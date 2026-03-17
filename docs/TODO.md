@@ -14,14 +14,14 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ## 1. Repository Foundation
 
-- [ ] initialize Go module
-- [ ] create base project layout
-- [ ] add `cmd/pacmand`
-- [ ] add `cmd/pacmanctl`
-- [ ] add `internal/` package structure
-- [ ] add `Makefile`
-- [ ] add CI workflow
-- [ ] add lint configuration
+- [x] initialize Go module
+- [x] create base project layout
+- [x] add `cmd/pacmand`
+- [x] add `cmd/pacmanctl`
+- [x] add `internal/` package structure
+- [x] add `Makefile`
+- [x] add CI workflow
+- [x] add lint configuration
 - [ ] add test workflow
 - [ ] add structured logging
 - [ ] add metrics scaffolding

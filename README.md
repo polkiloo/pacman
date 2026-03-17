@@ -62,3 +62,4 @@ flowchart TB
     CLI["pacmanctl / API"] --> A
     CLI --> B
     CLI --> C
+```
