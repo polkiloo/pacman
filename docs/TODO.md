@@ -1,4 +1,3 @@
-```markdown
 # PACMAN MVP TODO
 
 This document tracks the initial MVP work for **PACMAN** — **Postgres Autonomous Cluster Manager**.
@@ -236,6 +235,59 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ---
 
+## 16. Kubernetes-Native MVP
+
+This track captures the Kubernetes-native operator model described in [ARCHITECTURE_K8S.md](ARCHITECTURE_K8S.md).
+
+### CRD and API Model
+- [ ] define `PostgresCluster` CRD
+- [ ] define `PostgresClusterSpec`
+- [ ] define `PostgresClusterStatus`
+- [ ] define `status.conditions` model for failover / switchover / rejoin
+- [ ] define per-member status projection in CR `status`
+- [ ] define maintenance and failover policy fields for Kubernetes mode
+
+### Controller
+- [ ] scaffold controller-manager
+- [ ] implement leader election with Kubernetes `Lease`
+- [ ] implement reconcile loop for `PostgresCluster`
+- [ ] watch `StatefulSet`, `Pod`, `PVC`, `Service`, and `PodDisruptionBudget` objects
+- [ ] aggregate observed PostgreSQL state from pod-local agents
+- [ ] persist current primary and epoch into CR `status`
+- [ ] emit Kubernetes Events for topology changes
+
+### Workloads and Services
+- [ ] render PostgreSQL `StatefulSet`
+- [ ] add `pacmand` sidecar to each PostgreSQL Pod
+- [ ] render headless Service for stable member DNS
+- [ ] render `primary` Service
+- [ ] render `replicas` Service
+- [ ] render `PodDisruptionBudget`
+- [ ] render `Secret` and `ConfigMap` inputs for bootstrap and replication config
+- [ ] define pod labels and annotations used for role routing
+
+### Failover and Rejoin in Kubernetes
+- [ ] detect primary loss from combined Kubernetes and PostgreSQL signals
+- [ ] rank promotion candidates from agent-reported timeline / LSN / lag
+- [ ] implement promotion orchestration through the pod-local agent
+- [ ] switch `primary` Service to the new primary after confirmed promotion
+- [ ] mark former primary as `needs_rejoin` in CR `status`
+- [ ] implement `pg_rewind` or reclone workflow for a returning former primary
+- [ ] prevent unsafe failover completion without fencing confirmation
+- [ ] handle node drain and eviction interactions with failover policy
+
+### Kubernetes Packaging and Testing
+- [ ] add RBAC manifests
+- [ ] add operator deployment manifest
+- [ ] add local `kind`-based lab environment
+- [ ] add Kubernetes bootstrap end-to-end test
+- [ ] add Kubernetes planned switchover end-to-end test
+- [ ] add Kubernetes automatic failover end-to-end test
+- [ ] add Kubernetes former primary rejoin end-to-end test
+- [ ] add pod deletion and node drain scenario coverage
+
+---
+
 ## Suggested Milestones
 
 ## Milestone 1 — Local Agent
@@ -268,6 +320,13 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [ ] reliability improvements
 - [ ] end-to-end test stabilization
 
+## Milestone 6 — Kubernetes Operator MVP
+- [ ] `PostgresCluster` CRD and status model
+- [ ] leader-elected controller
+- [ ] `StatefulSet` plus `primary` and `replicas` Services
+- [ ] failover and rejoin flow inside Kubernetes
+- [ ] repeatable `kind` end-to-end coverage
+
 ---
 
 ## Nice-to-Have After MVP
@@ -278,7 +337,6 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [ ] standby-cluster / DR support
 - [ ] endpoint automation
 - [ ] web UI
-- [ ] Kubernetes integration
 
 ---
 
@@ -294,4 +352,5 @@ The MVP can be considered complete when PACMAN can reliably demonstrate:
 - [ ] explicit rejoin of a former primary
 - [ ] basic operator-facing CLI and API
 - [ ] repeatable integration and end-to-end test coverage
-
+- [ ] operator-managed Kubernetes deployment with `StatefulSet` and role-based Services
+- [ ] repeatable Kubernetes failover test coverage in `kind`

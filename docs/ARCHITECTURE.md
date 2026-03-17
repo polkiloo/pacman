@@ -97,4 +97,6 @@ flowchart TB
     CLI["pacmanctl / API"] --> A
     CLI --> B
     CLI --> C
+```
 
+For the Kubernetes-native deployment model, see [ARCHITECTURE_K8S.md](ARCHITECTURE_K8S.md).
