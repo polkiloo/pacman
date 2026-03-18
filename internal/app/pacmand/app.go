@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 
 	"go.uber.org/dig"
 
@@ -15,6 +16,7 @@ import (
 type App struct {
 	stdout io.Writer
 	stderr io.Writer
+	logger *slog.Logger
 }
 
 // Params defines pacmand constructor dependencies.
@@ -23,6 +25,7 @@ type Params struct {
 
 	Stdout io.Writer `name:"stdout"`
 	Stderr io.Writer `name:"stderr"`
+	Logger *slog.Logger
 }
 
 // New constructs a pacmand application.
@@ -30,6 +33,7 @@ func New(params Params) *App {
 	return &App{
 		stdout: params.Stdout,
 		stderr: params.Stderr,
+		logger: params.Logger,
 	}
 }
 
@@ -53,6 +57,6 @@ func (a *App) Run(ctx context.Context, args []string) error {
 		return err
 	}
 
-	_, err := fmt.Fprintln(a.stdout, "pacmand scaffold: local agent entrypoint is not implemented yet")
-	return err
+	a.logger.InfoContext(ctx, "pacmand scaffold is not implemented yet", slog.String("component", "daemon"))
+	return nil
 }

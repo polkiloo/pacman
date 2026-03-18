@@ -22,8 +22,8 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] add `Makefile`
 - [x] add CI workflow
 - [x] add lint configuration
-- [ ] add test workflow
-- [ ] add structured logging
+- [x] add test workflow
+- [x] add structured logging
 - [ ] add metrics scaffolding
 - [ ] add local development scripts
 

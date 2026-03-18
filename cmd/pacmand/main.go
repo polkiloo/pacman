@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"os"
 
 	"go.uber.org/dig"
 
 	pacmandcmd "github.com/polkiloo/pacman/internal/app/pacmand"
 	"github.com/polkiloo/pacman/internal/di"
+	"github.com/polkiloo/pacman/internal/logging"
 )
+
+const processName = "pacmand"
 
 type invokeParams struct {
 	dig.In
@@ -23,15 +26,16 @@ func main() {
 }
 
 func run() int {
+	logger := logging.New(processName, os.Stderr)
 	container := dig.New()
 
-	if err := di.ProvideBase(container, os.Args[1:], os.Stdout, os.Stderr); err != nil {
-		fmt.Fprintf(os.Stderr, "pacmand: bootstrap DI container: %v\n", err)
+	if err := di.ProvideBase(container, processName, os.Args[1:], os.Stdout, os.Stderr); err != nil {
+		logger.Error("failed to bootstrap DI container", slog.Any("error", err))
 		return 1
 	}
 
 	if err := container.Provide(pacmandcmd.New); err != nil {
-		fmt.Fprintf(os.Stderr, "pacmand: register app dependencies: %v\n", err)
+		logger.Error("failed to register app dependencies", slog.Any("error", err))
 		return 1
 	}
 
@@ -40,12 +44,12 @@ func run() int {
 	if err := container.Invoke(func(params invokeParams) {
 		runErr = params.App.Run(context.Background(), params.Args)
 	}); err != nil {
-		fmt.Fprintf(os.Stderr, "pacmand: invoke app: %v\n", err)
+		logger.Error("failed to invoke app", slog.Any("error", err))
 		return 1
 	}
 
 	if runErr != nil {
-		fmt.Fprintf(os.Stderr, "pacmand: %v\n", runErr)
+		logger.Error("app run failed", slog.Any("error", runErr))
 		return 1
 	}
 

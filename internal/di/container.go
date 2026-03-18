@@ -2,12 +2,15 @@ package di
 
 import (
 	"io"
+	"log/slog"
 
 	"go.uber.org/dig"
+
+	"github.com/polkiloo/pacman/internal/logging"
 )
 
 // ProvideBase registers process-scoped dependencies shared by command entrypoints.
-func ProvideBase(container *dig.Container, args []string, stdout, stderr io.Writer) error {
+func ProvideBase(container *dig.Container, processName string, args []string, stdout, stderr io.Writer) error {
 	if err := container.Provide(func() []string {
 		return args
 	}, dig.Name("args")); err != nil {
@@ -23,6 +26,12 @@ func ProvideBase(container *dig.Container, args []string, stdout, stderr io.Writ
 	if err := container.Provide(func() io.Writer {
 		return stderr
 	}, dig.Name("stderr")); err != nil {
+		return err
+	}
+
+	if err := container.Provide(func() *slog.Logger {
+		return logging.New(processName, stderr)
+	}); err != nil {
 		return err
 	}
 
