@@ -26,8 +26,8 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ## 2. Core Domain Model
 
-- [ ] define cluster roles
-- [ ] define node roles
+- [x] define cluster roles
+- [x] define node roles
 - [ ] define `ClusterSpec`
 - [ ] define `ClusterStatus`
 - [ ] define `MemberSpec`
