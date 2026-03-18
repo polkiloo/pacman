@@ -150,14 +150,30 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ## 10. API
 
-- [ ] expose cluster status endpoint
-- [ ] expose node status endpoint
-- [ ] expose member list endpoint
-- [ ] expose operation history endpoint
-- [ ] expose maintenance mode endpoint
-- [ ] expose diagnostics endpoint
-- [ ] expose switchover control endpoint
-- [ ] expose health endpoint
+### Contract
+- [x] draft OpenAPI spec for control-plane API
+- [ ] review OpenAPI contract against domain model and failover safety rules
+- [ ] define API authentication and authorization model
+- [ ] define stable API versioning and compatibility policy
+
+### Implementation
+- [ ] expose `GET /health`
+- [ ] expose `GET /liveness`
+- [ ] expose `GET /readiness`
+- [ ] expose `GET /primary`
+- [ ] expose `GET /replica`
+- [ ] expose `GET /api/v1/cluster`
+- [ ] expose `GET /api/v1/cluster/spec`
+- [ ] expose `GET /api/v1/nodes/{nodeName}`
+- [ ] expose `GET /api/v1/members`
+- [ ] expose `GET /api/v1/history`
+- [ ] expose `GET /api/v1/maintenance`
+- [ ] expose `PUT /api/v1/maintenance`
+- [ ] expose `GET /api/v1/diagnostics`
+- [ ] expose `POST /api/v1/operations/switchover`
+- [ ] expose `DELETE /api/v1/operations/switchover`
+- [ ] expose `POST /api/v1/operations/failover`
+- [ ] serve published OpenAPI document from the API process
 
 ---
 
@@ -166,6 +182,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [ ] implement `cluster status`
 - [ ] implement `members list`
 - [ ] implement `cluster switchover`
+- [ ] implement `cluster failover`
 - [ ] implement `cluster maintenance enable`
 - [ ] implement `cluster maintenance disable`
 - [ ] implement `history list`
