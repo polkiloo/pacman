@@ -28,7 +28,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 - [x] define cluster roles
 - [x] define node roles
-- [ ] define `ClusterSpec`
+- [x] define `ClusterSpec`
 - [ ] define `ClusterStatus`
 - [ ] define `MemberSpec`
 - [ ] define `MemberStatus`
