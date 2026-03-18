@@ -2,13 +2,7 @@
 
 This document tracks the initial MVP work for **PACMAN** — **Postgres Autonomous Cluster Manager**.
 
-The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control plane with:
-
-- local node agents,
-- internal cluster coordination,
-- automatic failover,
-- planned switchover,
-- and explicit rejoin of former primaries.
+The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control plane with local node agents, internal cluster coordination, automatic failover, planned switchover, and explicit rejoin of former primaries.
 
 ---
 
@@ -24,6 +18,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] add lint configuration
 - [x] add test workflow
 - [x] add structured logging
+- [x] add `testcontainers-go` integration test environment for `pacmand` and `pacmanctl` with `postgres:17`
 - [ ] add metrics scaffolding
 - [ ] add local development scripts
 
@@ -228,27 +223,47 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ## 15. Testing
 
+### Testcontainers Environment
+- [x] add Docker test image for `pacmand` and `pacmanctl` with PostgreSQL 17 client tools
+- [x] add shared `testcontainers-go` network harness for multi-container tests
+- [x] add PostgreSQL 17 sidecar fixture per `pacmand` node
+- [x] add local `make test-integration` target for Docker-backed test runs
+- [x] add cluster-layout smoke test for `pacmand`, `pacmanctl`, and `postgres:17`
+- [ ] extend PostgreSQL-backed fixture with replication/bootstrap orchestration
+- [ ] add CI job for Docker-backed integration and cluster smoke tests
+
+### Cluster Configuration Validation Tasks
+- [x] build the PACMAN test image and create an isolated Docker network for the scenario
+- [x] start three `postgres:17` containers with stable aliases `pacmand-1-postgres`, `pacmand-2-postgres`, and `pacmand-3-postgres`
+- [x] start three `pacmand` containers on the same network, one per PostgreSQL node, with each `pacmand` pointed at its neighboring PostgreSQL container
+- [x] start one `pacmanctl` container on the same network so that control commands run from the same cluster context
+- [x] verify every `pacmand` node can execute the daemon binary and return build metadata through `pacmand -version`
+- [x] verify every `pacmand` container can resolve and probe its local `postgres:17` peer with `pg_isready` and `psql`
+- [x] verify every PostgreSQL sidecar reports a PostgreSQL 17 server version and remains attached to the shared cluster network with the expected alias mapping
+- [x] verify `pacmanctl -version` and `pacmanctl cluster status` execute successfully from the client container
+- [ ] extend the same topology with replication/bootstrap wiring and assert switchover, failover, and rejoin flows after the control-plane API and local agent logic are implemented
+
 ### Unit Tests
-- [ ] cluster domain model tests
-- [ ] config validation tests
-- [ ] state machine tests
-- [ ] candidate ranking tests
-- [ ] failover policy tests
+- [ ] add cluster domain model unit tests
+- [ ] add config validation unit tests
+- [ ] add state machine unit tests
+- [ ] add candidate ranking unit tests
+- [ ] add failover policy unit tests
 
 ### Integration Tests
-- [ ] PostgreSQL role detection tests
-- [ ] promote workflow tests
-- [ ] standby configuration tests
-- [ ] rejoin / rewind tests
-- [ ] maintenance mode tests
+- [ ] add PostgreSQL role detection integration tests
+- [ ] add promote workflow integration tests
+- [ ] add standby configuration integration tests
+- [ ] add rejoin / rewind integration tests
+- [ ] add maintenance mode integration tests
 
 ### End-to-End Tests
-- [ ] 3-node cluster bootstrap
-- [ ] planned switchover scenario
-- [ ] automatic failover scenario
-- [ ] former primary rejoin scenario
-- [ ] network partition scenario
-- [ ] witness-assisted quorum scenario
+- [ ] add 3-node cluster bootstrap end-to-end test
+- [ ] add planned switchover end-to-end test
+- [ ] add automatic failover end-to-end test
+- [ ] add former primary rejoin end-to-end test
+- [ ] add network partition end-to-end test
+- [ ] add witness-assisted quorum end-to-end test
 
 ---
 
@@ -308,66 +323,66 @@ This track captures the Kubernetes-native operator model described in [ARCHITECT
 ## Suggested Milestones
 
 ## Milestone 1 — Local Agent
-- [ ] daemon process
-- [ ] PostgreSQL state detection
-- [ ] local API
-- [ ] lifecycle management
+- [ ] implement daemon process
+- [ ] implement PostgreSQL state detection
+- [ ] expose local API
+- [ ] implement lifecycle management
 
 ## Milestone 2 — Cluster View
-- [ ] multi-node membership
-- [ ] cluster status aggregation
-- [ ] leader election
-- [ ] source of truth model
+- [ ] implement multi-node membership
+- [ ] implement cluster status aggregation
+- [ ] implement leader election
+- [ ] implement source of truth model
 
 ## Milestone 3 — Planned Switchover
-- [ ] desired state model
-- [ ] promote / demote orchestration
-- [ ] operation history
+- [ ] implement desired state model
+- [ ] implement promote / demote orchestration
+- [ ] implement operation history
 
 ## Milestone 4 — Automatic Failover
-- [ ] quorum-based failure confirmation
-- [ ] candidate selection
-- [ ] controlled promotion
-- [ ] epoch transition
+- [ ] implement quorum-based failure confirmation
+- [ ] implement candidate selection
+- [ ] implement controlled promotion
+- [ ] implement epoch transition
 
 ## Milestone 5 — Rejoin and Hardening
-- [ ] rejoin workflow
-- [ ] rewind integration
-- [ ] maintenance mode
-- [ ] reliability improvements
-- [ ] end-to-end test stabilization
+- [ ] implement rejoin workflow
+- [ ] integrate rewind support
+- [ ] implement maintenance mode
+- [ ] implement reliability improvements
+- [ ] stabilize end-to-end tests
 
 ## Milestone 6 — Kubernetes Operator MVP
-- [ ] `PostgresCluster` CRD and status model
-- [ ] leader-elected controller
-- [ ] `StatefulSet` plus `primary` and `replicas` Services
-- [ ] failover and rejoin flow inside Kubernetes
-- [ ] repeatable `kind` end-to-end coverage
+- [ ] implement `PostgresCluster` CRD and status model
+- [ ] implement leader-elected controller
+- [ ] render `StatefulSet` plus `primary` and `replicas` Services
+- [ ] implement failover and rejoin flow inside Kubernetes
+- [ ] add repeatable `kind` end-to-end coverage
 
 ---
 
 ## Nice-to-Have After MVP
 
-- [ ] synchronous replication policies
-- [ ] richer fencing backends
-- [ ] dedicated witness mode improvements
-- [ ] standby-cluster / DR support
-- [ ] endpoint automation
-- [ ] web UI
+- [ ] add synchronous replication policies
+- [ ] add richer fencing backends
+- [ ] improve dedicated witness mode
+- [ ] add standby-cluster / DR support
+- [ ] automate endpoint management
+- [ ] add web UI
 
 ---
 
 ## MVP Definition of Done
 
-The MVP can be considered complete when PACMAN can reliably demonstrate:
+Close the MVP only after validating that PACMAN can reliably demonstrate the following outcomes:
 
-- [ ] bootstrap of a small PostgreSQL HA cluster
-- [ ] visibility into current topology
-- [ ] planned switchover
-- [ ] automatic failover with quorum
-- [ ] prevention of unsafe dual-primary behavior
-- [ ] explicit rejoin of a former primary
-- [ ] basic operator-facing CLI and API
-- [ ] repeatable integration and end-to-end test coverage
-- [ ] operator-managed Kubernetes deployment with `StatefulSet` and role-based Services
-- [ ] repeatable Kubernetes failover test coverage in `kind`
+- [ ] validate bootstrap of a small PostgreSQL HA cluster
+- [ ] validate visibility into current topology
+- [ ] validate planned switchover
+- [ ] validate automatic failover with quorum
+- [ ] validate prevention of unsafe dual-primary behavior
+- [ ] validate explicit rejoin of a former primary
+- [ ] validate basic operator-facing CLI and API
+- [ ] validate repeatable integration and end-to-end test coverage
+- [ ] validate operator-managed Kubernetes deployment with `StatefulSet` and role-based Services
+- [ ] validate repeatable Kubernetes failover test coverage in `kind`

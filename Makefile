@@ -12,6 +12,7 @@ endif
 GOLANGCI_LINT ?= $(GOBIN)/golangci-lint
 COVERAGE_OUT ?= coverage.out
 COVERAGE_MIN ?= 80.0
+PACMAN_TEST_IMAGE ?= pacman-test:local
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -21,13 +22,22 @@ LDFLAGS := -X github.com/polkiloo/pacman/internal/version.Version=$(VERSION) \
 	-X github.com/polkiloo/pacman/internal/version.Commit=$(COMMIT) \
 	-X github.com/polkiloo/pacman/internal/version.BuildDate=$(BUILD_DATE)
 
-.PHONY: fmt test coverage coverage-check lint lint-install build build-pacmand build-pacmanctl tidy clean
+.PHONY: fmt test test-integration test-cluster docker-build-test-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl tidy clean
 
 fmt:
 	$(GO) fmt ./...
 
 test:
 	$(GO) test ./...
+
+docker-build-test-image:
+	docker build -f test/docker/pacman-runner.Dockerfile -t $(PACMAN_TEST_IMAGE) .
+
+test-integration: docker-build-test-image
+	PACMAN_TEST_IMAGE=$(PACMAN_TEST_IMAGE) $(GO) test -tags=integration ./test/...
+
+test-cluster: docker-build-test-image
+	PACMAN_TEST_IMAGE=$(PACMAN_TEST_IMAGE) $(GO) test -tags=integration ./test/integration -run TestPACMANClusterEnvironment
 
 coverage:
 	$(GO) test -coverprofile=$(COVERAGE_OUT) ./...
