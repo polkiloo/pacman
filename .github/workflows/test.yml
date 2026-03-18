@@ -9,11 +9,7 @@ on:
 
 jobs:
   test:
-    runs-on:
-      - self-hosted
-      - linux
-      - x64
-      - centos
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout

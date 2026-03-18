@@ -9,11 +9,7 @@ on:
 
 jobs:
   build:
-    runs-on:
-      - self-hosted
-      - linux
-      - x64
-      - centos
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -29,11 +25,7 @@ jobs:
         run: make build
 
   lint:
-    runs-on:
-      - self-hosted
-      - linux
-      - x64
-      - centos
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
