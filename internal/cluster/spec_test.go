@@ -166,6 +166,15 @@ func TestClusterSpecValidate(t *testing.T) {
 						"max_wal_senders": 16,
 					},
 				},
+				Members: []MemberSpec{
+					{
+						Name:     "alpha-1",
+						Priority: 100,
+						Tags: map[string]any{
+							"zone": "a",
+						},
+					},
+				},
 			},
 		},
 		{
@@ -203,6 +212,19 @@ func TestClusterSpecValidate(t *testing.T) {
 			},
 			wantErr: ErrInvalidSynchronousMode,
 		},
+		{
+			name: "member spec must be valid when set",
+			spec: ClusterSpec{
+				ClusterName: "alpha",
+				Members: []MemberSpec{
+					{
+						Name:     "alpha-1",
+						Priority: -1,
+					},
+				},
+			},
+			wantErr: ErrMemberPriorityNegative,
+		},
 	}
 
 	for _, testCase := range testCases {
@@ -233,6 +255,16 @@ func TestClusterSpecCloneCopiesMutableFields(t *testing.T) {
 				"hot_standby":     "on",
 			},
 		},
+		Members: []MemberSpec{
+			{
+				Name:       "alpha-1",
+				Priority:   10,
+				NoFailover: true,
+				Tags: map[string]any{
+					"zone": "a",
+				},
+			},
+		},
 	}
 
 	clone := original.Clone()
@@ -243,6 +275,8 @@ func TestClusterSpecCloneCopiesMutableFields(t *testing.T) {
 
 	clone.Postgres.Parameters["max_wal_senders"] = 20
 	clone.Postgres.Parameters["shared_buffers"] = "1GB"
+	clone.Members[0].Tags["zone"] = "b"
+	clone.Members[0].Tags["rack"] = "r1"
 
 	if got, want := original.Postgres.Parameters["max_wal_senders"], 10; got != want {
 		t.Fatalf("original parameters were mutated: got %v, want %v", got, want)
@@ -250,5 +284,13 @@ func TestClusterSpecCloneCopiesMutableFields(t *testing.T) {
 
 	if _, ok := original.Postgres.Parameters["shared_buffers"]; ok {
 		t.Fatal("expected clone parameter mutation to stay isolated from original")
+	}
+
+	if got, want := original.Members[0].Tags["zone"], "a"; got != want {
+		t.Fatalf("original member tags were mutated: got %v, want %v", got, want)
+	}
+
+	if _, ok := original.Members[0].Tags["rack"]; ok {
+		t.Fatal("expected clone member tag mutation to stay isolated from original")
 	}
 }

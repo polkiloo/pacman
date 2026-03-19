@@ -1,6 +1,9 @@
 package cluster
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // ClusterSpec describes the desired cluster-wide configuration that the control
 // plane should converge to. It intentionally models only cluster-level
@@ -12,6 +15,7 @@ type ClusterSpec struct {
 	Failover    FailoverPolicy
 	Switchover  SwitchoverPolicy
 	Postgres    PostgresPolicy
+	Members     []MemberSpec
 }
 
 // Validate reports whether the desired cluster configuration is internally
@@ -33,6 +37,12 @@ func (spec ClusterSpec) Validate() error {
 		return ErrInvalidSynchronousMode
 	}
 
+	for _, member := range spec.Members {
+		if err := member.Validate(); err != nil {
+			return fmt.Errorf("member %q spec is invalid: %w", member.Name, err)
+		}
+	}
+
 	return nil
 }
 
@@ -40,6 +50,7 @@ func (spec ClusterSpec) Validate() error {
 func (spec ClusterSpec) Clone() ClusterSpec {
 	clone := spec
 	clone.Postgres.Parameters = clonePostgresParameters(spec.Postgres.Parameters)
+	clone.Members = cloneMemberSpecs(spec.Members)
 
 	return clone
 }
@@ -162,6 +173,19 @@ func clonePostgresParameters(parameters map[string]any) map[string]any {
 	cloned := make(map[string]any, len(parameters))
 	for key, value := range parameters {
 		cloned[key] = value
+	}
+
+	return cloned
+}
+
+func cloneMemberSpecs(members []MemberSpec) []MemberSpec {
+	if members == nil {
+		return nil
+	}
+
+	cloned := make([]MemberSpec, len(members))
+	for index, member := range members {
+		cloned[index] = member.Clone()
 	}
 
 	return cloned
