@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/dig"
 
+	"github.com/polkiloo/pacman/internal/config"
 	"github.com/polkiloo/pacman/internal/version"
 )
 
@@ -43,6 +44,7 @@ func (a *App) Run(ctx context.Context, args []string) error {
 	fs.SetOutput(a.stderr)
 
 	showVersion := fs.Bool("version", false, "print version and exit")
+	configPath := fs.String("config", "", "path to pacmand node configuration file")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -55,6 +57,22 @@ func (a *App) Run(ctx context.Context, args []string) error {
 	if *showVersion {
 		_, err := fmt.Fprintln(a.stdout, version.String())
 		return err
+	}
+
+	if *configPath != "" {
+		loadedConfig, err := config.Load(*configPath)
+		if err != nil {
+			return err
+		}
+
+		a.logger.InfoContext(
+			ctx,
+			"loaded node configuration",
+			slog.String("component", "config"),
+			slog.String("path", *configPath),
+			slog.String("node", loadedConfig.Node.Name),
+			slog.String("role", loadedConfig.Node.Role.String()),
+		)
 	}
 
 	a.logger.InfoContext(ctx, "pacmand scaffold is not implemented yet", slog.String("component", "daemon"))

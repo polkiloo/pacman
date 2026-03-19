@@ -32,25 +32,25 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] define `ClusterStatus`
 - [x] define `MemberSpec`
 - [x] define `MemberStatus`
-- [ ] define epoch / generation model
-- [ ] define failover state machine
-- [ ] define switchover state machine
-- [ ] define rejoin flow model
-- [ ] define operation history model
-- [ ] define maintenance mode model
+- [x] define epoch / generation model
+- [x] define failover state machine
+- [x] define switchover state machine
+- [x] define rejoin flow model
+- [x] define operation history model
+- [x] define maintenance mode model
 
 ---
 
 ## 3. Configuration System
 
-- [ ] define bootstrap node configuration format
-- [ ] define config loader
-- [ ] define config validation
-- [ ] define defaults
-- [ ] define TLS configuration section
-- [ ] define PostgreSQL local config section
-- [ ] define cluster bootstrap config section
-- [ ] reject unsafe local-only overrides for cluster truth
+- [x] define bootstrap node configuration format
+- [x] define config loader
+- [x] define config validation
+- [x] define defaults
+- [x] define TLS configuration section
+- [x] define PostgreSQL local config section
+- [x] define cluster bootstrap config section
+- [x] reject unsafe local-only overrides for cluster truth
 
 ---
 
@@ -235,12 +235,12 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 ### Cluster Configuration Validation Tasks
 - [x] build the PACMAN test image and create an isolated Docker network for the scenario
 - [x] start three `postgres:17` containers with stable aliases `pacmand-1-postgres`, `pacmand-2-postgres`, and `pacmand-3-postgres`
-- [x] start three `pacmand` containers on the same network, one per PostgreSQL node, with each `pacmand` pointed at its neighboring PostgreSQL container
-- [x] start one `pacmanctl` container on the same network so that control commands run from the same cluster context
-- [x] verify every `pacmand` node can execute the daemon binary and return build metadata through `pacmand -version`
-- [x] verify every `pacmand` container can resolve and probe its local `postgres:17` peer with `pg_isready` and `psql`
-- [x] verify every PostgreSQL sidecar reports a PostgreSQL 17 server version and remains attached to the shared cluster network with the expected alias mapping
-- [x] verify `pacmanctl -version` and `pacmanctl cluster status` execute successfully from the client container
+- [] start three `pacmand` containers on the same network, one per PostgreSQL node, with each `pacmand` pointed at its neighboring PostgreSQL container
+- [] start one `pacmanctl` container on the same network so that control commands run from the same cluster context
+- [] verify every `pacmand` node can execute the daemon binary and return build metadata through `pacmand -version`
+- [] verify every `pacmand` container can resolve and probe its local `postgres:17` peer with `pg_isready` and `psql`
+- [] verify every PostgreSQL sidecar reports a PostgreSQL 17 server version and remains attached to the shared cluster network with the expected alias mapping
+- [] verify `pacmanctl -version` and `pacmanctl cluster status` execute successfully from the client container
 - [ ] extend the same topology with replication/bootstrap wiring and assert switchover, failover, and rejoin flows after the control-plane API and local agent logic are implemented
 
 ### Unit Tests
@@ -265,6 +265,21 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [ ] add network partition end-to-end test
 - [ ] add witness-assisted quorum end-to-end test
 
+
+### Patroni-Inspired Coverage Groups
+- [ ] add REST API and HTTP server coverage inspired by Patroni `tests/test_api.py`
+- [ ] add daemon entrypoint and process lifecycle coverage inspired by Patroni `tests/test_patroni.py`
+- [ ] add CLI command and presentation coverage inspired by Patroni `tests/test_ctl.py`
+- [ ] add config parsing, generation, validator, and file-permission coverage inspired by Patroni `tests/test_config.py`, `tests/test_config_generator.py`, `tests/test_validator.py`, and `tests/test_file_perm.py`
+- [ ] add async executor, callback executor, and cancellable subprocess coverage inspired by Patroni `tests/test_async_executor.py`, `tests/test_callback_executor.py`, and `tests/test_cancellable.py`
+- [ ] add HA loop, quorum, synchronous replication, and slot-management coverage inspired by Patroni `tests/test_ha.py`, `tests/test_quorum.py`, `tests/test_sync.py`, and `tests/test_slots.py`
+- [ ] add PostgreSQL bootstrap, local lifecycle, and postmaster coverage inspired by Patroni `tests/test_bootstrap.py`, `tests/test_postgresql.py`, and `tests/test_postmaster.py`
+- [ ] add rewind and replica rejoin coverage inspired by Patroni `tests/test_rewind.py`
+- [ ] add backup, restore, and cloud-integration coverage inspired by Patroni `tests/test_aws.py`, `tests/test_barman.py`, and `tests/test_wale_restore.py`
+- [ ] add DCS backend contract coverage for Consul, etcd, etcd3, Exhibitor, Kubernetes, Raft, and ZooKeeper inspired by Patroni `tests/test_consul.py`, `tests/test_etcd.py`, `tests/test_etcd3.py`, `tests/test_exhibitor.py`, `tests/test_kubernetes.py`, `tests/test_raft.py`, `tests/test_raft_controller.py`, and `tests/test_zookeeper.py`
+- [ ] add watchdog and fencing coverage inspired by Patroni `tests/test_watchdog.py`
+- [ ] add logging and utility helper coverage inspired by Patroni `tests/test_log.py` and `tests/test_utils.py`
+- [ ] add distributed-topology and MPP coverage inspired by Patroni `tests/test_citus.py` and `tests/test_mpp.py`
 ---
 
 ## 16. Kubernetes-Native MVP
