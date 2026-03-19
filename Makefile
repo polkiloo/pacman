@@ -12,6 +12,7 @@ endif
 GOLANGCI_LINT ?= $(GOBIN)/golangci-lint
 COVERAGE_OUT ?= coverage.out
 COVERAGE_MIN ?= 80.0
+COVERAGE_PACKAGES ?= $(shell $(GO) list ./... | grep -v '/test/')
 PACMAN_TEST_IMAGE ?= pacman-test:local
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -40,7 +41,7 @@ test-cluster: docker-build-test-image
 	PACMAN_TEST_IMAGE=$(PACMAN_TEST_IMAGE) $(GO) test -tags=integration ./test/integration -run TestPACMANClusterEnvironment
 
 coverage:
-	$(GO) test -coverprofile=$(COVERAGE_OUT) ./...
+	$(GO) test -coverprofile=$(COVERAGE_OUT) $(COVERAGE_PACKAGES)
 
 coverage-check: coverage
 	@coverage=$$($(GO) tool cover -func=$(COVERAGE_OUT) | awk '/^total:/ { gsub("%", "", $$3); print $$3 }'); \
