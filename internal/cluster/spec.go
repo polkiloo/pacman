@@ -29,6 +29,10 @@ func (spec ClusterSpec) Validate() error {
 		return err
 	}
 
+	if err := spec.Maintenance.Validate(); err != nil {
+		return err
+	}
+
 	if !spec.Failover.Mode.IsZero() && !spec.Failover.Mode.IsValid() {
 		return ErrInvalidFailoverMode
 	}

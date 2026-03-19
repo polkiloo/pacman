@@ -99,6 +99,18 @@ func TestClusterStatusValidate(t *testing.T) {
 					RequestedBy: "",
 					UpdatedAt:   now,
 				},
+				ActiveOperation: &Operation{
+					ID:          "op-1",
+					Kind:        OperationKindSwitchover,
+					State:       OperationStateRunning,
+					RequestedAt: now,
+					Result:      OperationResultPending,
+				},
+				ScheduledSwitchover: &ScheduledSwitchover{
+					At:   now.Add(10 * time.Minute),
+					From: "alpha-1",
+					To:   "alpha-2",
+				},
 				Members: []MemberStatus{
 					{
 						Name:       "alpha-1",
@@ -146,6 +158,50 @@ func TestClusterStatusValidate(t *testing.T) {
 				ObservedAt:   now,
 			},
 			wantErr: ErrClusterEpochNegative,
+		},
+		{
+			name: "maintenance metadata requires updated time",
+			status: ClusterStatus{
+				ClusterName: "alpha",
+				Phase:       ClusterPhaseHealthy,
+				Maintenance: MaintenanceModeStatus{
+					Enabled: true,
+				},
+				ObservedAt: now,
+			},
+			wantErr: ErrMaintenanceUpdatedAtRequired,
+		},
+		{
+			name: "active operation must be valid when set",
+			status: ClusterStatus{
+				ClusterName: "alpha",
+				Phase:       ClusterPhaseHealthy,
+				Maintenance: MaintenanceModeStatus{
+					Enabled: false,
+				},
+				ActiveOperation: &Operation{
+					Kind:        OperationKindSwitchover,
+					State:       OperationStateRunning,
+					RequestedAt: now,
+				},
+				ObservedAt: now,
+			},
+			wantErr: ErrOperationIDRequired,
+		},
+		{
+			name: "scheduled switchover must be valid when set",
+			status: ClusterStatus{
+				ClusterName: "alpha",
+				Phase:       ClusterPhaseHealthy,
+				Maintenance: MaintenanceModeStatus{
+					Enabled: false,
+				},
+				ScheduledSwitchover: &ScheduledSwitchover{
+					From: "alpha-1",
+				},
+				ObservedAt: now,
+			},
+			wantErr: ErrScheduledSwitchoverAtRequired,
 		},
 		{
 			name: "observed time required",
@@ -203,6 +259,20 @@ func TestClusterStatusCloneCopiesMutableFields(t *testing.T) {
 			RequestedBy: "operator",
 			UpdatedAt:   time.Now().UTC(),
 		},
+		ActiveOperation: &Operation{
+			ID:          "op-1",
+			Kind:        OperationKindSwitchover,
+			State:       OperationStateScheduled,
+			RequestedAt: time.Now().UTC(),
+			ToMember:    "alpha-2",
+			Result:      OperationResultPending,
+			Message:     "scheduled",
+		},
+		ScheduledSwitchover: &ScheduledSwitchover{
+			At:   time.Now().UTC().Add(15 * time.Minute),
+			From: "alpha-1",
+			To:   "alpha-2",
+		},
 		Members: []MemberStatus{
 			{
 				Name:       "alpha-1",
@@ -226,6 +296,8 @@ func TestClusterStatusCloneCopiesMutableFields(t *testing.T) {
 
 	clone.Members[0].Tags["zone"] = "b"
 	clone.Members[0].Tags["rack"] = "r1"
+	clone.ActiveOperation.Message = "moved"
+	clone.ScheduledSwitchover.To = "alpha-3"
 
 	if got, want := original.Members[0].Tags["zone"], "a"; got != want {
 		t.Fatalf("original member tags were mutated: got %v, want %v", got, want)
@@ -233,5 +305,13 @@ func TestClusterStatusCloneCopiesMutableFields(t *testing.T) {
 
 	if _, ok := original.Members[0].Tags["rack"]; ok {
 		t.Fatal("expected clone member tag mutation to stay isolated from original")
+	}
+
+	if got, want := original.ActiveOperation.Message, "scheduled"; got != want {
+		t.Fatalf("original active operation was mutated: got %q, want %q", got, want)
+	}
+
+	if got, want := original.ScheduledSwitchover.To, "alpha-2"; got != want {
+		t.Fatalf("original scheduled switchover was mutated: got %q, want %q", got, want)
 	}
 }

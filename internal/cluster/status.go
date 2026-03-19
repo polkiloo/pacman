@@ -10,13 +10,15 @@ import (
 // intentionally models only cluster-level observations; per-member observed
 // state lands in MemberStatus.
 type ClusterStatus struct {
-	ClusterName    string
-	Phase          ClusterPhase
-	CurrentPrimary string
-	CurrentEpoch   Epoch
-	Maintenance    MaintenanceModeStatus
-	Members        []MemberStatus
-	ObservedAt     time.Time
+	ClusterName         string
+	Phase               ClusterPhase
+	CurrentPrimary      string
+	CurrentEpoch        Epoch
+	Maintenance         MaintenanceModeStatus
+	ActiveOperation     *Operation
+	ScheduledSwitchover *ScheduledSwitchover
+	Members             []MemberStatus
+	ObservedAt          time.Time
 }
 
 // Validate reports whether the observed cluster state is coherent enough to be
@@ -38,6 +40,22 @@ func (status ClusterStatus) Validate() error {
 		return err
 	}
 
+	if err := status.Maintenance.Validate(); err != nil {
+		return err
+	}
+
+	if status.ActiveOperation != nil {
+		if err := status.ActiveOperation.Validate(); err != nil {
+			return fmt.Errorf("active operation is invalid: %w", err)
+		}
+	}
+
+	if status.ScheduledSwitchover != nil {
+		if err := status.ScheduledSwitchover.Validate(); err != nil {
+			return fmt.Errorf("scheduled switchover is invalid: %w", err)
+		}
+	}
+
 	if status.ObservedAt.IsZero() {
 		return ErrClusterObservedAtRequired
 	}
@@ -54,6 +72,8 @@ func (status ClusterStatus) Validate() error {
 // Clone returns a copy of the status with detached mutable fields.
 func (status ClusterStatus) Clone() ClusterStatus {
 	clone := status
+	clone.ActiveOperation = cloneOperation(status.ActiveOperation)
+	clone.ScheduledSwitchover = cloneScheduledSwitchover(status.ScheduledSwitchover)
 	clone.Members = cloneMemberStatuses(status.Members)
 
 	return clone
@@ -129,4 +149,24 @@ func cloneMemberStatuses(members []MemberStatus) []MemberStatus {
 	}
 
 	return cloned
+}
+
+func cloneOperation(operation *Operation) *Operation {
+	if operation == nil {
+		return nil
+	}
+
+	cloned := operation.Clone()
+
+	return &cloned
+}
+
+func cloneScheduledSwitchover(scheduled *ScheduledSwitchover) *ScheduledSwitchover {
+	if scheduled == nil {
+		return nil
+	}
+
+	cloned := scheduled.Clone()
+
+	return &cloned
 }
