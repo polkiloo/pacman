@@ -43,8 +43,8 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ## 3. Configuration System
 
-- [ ] define bootstrap node configuration format
-- [ ] define config loader
+- [x] define bootstrap node configuration format
+- [x] define config loader
 - [ ] define config validation
 - [ ] define defaults
 - [ ] define TLS configuration section
