@@ -10,7 +10,7 @@ import (
 // policies; per-member desired state lands in MemberSpec.
 type ClusterSpec struct {
 	ClusterName string
-	Generation  int64
+	Generation  Generation
 	Maintenance MaintenanceDesiredState
 	Failover    FailoverPolicy
 	Switchover  SwitchoverPolicy
@@ -25,8 +25,8 @@ func (spec ClusterSpec) Validate() error {
 		return ErrClusterNameRequired
 	}
 
-	if spec.Generation < 0 {
-		return ErrClusterGenerationNegative
+	if err := spec.Generation.Validate(); err != nil {
+		return err
 	}
 
 	if !spec.Failover.Mode.IsZero() && !spec.Failover.Mode.IsValid() {

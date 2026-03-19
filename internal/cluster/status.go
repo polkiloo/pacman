@@ -13,7 +13,7 @@ type ClusterStatus struct {
 	ClusterName    string
 	Phase          ClusterPhase
 	CurrentPrimary string
-	CurrentEpoch   int64
+	CurrentEpoch   Epoch
 	Maintenance    MaintenanceModeStatus
 	Members        []MemberStatus
 	ObservedAt     time.Time
@@ -34,8 +34,8 @@ func (status ClusterStatus) Validate() error {
 		return ErrInvalidClusterPhase
 	}
 
-	if status.CurrentEpoch < 0 {
-		return ErrClusterEpochNegative
+	if err := status.CurrentEpoch.Validate(); err != nil {
+		return err
 	}
 
 	if status.ObservedAt.IsZero() {

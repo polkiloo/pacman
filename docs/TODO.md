@@ -32,7 +32,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] define `ClusterStatus`
 - [x] define `MemberSpec`
 - [x] define `MemberStatus`
-- [ ] define epoch / generation model
+- [x] define epoch / generation model
 - [ ] define failover state machine
 - [ ] define switchover state machine
 - [ ] define rejoin flow model
