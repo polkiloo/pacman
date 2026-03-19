@@ -45,8 +45,8 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 - [x] define bootstrap node configuration format
 - [x] define config loader
-- [ ] define config validation
-- [ ] define defaults
+- [x] define config validation
+- [x] define defaults
 - [ ] define TLS configuration section
 - [ ] define PostgreSQL local config section
 - [ ] define cluster bootstrap config section

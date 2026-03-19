@@ -43,6 +43,35 @@ node:
 	}
 }
 
+func TestDecodeAppliesDefaults(t *testing.T) {
+	t.Parallel()
+
+	payload := `
+node:
+  name: alpha-1
+`
+
+	got, err := Decode(strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("decode config with defaults: %v", err)
+	}
+
+	want := Config{
+		APIVersion: APIVersionV1Alpha1,
+		Kind:       KindNodeConfig,
+		Node: NodeConfig{
+			Name:           "alpha-1",
+			Role:           cluster.NodeRoleData,
+			APIAddress:     DefaultAPIAddress,
+			ControlAddress: DefaultControlAddress,
+		},
+	}
+
+	if got != want {
+		t.Fatalf("unexpected defaulted config: got %+v, want %+v", got, want)
+	}
+}
+
 func TestDecodeRejectsUnknownFields(t *testing.T) {
 	t.Parallel()
 
@@ -60,6 +89,26 @@ node:
 	}
 
 	assertContains(t, err.Error(), "field unknownField not found")
+}
+
+func TestDecodeRejectsInvalidConfig(t *testing.T) {
+	t.Parallel()
+
+	payload := `
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: alpha-1
+  role: observer
+`
+
+	_, err := Decode(strings.NewReader(payload))
+	if err == nil {
+		t.Fatal("expected decode error")
+	}
+
+	assertContains(t, err.Error(), "validate config document")
+	assertContains(t, err.Error(), ErrNodeRoleInvalid.Error())
 }
 
 func TestLoad(t *testing.T) {
