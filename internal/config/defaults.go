@@ -3,8 +3,10 @@ package config
 import "github.com/polkiloo/pacman/internal/cluster"
 
 const (
-	DefaultAPIAddress     = "0.0.0.0:8080"
-	DefaultControlAddress = "0.0.0.0:9090"
+	DefaultAPIAddress            = "0.0.0.0:8080"
+	DefaultControlAddress        = "0.0.0.0:9090"
+	DefaultPostgresListenAddress = "127.0.0.1"
+	DefaultPostgresPort          = 5432
 )
 
 // WithDefaults returns a copy of the config with omitted fields filled using
@@ -21,6 +23,21 @@ func (config Config) WithDefaults() Config {
 	}
 
 	defaulted.Node = defaulted.Node.WithDefaults()
+
+	if defaulted.TLS != nil {
+		tls := defaulted.TLS.WithDefaults()
+		defaulted.TLS = &tls
+	}
+
+	if defaulted.Postgres != nil {
+		postgres := defaulted.Postgres.WithDefaults()
+		defaulted.Postgres = &postgres
+	}
+
+	if defaulted.Bootstrap != nil {
+		bootstrap := defaulted.Bootstrap.WithDefaults(defaulted.Node.Name, defaulted.Node.ControlAddress)
+		defaulted.Bootstrap = &bootstrap
+	}
 
 	return defaulted
 }
@@ -40,6 +57,48 @@ func (node NodeConfig) WithDefaults() NodeConfig {
 
 	if defaulted.ControlAddress == "" {
 		defaulted.ControlAddress = DefaultControlAddress
+	}
+
+	return defaulted
+}
+
+// WithDefaults returns a copy of the tls config with omitted fields filled
+// using PACMAN defaults.
+func (tls TLSConfig) WithDefaults() TLSConfig {
+	return tls
+}
+
+// WithDefaults returns a copy of the postgres local config with omitted fields
+// filled using PACMAN defaults.
+func (postgres PostgresLocalConfig) WithDefaults() PostgresLocalConfig {
+	defaulted := postgres
+
+	if defaulted.ListenAddress == "" {
+		defaulted.ListenAddress = DefaultPostgresListenAddress
+	}
+
+	if defaulted.Port == 0 {
+		defaulted.Port = DefaultPostgresPort
+	}
+
+	return defaulted
+}
+
+// WithDefaults returns a copy of the bootstrap config with omitted fields
+// filled using local-node defaults.
+func (bootstrap ClusterBootstrapConfig) WithDefaults(nodeName, controlAddress string) ClusterBootstrapConfig {
+	defaulted := bootstrap
+
+	if defaulted.InitialPrimary == "" {
+		defaulted.InitialPrimary = nodeName
+	}
+
+	if len(defaulted.SeedAddresses) == 0 && controlAddress != "" {
+		defaulted.SeedAddresses = []string{controlAddress}
+	}
+
+	if len(defaulted.ExpectedMembers) == 0 && nodeName != "" {
+		defaulted.ExpectedMembers = []string{nodeName}
 	}
 
 	return defaulted

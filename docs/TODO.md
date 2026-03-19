@@ -47,10 +47,10 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] define config loader
 - [x] define config validation
 - [x] define defaults
-- [ ] define TLS configuration section
-- [ ] define PostgreSQL local config section
-- [ ] define cluster bootstrap config section
-- [ ] reject unsafe local-only overrides for cluster truth
+- [x] define TLS configuration section
+- [x] define PostgreSQL local config section
+- [x] define cluster bootstrap config section
+- [x] reject unsafe local-only overrides for cluster truth
 
 ---
 
@@ -235,12 +235,12 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 ### Cluster Configuration Validation Tasks
 - [x] build the PACMAN test image and create an isolated Docker network for the scenario
 - [x] start three `postgres:17` containers with stable aliases `pacmand-1-postgres`, `pacmand-2-postgres`, and `pacmand-3-postgres`
-- [x] start three `pacmand` containers on the same network, one per PostgreSQL node, with each `pacmand` pointed at its neighboring PostgreSQL container
-- [x] start one `pacmanctl` container on the same network so that control commands run from the same cluster context
-- [x] verify every `pacmand` node can execute the daemon binary and return build metadata through `pacmand -version`
-- [x] verify every `pacmand` container can resolve and probe its local `postgres:17` peer with `pg_isready` and `psql`
-- [x] verify every PostgreSQL sidecar reports a PostgreSQL 17 server version and remains attached to the shared cluster network with the expected alias mapping
-- [x] verify `pacmanctl -version` and `pacmanctl cluster status` execute successfully from the client container
+- [] start three `pacmand` containers on the same network, one per PostgreSQL node, with each `pacmand` pointed at its neighboring PostgreSQL container
+- [] start one `pacmanctl` container on the same network so that control commands run from the same cluster context
+- [] verify every `pacmand` node can execute the daemon binary and return build metadata through `pacmand -version`
+- [] verify every `pacmand` container can resolve and probe its local `postgres:17` peer with `pg_isready` and `psql`
+- [] verify every PostgreSQL sidecar reports a PostgreSQL 17 server version and remains attached to the shared cluster network with the expected alias mapping
+- [] verify `pacmanctl -version` and `pacmanctl cluster status` execute successfully from the client container
 - [ ] extend the same topology with replication/bootstrap wiring and assert switchover, failover, and rejoin flows after the control-plane API and local agent logic are implemented
 
 ### Unit Tests
