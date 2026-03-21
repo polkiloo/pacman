@@ -57,8 +57,8 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 ## 4. Local Agent
 
 - [x] implement daemon startup
-- [ ] implement local heartbeat loop
-- [ ] detect PostgreSQL availability
+- [x] implement local heartbeat loop
+- [x] detect PostgreSQL availability
 - [ ] detect current PostgreSQL role
 - [ ] detect recovery state
 - [ ] collect system identifier

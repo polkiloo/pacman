@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/polkiloo/pacman/internal/logging"
 	"github.com/polkiloo/pacman/internal/version"
@@ -77,7 +78,7 @@ func TestRunRequiresConfigPath(t *testing.T) {
 	}
 }
 
-func TestRunStartsLocalDaemonWhenProvided(t *testing.T) {
+func TestRunStartsLocalDaemonAndHeartbeatLoopWhenProvided(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -106,7 +107,10 @@ postgres:
 		Logger: logging.New("pacmand", &logs),
 	})
 
-	if err := app.Run(context.Background(), []string{"-config", path}); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	if err := app.Run(ctx, []string{"-config", path}); err != nil {
 		t.Fatalf("run pacmand with config: %v", err)
 	}
 
@@ -118,6 +122,8 @@ postgres:
 	assertContains(t, logs.String(), `"msg":"started local agent daemon"`)
 	assertContains(t, logs.String(), `"component":"agent"`)
 	assertContains(t, logs.String(), `"manages_postgres":true`)
+	assertContains(t, logs.String(), `"msg":"observed PostgreSQL unavailability"`)
+	assertContains(t, logs.String(), `"postgres_up":false`)
 }
 
 func TestRunReturnsConfigLoadError(t *testing.T) {

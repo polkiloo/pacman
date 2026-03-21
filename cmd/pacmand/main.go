@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"go.uber.org/dig"
 
@@ -26,6 +28,13 @@ func main() {
 }
 
 func run() int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	return runContext(ctx)
+}
+
+func runContext(ctx context.Context) int {
 	logger := logging.New(processName, os.Stderr)
 	container := dig.New()
 
@@ -42,7 +51,7 @@ func run() int {
 	var runErr error
 
 	if err := container.Invoke(func(params invokeParams) {
-		runErr = params.App.Run(context.Background(), params.Args)
+		runErr = params.App.Run(ctx, params.Args)
 	}); err != nil {
 		logger.Error("failed to invoke app", slog.Any("error", err))
 		return 1

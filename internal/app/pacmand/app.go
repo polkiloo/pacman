@@ -90,5 +90,7 @@ func (a *App) Run(ctx context.Context, args []string) error {
 		return fmt.Errorf("start local agent daemon: %w", err)
 	}
 
+	daemon.Wait()
+
 	return nil
 }

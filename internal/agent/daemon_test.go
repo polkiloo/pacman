@@ -3,7 +3,9 @@ package agent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -62,7 +64,7 @@ func TestNewDaemonAllowsWitnessWithoutPostgresConfig(t *testing.T) {
 	}
 }
 
-func TestDaemonStartRecordsStartupState(t *testing.T) {
+func TestDaemonStartRecordsStartupStateAndHeartbeat(t *testing.T) {
 	t.Parallel()
 
 	var logs bytes.Buffer
@@ -72,12 +74,17 @@ func TestDaemonStartRecordsStartupState(t *testing.T) {
 		validDataConfig(),
 		logging.New("pacmand", &logs),
 		withNow(func() time.Time { return now }),
+		withHeartbeatInterval(time.Hour),
+		withPostgresProbe(func(context.Context, string) error { return nil }),
 	)
 	if err != nil {
 		t.Fatalf("new daemon: %v", err)
 	}
 
-	if err := daemon.Start(context.Background()); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := daemon.Start(ctx); err != nil {
 		t.Fatalf("start daemon: %v", err)
 	}
 
@@ -106,27 +113,165 @@ func TestDaemonStartRecordsStartupState(t *testing.T) {
 		t.Fatalf("unexpected startedAt: got %v, want %v", startup.StartedAt, now)
 	}
 
+	heartbeat := daemon.Heartbeat()
+	if heartbeat.Sequence != 1 {
+		t.Fatalf("unexpected heartbeat sequence: got %d, want %d", heartbeat.Sequence, 1)
+	}
+
+	if !heartbeat.ObservedAt.Equal(now) {
+		t.Fatalf("unexpected heartbeat observedAt: got %v, want %v", heartbeat.ObservedAt, now)
+	}
+
+	if !heartbeat.Postgres.Managed {
+		t.Fatal("expected heartbeat to manage postgres")
+	}
+
+	if !heartbeat.Postgres.Up {
+		t.Fatalf("expected postgres to be available, got %+v", heartbeat.Postgres)
+	}
+
+	if heartbeat.Postgres.Address != "127.0.0.1:5432" {
+		t.Fatalf("unexpected postgres probe address: got %q", heartbeat.Postgres.Address)
+	}
+
 	assertContains(t, logs.String(), `"msg":"started local agent daemon"`)
-	assertContains(t, logs.String(), `"component":"agent"`)
-	assertContains(t, logs.String(), `"node":"alpha-1"`)
-	assertContains(t, logs.String(), `"manages_postgres":true`)
+	assertContains(t, logs.String(), `"msg":"observed PostgreSQL availability"`)
+	assertContains(t, logs.String(), `"heartbeat_sequence":1`)
+	assertContains(t, logs.String(), `"postgres_up":true`)
+
+	cancel()
+	daemon.Wait()
+}
+
+func TestDaemonStartRecordsWitnessHeartbeatWithoutLocalPostgres(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	now := time.Date(2026, time.March, 21, 10, 30, 0, 0, time.UTC)
+
+	daemon, err := NewDaemon(
+		config.Config{
+			APIVersion: config.APIVersionV1Alpha1,
+			Kind:       config.KindNodeConfig,
+			Node: config.NodeConfig{
+				Name: "witness-1",
+				Role: cluster.NodeRoleWitness,
+			},
+		},
+		logging.New("pacmand", &logs),
+		withNow(func() time.Time { return now }),
+		withHeartbeatInterval(time.Hour),
+	)
+	if err != nil {
+		t.Fatalf("new daemon: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := daemon.Start(ctx); err != nil {
+		t.Fatalf("start daemon: %v", err)
+	}
+
+	heartbeat := daemon.Heartbeat()
+	if heartbeat.Sequence != 1 {
+		t.Fatalf("unexpected heartbeat sequence: got %d, want %d", heartbeat.Sequence, 1)
+	}
+
+	if heartbeat.Postgres.Managed {
+		t.Fatalf("expected witness heartbeat without postgres, got %+v", heartbeat.Postgres)
+	}
+
+	if heartbeat.Postgres.Up {
+		t.Fatalf("expected postgres availability to be false, got %+v", heartbeat.Postgres)
+	}
+
+	assertContains(t, logs.String(), `"msg":"observed heartbeat without local PostgreSQL"`)
+	assertContains(t, logs.String(), `"postgres_managed":false`)
+
+	cancel()
+	daemon.Wait()
+}
+
+func TestDaemonHeartbeatLoopTicksAndTracksAvailabilityChanges(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	var (
+		mu    sync.Mutex
+		calls int
+	)
+
+	daemon, err := NewDaemon(
+		validDataConfig(),
+		logging.New("pacmand", &logs),
+		withHeartbeatInterval(10*time.Millisecond),
+		withPostgresProbe(func(context.Context, string) error {
+			mu.Lock()
+			defer mu.Unlock()
+
+			calls++
+			if calls == 1 {
+				return errors.New("dial tcp 127.0.0.1:5432: connect: connection refused")
+			}
+
+			return nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("new daemon: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := daemon.Start(ctx); err != nil {
+		t.Fatalf("start daemon: %v", err)
+	}
+
+	waitForHeartbeat(t, daemon, func(heartbeat Heartbeat) bool {
+		return heartbeat.Sequence >= 2 && heartbeat.Postgres.Up
+	})
+
+	cancel()
+	daemon.Wait()
+
+	heartbeat := daemon.Heartbeat()
+	if heartbeat.Sequence < 2 {
+		t.Fatalf("expected at least two heartbeats, got %d", heartbeat.Sequence)
+	}
+
+	if !heartbeat.Postgres.Up {
+		t.Fatalf("expected postgres to recover, got %+v", heartbeat.Postgres)
+	}
+
+	assertContains(t, logs.String(), `"msg":"observed PostgreSQL unavailability"`)
+	assertContains(t, logs.String(), `"msg":"observed PostgreSQL availability"`)
+	assertContains(t, logs.String(), `"postgres_up":false`)
+	assertContains(t, logs.String(), `"postgres_up":true`)
 }
 
 func TestDaemonStartRejectsSecondStart(t *testing.T) {
 	t.Parallel()
 
-	daemon, err := NewDaemon(validDataConfig(), logging.New("pacmand", &bytes.Buffer{}))
+	daemon, err := NewDaemon(validDataConfig(), logging.New("pacmand", &bytes.Buffer{}), withHeartbeatInterval(time.Hour))
 	if err != nil {
 		t.Fatalf("new daemon: %v", err)
 	}
 
-	if err := daemon.Start(context.Background()); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := daemon.Start(ctx); err != nil {
 		t.Fatalf("start daemon: %v", err)
 	}
 
-	if err := daemon.Start(context.Background()); err != ErrDaemonAlreadyStarted {
+	if err := daemon.Start(ctx); err != ErrDaemonAlreadyStarted {
 		t.Fatalf("expected second start error, got %v", err)
 	}
+
+	cancel()
+	daemon.Wait()
 }
 
 func TestDaemonStartReturnsContextError(t *testing.T) {
@@ -158,6 +303,21 @@ func validDataConfig() config.Config {
 			DataDir: "/var/lib/postgresql/data",
 		},
 	}
+}
+
+func waitForHeartbeat(t *testing.T, daemon *Daemon, predicate func(Heartbeat) bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if predicate(daemon.Heartbeat()) {
+			return
+		}
+
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	t.Fatalf("heartbeat condition was not met, last heartbeat: %+v", daemon.Heartbeat())
 }
 
 func assertContains(t *testing.T, got, want string) {

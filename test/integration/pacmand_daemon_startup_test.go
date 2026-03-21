@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,14 +23,14 @@ func TestPacmandDaemonStartupMatrix(t *testing.T) {
 
 	testCases := []struct {
 		name         string
-		args         []string
 		configBody   string
+		runAsDaemon  bool
+		withPostgres bool
 		wantExitCode int
 		wantContains []string
 	}{
 		{
-			name: "positive data node minimal config starts",
-			args: []string{"pacmand", "-config", daemonConfigPath},
+			name: "positive data node starts heartbeat with unavailable postgres",
 			configBody: `
 apiVersion: pacman.io/v1alpha1
 kind: NodeConfig
@@ -39,17 +40,18 @@ node:
 postgres:
   dataDir: /var/lib/postgresql/data
 `,
+			runAsDaemon:  true,
 			wantExitCode: 0,
 			wantContains: []string{
 				`"msg":"loaded node configuration"`,
 				`"msg":"started local agent daemon"`,
 				`"node":"alpha-1"`,
-				`"manages_postgres":true`,
+				`"msg":"observed PostgreSQL unavailability"`,
+				`"postgres_up":false`,
 			},
 		},
 		{
-			name: "positive data node with explicit sections starts",
-			args: []string{"pacmand", "-config", daemonConfigPath},
+			name: "positive data node reports reachable postgres",
 			configBody: `
 apiVersion: pacman.io/v1alpha1
 kind: NodeConfig
@@ -66,8 +68,8 @@ tls:
 postgres:
   dataDir: /srv/postgres
   binDir: /usr/lib/postgresql/17/bin
-  listenAddress: 127.0.0.1
-  port: 5433
+  listenAddress: {{postgres_host}}
+  port: 5432
   parameters:
     max_connections: "200"
 bootstrap:
@@ -79,6 +81,8 @@ bootstrap:
     - alpha-2
     - alpha-3
 `,
+			runAsDaemon:  true,
+			withPostgres: true,
 			wantExitCode: 0,
 			wantContains: []string{
 				`"msg":"started local agent daemon"`,
@@ -86,11 +90,12 @@ bootstrap:
 				`"role":"data"`,
 				`"api_address":"10.0.0.12:8081"`,
 				`"control_address":"10.0.0.12:9091"`,
+				`"msg":"observed PostgreSQL availability"`,
+				`"postgres_up":true`,
 			},
 		},
 		{
 			name: "positive witness node without postgres starts",
-			args: []string{"pacmand", "-config", daemonConfigPath},
 			configBody: `
 apiVersion: pacman.io/v1alpha1
 kind: NodeConfig
@@ -98,17 +103,19 @@ node:
   name: witness-1
   role: witness
 `,
+			runAsDaemon:  true,
 			wantExitCode: 0,
 			wantContains: []string{
 				`"msg":"started local agent daemon"`,
 				`"node":"witness-1"`,
 				`"role":"witness"`,
 				`"manages_postgres":false`,
+				`"msg":"observed heartbeat without local PostgreSQL"`,
+				`"postgres_managed":false`,
 			},
 		},
 		{
 			name: "positive witness node with tls starts",
-			args: []string{"pacmand", "-config", daemonConfigPath},
 			configBody: `
 apiVersion: pacman.io/v1alpha1
 kind: NodeConfig
@@ -122,17 +129,18 @@ tls:
   certFile: /etc/pacman/tls/witness.crt
   keyFile: /etc/pacman/tls/witness.key
 `,
+			runAsDaemon:  true,
 			wantExitCode: 0,
 			wantContains: []string{
 				`"msg":"started local agent daemon"`,
 				`"node":"witness-2"`,
 				`"api_address":"0.0.0.0:8181"`,
 				`"control_address":"0.0.0.0:9191"`,
+				`"msg":"observed heartbeat without local PostgreSQL"`,
 			},
 		},
 		{
 			name: "positive data node with defaults and safe params starts",
-			args: []string{"pacmand", "-config", daemonConfigPath},
 			configBody: `
 apiVersion: pacman.io/v1alpha1
 kind: NodeConfig
@@ -145,17 +153,17 @@ postgres:
     max_connections: "150"
     shared_buffers: 256MB
 `,
+			runAsDaemon:  true,
 			wantExitCode: 0,
 			wantContains: []string{
 				`"msg":"started local agent daemon"`,
 				`"node":"alpha-3"`,
-				`"api_address":"0.0.0.0:8080"`,
-				`"control_address":"0.0.0.0:9090"`,
+				`"msg":"observed PostgreSQL unavailability"`,
+				`"postgres_address":"127.0.0.1:5432"`,
 			},
 		},
 		{
 			name:         "negative missing config path fails",
-			args:         []string{"pacmand"},
 			wantExitCode: 1,
 			wantContains: []string{
 				`"msg":"app run failed"`,
@@ -164,7 +172,7 @@ postgres:
 		},
 		{
 			name:         "negative missing config file fails",
-			args:         []string{"pacmand", "-config", daemonConfigPath},
+			configBody:   "",
 			wantExitCode: 1,
 			wantContains: []string{
 				`"msg":"app run failed"`,
@@ -173,7 +181,6 @@ postgres:
 		},
 		{
 			name: "negative data node without postgres section fails",
-			args: []string{"pacmand", "-config", daemonConfigPath},
 			configBody: `
 apiVersion: pacman.io/v1alpha1
 kind: NodeConfig
@@ -190,7 +197,6 @@ node:
 		},
 		{
 			name: "negative tls config missing key fails",
-			args: []string{"pacmand", "-config", daemonConfigPath},
 			configBody: `
 apiVersion: pacman.io/v1alpha1
 kind: NodeConfig
@@ -210,7 +216,6 @@ tls:
 		},
 		{
 			name: "negative unsafe postgres override fails",
-			args: []string{"pacmand", "-config", daemonConfigPath},
 			configBody: `
 apiVersion: pacman.io/v1alpha1
 kind: NodeConfig
@@ -233,9 +238,29 @@ postgres:
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			runner := startDaemonRunner(t, env, testCase.name, testCase.configBody)
+			configBody := testCase.configBody
+			if testCase.withPostgres {
+				postgresAlias := sanitizeIntegrationName(testCase.name) + "-postgres"
+				postgresFixture := env.StartPostgres(t, testCase.name, postgresAlias)
+				configBody = strings.ReplaceAll(configBody, "{{postgres_host}}", postgresFixture.Alias())
+			}
 
-			result := runner.Exec(t, testCase.args...)
+			runner := startDaemonRunner(t, env, testCase.name, configBody)
+
+			var result testenv.ExecResult
+			switch {
+			case testCase.runAsDaemon:
+				result = runPacmandUntilTerminated(t, runner)
+			case strings.TrimSpace(configBody) == "":
+				result = runner.Exec(t, "pacmand", "-config", daemonConfigPath)
+			default:
+				result = runner.Exec(t, "pacmand", "-config", daemonConfigPath)
+			}
+
+			if testCase.name == "negative missing config path fails" {
+				result = runner.Exec(t, "pacmand")
+			}
+
 			if result.ExitCode != testCase.wantExitCode {
 				t.Fatalf("unexpected exit code: got %d, want %d, output=%q", result.ExitCode, testCase.wantExitCode, result.Output)
 			}
@@ -267,6 +292,17 @@ func startDaemonRunner(t *testing.T, env *testenv.Environment, name, configBody 
 	}
 
 	return env.StartRunner(t, cfg)
+}
+
+func runPacmandUntilTerminated(t *testing.T, runner *testenv.Runner) testenv.ExecResult {
+	t.Helper()
+
+	script := fmt.Sprintf(
+		"pacmand -config %s >/tmp/pacmand.log 2>&1 & pid=$!; sleep 2; kill -TERM $pid; wait $pid; status=$?; cat /tmp/pacmand.log; exit $status",
+		daemonConfigPath,
+	)
+
+	return runner.Exec(t, "/bin/sh", "-lc", script)
 }
 
 func writeDaemonConfigFile(t *testing.T, body string) testcontainers.ContainerFile {
