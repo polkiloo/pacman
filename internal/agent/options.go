@@ -4,14 +4,14 @@ import (
 	"context"
 	"time"
 
-	"github.com/polkiloo/pacman/internal/cluster"
+	"github.com/polkiloo/pacman/internal/postgres"
 )
 
 // Option customizes daemon construction for tests and future runtime hooks.
 type Option func(*Daemon)
 
 type postgresAvailabilityProbe func(context.Context, string) error
-type postgresStateProbe func(context.Context, string) (cluster.MemberRole, bool, error)
+type postgresStateProbe func(context.Context, string) (postgres.Observation, error)
 
 func withNow(now func() time.Time) Option {
 	return func(daemon *Daemon) {

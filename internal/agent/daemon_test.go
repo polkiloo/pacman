@@ -13,6 +13,7 @@ import (
 	"github.com/polkiloo/pacman/internal/cluster"
 	"github.com/polkiloo/pacman/internal/config"
 	"github.com/polkiloo/pacman/internal/logging"
+	"github.com/polkiloo/pacman/internal/postgres"
 )
 
 func TestNewDaemonRejectsNilLogger(t *testing.T) {
@@ -77,8 +78,13 @@ func TestDaemonStartRecordsStartupStateAndHeartbeat(t *testing.T) {
 		withNow(func() time.Time { return now }),
 		withHeartbeatInterval(time.Hour),
 		withPostgresProbe(func(context.Context, string) error { return nil }),
-		withPostgresStateProbe(func(context.Context, string) (cluster.MemberRole, bool, error) {
-			return cluster.MemberRolePrimary, false, nil
+		withPostgresStateProbe(func(context.Context, string) (postgres.Observation, error) {
+			return postgres.Observation{
+				Role:             cluster.MemberRolePrimary,
+				InRecovery:       false,
+				SystemIdentifier: "7599025879359099984",
+				Timeline:         1,
+			}, nil
 		}),
 	)
 	if err != nil {
@@ -146,6 +152,14 @@ func TestDaemonStartRecordsStartupStateAndHeartbeat(t *testing.T) {
 		t.Fatalf("expected primary recovery state, got %+v", heartbeat.Postgres)
 	}
 
+	if heartbeat.Postgres.SystemIdentifier != "7599025879359099984" {
+		t.Fatalf("unexpected system identifier: got %q", heartbeat.Postgres.SystemIdentifier)
+	}
+
+	if heartbeat.Postgres.Timeline != 1 {
+		t.Fatalf("unexpected timeline: got %d, want %d", heartbeat.Postgres.Timeline, 1)
+	}
+
 	if heartbeat.Postgres.Address != "127.0.0.1:5432" {
 		t.Fatalf("unexpected postgres probe address: got %q", heartbeat.Postgres.Address)
 	}
@@ -156,6 +170,8 @@ func TestDaemonStartRecordsStartupStateAndHeartbeat(t *testing.T) {
 	assertContains(t, logs.String(), `"postgres_up":true`)
 	assertContains(t, logs.String(), `"member_role":"primary"`)
 	assertContains(t, logs.String(), `"in_recovery":false`)
+	assertContains(t, logs.String(), `"system_identifier":"7599025879359099984"`)
+	assertContains(t, logs.String(), `"timeline":1`)
 
 	cancel()
 	daemon.Wait()
@@ -223,8 +239,13 @@ func TestDaemonStartDetectsReplicaRecoveryState(t *testing.T) {
 		logging.New("pacmand", &bytes.Buffer{}),
 		withHeartbeatInterval(time.Hour),
 		withPostgresProbe(func(context.Context, string) error { return nil }),
-		withPostgresStateProbe(func(context.Context, string) (cluster.MemberRole, bool, error) {
-			return cluster.MemberRoleReplica, true, nil
+		withPostgresStateProbe(func(context.Context, string) (postgres.Observation, error) {
+			return postgres.Observation{
+				Role:             cluster.MemberRoleReplica,
+				InRecovery:       true,
+				SystemIdentifier: "7599025879359099984",
+				Timeline:         7,
+			}, nil
 		}),
 	)
 	if err != nil {
@@ -251,6 +272,14 @@ func TestDaemonStartDetectsReplicaRecoveryState(t *testing.T) {
 		t.Fatalf("expected in-recovery state, got %+v", heartbeat.Postgres)
 	}
 
+	if heartbeat.Postgres.SystemIdentifier != "7599025879359099984" {
+		t.Fatalf("unexpected system identifier: got %q", heartbeat.Postgres.SystemIdentifier)
+	}
+
+	if heartbeat.Postgres.Timeline != 7 {
+		t.Fatalf("unexpected timeline: got %d, want %d", heartbeat.Postgres.Timeline, 7)
+	}
+
 	cancel()
 	daemon.Wait()
 }
@@ -265,8 +294,8 @@ func TestDaemonStartReportsRoleDetectionFailureWhileAvailabilityIsUp(t *testing.
 		logging.New("pacmand", &logs),
 		withHeartbeatInterval(time.Hour),
 		withPostgresProbe(func(context.Context, string) error { return nil }),
-		withPostgresStateProbe(func(context.Context, string) (cluster.MemberRole, bool, error) {
-			return cluster.MemberRoleUnknown, false, errors.New("pq: password authentication failed")
+		withPostgresStateProbe(func(context.Context, string) (postgres.Observation, error) {
+			return postgres.Observation{Role: cluster.MemberRoleUnknown}, errors.New("pq: password authentication failed")
 		}),
 	)
 	if err != nil {
@@ -324,8 +353,13 @@ func TestDaemonHeartbeatLoopTicksAndTracksAvailabilityChanges(t *testing.T) {
 
 			return nil
 		}),
-		withPostgresStateProbe(func(context.Context, string) (cluster.MemberRole, bool, error) {
-			return cluster.MemberRolePrimary, false, nil
+		withPostgresStateProbe(func(context.Context, string) (postgres.Observation, error) {
+			return postgres.Observation{
+				Role:             cluster.MemberRolePrimary,
+				InRecovery:       false,
+				SystemIdentifier: "7599025879359099984",
+				Timeline:         1,
+			}, nil
 		}),
 	)
 	if err != nil {
@@ -360,6 +394,8 @@ func TestDaemonHeartbeatLoopTicksAndTracksAvailabilityChanges(t *testing.T) {
 	assertContains(t, logs.String(), `"postgres_up":false`)
 	assertContains(t, logs.String(), `"postgres_up":true`)
 	assertContains(t, logs.String(), `"member_role":"primary"`)
+	assertContains(t, logs.String(), `"system_identifier":"7599025879359099984"`)
+	assertContains(t, logs.String(), `"timeline":1`)
 }
 
 func TestDaemonStartRejectsSecondStart(t *testing.T) {
@@ -393,8 +429,13 @@ func TestDaemonStartRejectsConcurrentSecondStart(t *testing.T) {
 		logging.New("pacmand", &bytes.Buffer{}),
 		withHeartbeatInterval(time.Hour),
 		withPostgresProbe(func(context.Context, string) error { return nil }),
-		withPostgresStateProbe(func(context.Context, string) (cluster.MemberRole, bool, error) {
-			return cluster.MemberRolePrimary, false, nil
+		withPostgresStateProbe(func(context.Context, string) (postgres.Observation, error) {
+			return postgres.Observation{
+				Role:             cluster.MemberRolePrimary,
+				InRecovery:       false,
+				SystemIdentifier: "7599025879359099984",
+				Timeline:         1,
+			}, nil
 		}),
 	)
 	if err != nil {

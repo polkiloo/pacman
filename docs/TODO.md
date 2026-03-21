@@ -61,8 +61,8 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] detect PostgreSQL availability
 - [x] detect current PostgreSQL role
 - [x] detect recovery state
-- [ ] collect system identifier
-- [ ] collect timeline information
+- [x] collect system identifier
+- [x] collect timeline information
 - [ ] collect receive / replay / flush LSN
 - [ ] collect replication lag signals
 - [ ] collect local process health

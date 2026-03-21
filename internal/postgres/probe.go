@@ -13,25 +13,45 @@ import (
 	"github.com/polkiloo/pacman/internal/cluster"
 )
 
-// QueryRoleAndRecoveryState determines the local PostgreSQL member role by
-// querying pg_is_in_recovery() over a direct SQL connection.
-func QueryRoleAndRecoveryState(ctx context.Context, address string) (cluster.MemberRole, bool, error) {
+// Observation describes the latest PostgreSQL state collected from a direct
+// SQL connection.
+type Observation struct {
+	Role             cluster.MemberRole
+	InRecovery       bool
+	SystemIdentifier string
+	Timeline         int64
+}
+
+// QueryObservation determines the local PostgreSQL runtime observation by
+// querying recovery state, system identifier, and timeline over a direct SQL
+// connection.
+func QueryObservation(ctx context.Context, address string) (Observation, error) {
 	db, err := sql.Open("postgres", connectionString(address))
 	if err != nil {
-		return cluster.MemberRoleUnknown, false, err
+		return Observation{Role: cluster.MemberRoleUnknown}, err
 	}
 	defer db.Close()
 
-	var inRecovery bool
-	if err := db.QueryRowContext(ctx, "select pg_is_in_recovery()").Scan(&inRecovery); err != nil {
-		return cluster.MemberRoleUnknown, false, err
+	var observation Observation
+	if err := db.QueryRowContext(
+		ctx,
+		`select
+			pg_is_in_recovery(),
+			system.system_identifier::text,
+			checkpoint.timeline_id
+		from pg_control_system() as system
+		cross join pg_control_checkpoint() as checkpoint`,
+	).Scan(&observation.InRecovery, &observation.SystemIdentifier, &observation.Timeline); err != nil {
+		return Observation{Role: cluster.MemberRoleUnknown}, err
 	}
 
-	if inRecovery {
-		return cluster.MemberRoleReplica, true, nil
+	if observation.InRecovery {
+		observation.Role = cluster.MemberRoleReplica
+		return observation, nil
 	}
 
-	return cluster.MemberRolePrimary, false, nil
+	observation.Role = cluster.MemberRolePrimary
+	return observation, nil
 }
 
 func connectionString(address string) string {

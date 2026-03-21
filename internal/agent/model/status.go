@@ -28,6 +28,8 @@ type PostgresStatus struct {
 	Role              cluster.MemberRole
 	RecoveryKnown     bool
 	InRecovery        bool
+	SystemIdentifier  string
+	Timeline          int64
 	StateError        string
 }
 

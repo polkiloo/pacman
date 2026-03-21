@@ -57,7 +57,7 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 		now:                time.Now,
 		heartbeatInterval:  defaultHeartbeatInterval,
 		postgresProbe:      dialPostgresAvailability,
-		postgresStateProbe: postgres.QueryRoleAndRecoveryState,
+		postgresStateProbe: postgres.QueryObservation,
 		probeTimeout:       defaultPostgresProbeTimeout,
 	}
 

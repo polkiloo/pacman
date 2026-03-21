@@ -48,6 +48,8 @@ func (daemon *Daemon) logHeartbeat(current, previous agentmodel.Heartbeat) {
 		current.Postgres.Role == previous.Postgres.Role &&
 		current.Postgres.RecoveryKnown == previous.Postgres.RecoveryKnown &&
 		current.Postgres.InRecovery == previous.Postgres.InRecovery &&
+		current.Postgres.SystemIdentifier == previous.Postgres.SystemIdentifier &&
+		current.Postgres.Timeline == previous.Postgres.Timeline &&
 		current.Postgres.AvailabilityError == previous.Postgres.AvailabilityError &&
 		current.Postgres.StateError == previous.Postgres.StateError {
 		return
@@ -70,6 +72,14 @@ func (daemon *Daemon) logHeartbeat(current, previous agentmodel.Heartbeat) {
 
 	if current.Postgres.RecoveryKnown {
 		args = append(args, slog.Bool("in_recovery", current.Postgres.InRecovery))
+	}
+
+	if current.Postgres.SystemIdentifier != "" {
+		args = append(args, slog.String("system_identifier", current.Postgres.SystemIdentifier))
+	}
+
+	if current.Postgres.Timeline > 0 {
+		args = append(args, slog.Int64("timeline", current.Postgres.Timeline))
 	}
 
 	if current.Postgres.AvailabilityError != "" {

@@ -43,15 +43,17 @@ func (daemon *Daemon) detectPostgresStatus(ctx context.Context, observedAt time.
 
 	status.Up = true
 
-	role, inRecovery, err := daemon.postgresStateProbe(probeCtx, address)
+	observation, err := daemon.postgresStateProbe(probeCtx, address)
 	if err != nil {
 		status.StateError = err.Error()
 		return status
 	}
 
-	status.Role = role
+	status.Role = observation.Role
 	status.RecoveryKnown = true
-	status.InRecovery = inRecovery
+	status.InRecovery = observation.InRecovery
+	status.SystemIdentifier = observation.SystemIdentifier
+	status.Timeline = observation.Timeline
 	return status
 }
 

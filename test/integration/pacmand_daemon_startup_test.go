@@ -95,6 +95,8 @@ bootstrap:
 				`"postgres_up":true`,
 				`"member_role":"primary"`,
 				`"in_recovery":false`,
+				`"system_identifier":"`,
+				`"timeline":1`,
 			},
 		},
 		{
