@@ -27,6 +27,7 @@ func TestPacmandDaemonStartupMatrix(t *testing.T) {
 		runAsDaemon  bool
 		withPostgres bool
 		wantExitCode int
+		extraEnv     map[string]string
 		wantContains []string
 	}{
 		{
@@ -92,6 +93,8 @@ bootstrap:
 				`"control_address":"10.0.0.12:9091"`,
 				`"msg":"observed PostgreSQL availability"`,
 				`"postgres_up":true`,
+				`"member_role":"primary"`,
+				`"in_recovery":false`,
 			},
 		},
 		{
@@ -243,9 +246,14 @@ postgres:
 				postgresAlias := sanitizeIntegrationName(testCase.name) + "-postgres"
 				postgresFixture := env.StartPostgres(t, testCase.name, postgresAlias)
 				configBody = strings.ReplaceAll(configBody, "{{postgres_host}}", postgresFixture.Alias())
+				testCase.extraEnv = map[string]string{
+					"PGDATABASE": postgresFixture.Database(),
+					"PGUSER":     postgresFixture.Username(),
+					"PGPASSWORD": postgresFixture.Password(),
+				}
 			}
 
-			runner := startDaemonRunner(t, env, testCase.name, configBody)
+			runner := startDaemonRunner(t, env, testCase.name, configBody, testCase.extraEnv)
 
 			var result testenv.ExecResult
 			switch {
@@ -276,15 +284,21 @@ postgres:
 
 const daemonConfigPath = "/tmp/pacmand.yaml"
 
-func startDaemonRunner(t *testing.T, env *testenv.Environment, name, configBody string) *testenv.Runner {
+func startDaemonRunner(t *testing.T, env *testenv.Environment, name, configBody string, extraEnv map[string]string) *testenv.Runner {
 	t.Helper()
+
+	runnerEnv := map[string]string{
+		"PACMAN_TEST_ROLE": "pacmand",
+	}
+
+	for key, value := range extraEnv {
+		runnerEnv[key] = value
+	}
 
 	cfg := testenv.RunnerConfig{
 		Name:    name,
 		Aliases: []string{sanitizeIntegrationName(name)},
-		Env: map[string]string{
-			"PACMAN_TEST_ROLE": "pacmand",
-		},
+		Env:     runnerEnv,
 	}
 
 	if strings.TrimSpace(configBody) != "" {
