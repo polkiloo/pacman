@@ -8,8 +8,8 @@ import (
 	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
 )
 
-func (daemon *Daemon) runHeartbeatLoop(ctx context.Context, loopDone chan struct{}) {
-	defer close(loopDone)
+func (daemon *Daemon) runHeartbeatLoop(ctx context.Context) {
+	defer daemon.loopWG.Done()
 
 	ticker := time.NewTicker(daemon.heartbeatInterval)
 	defer ticker.Stop()

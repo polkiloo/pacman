@@ -385,6 +385,58 @@ func TestDaemonStartRejectsSecondStart(t *testing.T) {
 	daemon.Wait()
 }
 
+func TestDaemonStartRejectsConcurrentSecondStart(t *testing.T) {
+	t.Parallel()
+
+	daemon, err := NewDaemon(
+		validDataConfig(),
+		logging.New("pacmand", &bytes.Buffer{}),
+		withHeartbeatInterval(time.Hour),
+		withPostgresProbe(func(context.Context, string) error { return nil }),
+		withPostgresStateProbe(func(context.Context, string) (cluster.MemberRole, bool, error) {
+			return cluster.MemberRolePrimary, false, nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("new daemon: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			errs <- daemon.Start(ctx)
+		}()
+	}
+
+	var startedCount int
+	var alreadyStartedCount int
+	for range 2 {
+		err := <-errs
+		switch err {
+		case nil:
+			startedCount++
+		case ErrDaemonAlreadyStarted:
+			alreadyStartedCount++
+		default:
+			t.Fatalf("unexpected start error: %v", err)
+		}
+	}
+
+	if startedCount != 1 {
+		t.Fatalf("expected exactly one successful start, got %d", startedCount)
+	}
+
+	if alreadyStartedCount != 1 {
+		t.Fatalf("expected exactly one already-started error, got %d", alreadyStartedCount)
+	}
+
+	cancel()
+	daemon.Wait()
+}
+
 func TestDaemonStartReturnsContextError(t *testing.T) {
 	t.Parallel()
 

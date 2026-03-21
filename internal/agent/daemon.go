@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
 	"github.com/polkiloo/pacman/internal/config"
+	"github.com/polkiloo/pacman/internal/postgres"
 )
 
 const (
@@ -26,11 +28,12 @@ type Daemon struct {
 	postgresProbe      postgresAvailabilityProbe
 	postgresStateProbe postgresStateProbe
 	probeTimeout       time.Duration
+	startedFlag        atomic.Bool
 
 	mu        sync.RWMutex
 	started   agentmodel.Startup
 	heartbeat agentmodel.Heartbeat
-	loopDone  chan struct{}
+	loopWG    sync.WaitGroup
 }
 
 // NewDaemon constructs a local PACMAN daemon from the validated node config.
@@ -54,7 +57,7 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 		now:                time.Now,
 		heartbeatInterval:  defaultHeartbeatInterval,
 		postgresProbe:      dialPostgresAvailability,
-		postgresStateProbe: queryPostgresRoleAndRecoveryState,
+		postgresStateProbe: postgres.QueryRoleAndRecoveryState,
 		probeTimeout:       defaultPostgresProbeTimeout,
 	}
 
@@ -73,13 +76,24 @@ func (daemon *Daemon) Start(ctx context.Context) error {
 		return err
 	}
 
-	daemon.mu.Lock()
-	if !daemon.started.StartedAt.IsZero() {
-		daemon.mu.Unlock()
-		return ErrDaemonAlreadyStarted
+	startup, err := daemon.beginStart()
+	if err != nil {
+		return err
 	}
 
-	daemon.started = agentmodel.Startup{
+	daemon.logStartup(ctx, startup)
+	daemon.recordHeartbeat(ctx)
+	go daemon.runHeartbeatLoop(ctx)
+
+	return nil
+}
+
+func (daemon *Daemon) beginStart() (agentmodel.Startup, error) {
+	if !daemon.startedFlag.CompareAndSwap(false, true) {
+		return agentmodel.Startup{}, ErrDaemonAlreadyStarted
+	}
+
+	startup := agentmodel.Startup{
 		NodeName:        daemon.config.Node.Name,
 		NodeRole:        daemon.config.Node.Role,
 		APIAddress:      daemon.config.Node.APIAddress,
@@ -88,26 +102,24 @@ func (daemon *Daemon) Start(ctx context.Context) error {
 		StartedAt:       daemon.now().UTC(),
 	}
 
+	daemon.loopWG.Add(1)
+	daemon.mu.Lock()
+	defer daemon.mu.Unlock()
+	daemon.started = startup
+	return startup, nil
+}
+
+func (daemon *Daemon) logStartup(ctx context.Context, startup agentmodel.Startup) {
 	daemon.logger.InfoContext(
 		ctx,
 		"started local agent daemon",
 		slog.String("component", "agent"),
-		slog.String("node", daemon.started.NodeName),
-		slog.String("role", daemon.started.NodeRole.String()),
-		slog.Bool("manages_postgres", daemon.started.ManagesPostgres),
-		slog.String("api_address", daemon.started.APIAddress),
-		slog.String("control_address", daemon.started.ControlAddress),
+		slog.String("node", startup.NodeName),
+		slog.String("role", startup.NodeRole.String()),
+		slog.Bool("manages_postgres", startup.ManagesPostgres),
+		slog.String("api_address", startup.APIAddress),
+		slog.String("control_address", startup.ControlAddress),
 	)
-
-	loopDone := make(chan struct{})
-	daemon.loopDone = loopDone
-	daemon.mu.Unlock()
-
-	daemon.recordHeartbeat(ctx)
-
-	go daemon.runHeartbeatLoop(ctx, loopDone)
-
-	return nil
 }
 
 // Startup returns the daemon startup state collected during Start.
@@ -130,13 +142,5 @@ func (daemon *Daemon) Heartbeat() agentmodel.Heartbeat {
 // Wait blocks until the heartbeat loop stops after the daemon context is
 // cancelled.
 func (daemon *Daemon) Wait() {
-	daemon.mu.RLock()
-	loopDone := daemon.loopDone
-	daemon.mu.RUnlock()
-
-	if loopDone == nil {
-		return
-	}
-
-	<-loopDone
+	daemon.loopWG.Wait()
 }
