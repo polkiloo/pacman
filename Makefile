@@ -23,7 +23,7 @@ LDFLAGS := -X github.com/polkiloo/pacman/internal/version.Version=$(VERSION) \
 	-X github.com/polkiloo/pacman/internal/version.Commit=$(COMMIT) \
 	-X github.com/polkiloo/pacman/internal/version.BuildDate=$(BUILD_DATE)
 
-.PHONY: fmt test test-integration test-cluster docker-build-test-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl tidy clean
+.PHONY: fmt test test-integration docker-build-test-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl tidy clean
 
 fmt:
 	$(GO) fmt ./...
@@ -36,9 +36,6 @@ docker-build-test-image:
 
 test-integration: docker-build-test-image
 	PACMAN_TEST_IMAGE=$(PACMAN_TEST_IMAGE) $(GO) test -tags=integration ./test/...
-
-test-cluster: docker-build-test-image
-	PACMAN_TEST_IMAGE=$(PACMAN_TEST_IMAGE) $(GO) test -tags=integration ./test/integration -run TestPACMANClusterEnvironment
 
 coverage:
 	$(GO) test -coverprofile=$(COVERAGE_OUT) $(COVERAGE_PACKAGES)
