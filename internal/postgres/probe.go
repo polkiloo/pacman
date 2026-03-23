@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	_ "github.com/lib/pq"
 
@@ -16,10 +17,29 @@ import (
 // Observation describes the latest PostgreSQL state collected from a direct
 // SQL connection.
 type Observation struct {
-	Role             cluster.MemberRole
-	InRecovery       bool
-	SystemIdentifier string
-	Timeline         int64
+	Role       cluster.MemberRole
+	InRecovery bool
+	Details    Details
+	WAL        WALProgress
+}
+
+// Details describes the latest local PostgreSQL instance details.
+type Details struct {
+	ServerVersion       int
+	PendingRestart      bool
+	SystemIdentifier    string
+	Timeline            int64
+	PostmasterStartAt   time.Time
+	ReplicationLagBytes int64
+}
+
+// WALProgress describes the latest locally observed PostgreSQL WAL positions.
+type WALProgress struct {
+	WriteLSN        string
+	FlushLSN        string
+	ReceiveLSN      string
+	ReplayLSN       string
+	ReplayTimestamp time.Time
 }
 
 // QueryObservation determines the local PostgreSQL runtime observation by
@@ -28,30 +48,89 @@ type Observation struct {
 func QueryObservation(ctx context.Context, address string) (Observation, error) {
 	db, err := sql.Open("postgres", connectionString(address))
 	if err != nil {
-		return Observation{Role: cluster.MemberRoleUnknown}, err
+		return unknownObservation(), err
 	}
 	defer db.Close()
 
-	var observation Observation
-	if err := db.QueryRowContext(
-		ctx,
-		`select
-			pg_is_in_recovery(),
-			system.system_identifier::text,
-			checkpoint.timeline_id
-		from pg_control_system() as system
-		cross join pg_control_checkpoint() as checkpoint`,
-	).Scan(&observation.InRecovery, &observation.SystemIdentifier, &observation.Timeline); err != nil {
-		return Observation{Role: cluster.MemberRoleUnknown}, err
+	row, err := queryObservationRow(ctx, db)
+	if err != nil {
+		return unknownObservation(), err
 	}
 
-	if observation.InRecovery {
-		observation.Role = cluster.MemberRoleReplica
-		return observation, nil
+	return row.observation(), nil
+}
+
+type observationRow struct {
+	inRecovery          bool
+	serverVersion       int
+	postmasterStartAt   time.Time
+	pendingRestart      bool
+	systemIdentifier    string
+	timeline            int64
+	writeLSN            string
+	flushLSN            string
+	receiveLSN          string
+	replayLSN           string
+	replayTimestamp     sql.NullTime
+	replicationLagBytes int64
+}
+
+func queryObservationRow(ctx context.Context, db *sql.DB) (observationRow, error) {
+	var row observationRow
+	err := db.QueryRowContext(ctx, queryObservationSQL).Scan(
+		&row.inRecovery,
+		&row.serverVersion,
+		&row.postmasterStartAt,
+		&row.pendingRestart,
+		&row.systemIdentifier,
+		&row.timeline,
+		&row.writeLSN,
+		&row.flushLSN,
+		&row.receiveLSN,
+		&row.replayLSN,
+		&row.replayTimestamp,
+		&row.replicationLagBytes,
+	)
+	return row, err
+}
+
+func (row observationRow) observation() Observation {
+	observation := Observation{
+		Role:       observationRole(row.inRecovery),
+		InRecovery: row.inRecovery,
+		Details: Details{
+			ServerVersion:       row.serverVersion,
+			PendingRestart:      row.pendingRestart,
+			SystemIdentifier:    row.systemIdentifier,
+			Timeline:            row.timeline,
+			PostmasterStartAt:   row.postmasterStartAt,
+			ReplicationLagBytes: row.replicationLagBytes,
+		},
+		WAL: WALProgress{
+			WriteLSN:   row.writeLSN,
+			FlushLSN:   row.flushLSN,
+			ReceiveLSN: row.receiveLSN,
+			ReplayLSN:  row.replayLSN,
+		},
 	}
 
-	observation.Role = cluster.MemberRolePrimary
-	return observation, nil
+	if row.replayTimestamp.Valid {
+		observation.WAL.ReplayTimestamp = row.replayTimestamp.Time.UTC()
+	}
+
+	return observation
+}
+
+func unknownObservation() Observation {
+	return Observation{Role: cluster.MemberRoleUnknown}
+}
+
+func observationRole(inRecovery bool) cluster.MemberRole {
+	if inRecovery {
+		return cluster.MemberRoleReplica
+	}
+
+	return cluster.MemberRolePrimary
 }
 
 func connectionString(address string) string {

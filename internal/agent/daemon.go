@@ -10,6 +10,7 @@ import (
 
 	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
 	"github.com/polkiloo/pacman/internal/config"
+	"github.com/polkiloo/pacman/internal/controlplane"
 	"github.com/polkiloo/pacman/internal/postgres"
 )
 
@@ -18,8 +19,7 @@ const (
 	defaultPostgresProbeTimeout = 500 * time.Millisecond
 )
 
-// Daemon is the node-local PACMAN agent responsible for PostgreSQL observation
-// and lifecycle management.
+// Daemon runs the node-local PACMAN agent.
 type Daemon struct {
 	config             config.Config
 	logger             *slog.Logger
@@ -27,13 +27,15 @@ type Daemon struct {
 	heartbeatInterval  time.Duration
 	postgresProbe      postgresAvailabilityProbe
 	postgresStateProbe postgresStateProbe
+	statePublisher     controlplane.NodeStatePublisher
 	probeTimeout       time.Duration
 	startedFlag        atomic.Bool
 
-	mu        sync.RWMutex
-	started   agentmodel.Startup
-	heartbeat agentmodel.Heartbeat
-	loopWG    sync.WaitGroup
+	mu         sync.RWMutex
+	started    agentmodel.Startup
+	heartbeat  agentmodel.Heartbeat
+	nodeStatus agentmodel.NodeStatus
+	loopWG     sync.WaitGroup
 }
 
 // NewDaemon constructs a local PACMAN daemon from the validated node config.
@@ -58,6 +60,7 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 		heartbeatInterval:  defaultHeartbeatInterval,
 		postgresProbe:      dialPostgresAvailability,
 		postgresStateProbe: postgres.QueryObservation,
+		statePublisher:     controlplane.NewMemoryStateStore(),
 		probeTimeout:       defaultPostgresProbeTimeout,
 	}
 
@@ -137,6 +140,14 @@ func (daemon *Daemon) Heartbeat() agentmodel.Heartbeat {
 	defer daemon.mu.RUnlock()
 
 	return daemon.heartbeat
+}
+
+// NodeStatus returns the latest local node observation published by the agent.
+func (daemon *Daemon) NodeStatus() agentmodel.NodeStatus {
+	daemon.mu.RLock()
+	defer daemon.mu.RUnlock()
+
+	return daemon.nodeStatus.Clone()
 }
 
 // Wait blocks until the heartbeat loop stops after the daemon context is

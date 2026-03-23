@@ -123,6 +123,7 @@ postgres:
 	assertContains(t, logs.String(), `"component":"agent"`)
 	assertContains(t, logs.String(), `"manages_postgres":true`)
 	assertContains(t, logs.String(), `"msg":"observed PostgreSQL unavailability"`)
+	assertContains(t, logs.String(), `"msg":"published local state to control plane"`)
 	assertContains(t, logs.String(), `"postgres_up":false`)
 }
 

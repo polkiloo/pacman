@@ -57,6 +57,7 @@ postgres:
 
 	assertContains(t, stderr, `"msg":"started local agent daemon"`)
 	assertContains(t, stderr, `"msg":"observed PostgreSQL unavailability"`)
+	assertContains(t, stderr, `"msg":"published local state to control plane"`)
 	assertContains(t, stderr, `"postgres_up":false`)
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/polkiloo/pacman/internal/controlplane"
 	"github.com/polkiloo/pacman/internal/postgres"
 )
 
@@ -12,6 +13,16 @@ type Option func(*Daemon)
 
 type postgresAvailabilityProbe func(context.Context, string) error
 type postgresStateProbe func(context.Context, string) (postgres.Observation, error)
+
+// WithControlPlanePublisher overrides the control-plane publisher used by the
+// daemon to publish local observed state.
+func WithControlPlanePublisher(publisher controlplane.NodeStatePublisher) Option {
+	return func(daemon *Daemon) {
+		if publisher != nil {
+			daemon.statePublisher = publisher
+		}
+	}
+}
 
 func withNow(now func() time.Time) Option {
 	return func(daemon *Daemon) {
