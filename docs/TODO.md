@@ -63,10 +63,10 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] detect recovery state
 - [x] collect system identifier
 - [x] collect timeline information
-- [ ] collect receive / replay / flush LSN
-- [ ] collect replication lag signals
-- [ ] collect local process health
-- [ ] publish observed state to control plane
+- [x] collect receive / replay / flush LSN
+- [x] collect replication lag signals
+- [x] collect local process health
+- [x] publish observed state to control plane
 
 ---
 
@@ -401,6 +401,18 @@ This track captures the Kubernetes-native operator model described in [ARCHITECT
 - [ ] add standby-cluster / DR support
 - [ ] automate endpoint management
 - [ ] add web UI
+
+### Managed Logical Replication and Downstream Delivery
+- [ ] define post-MVP product scope for `physical HA + managed logical replication`, including guarantees, non-goals, and failure model relative to core HA
+- [ ] define cluster/domain model for logical publications, downstream subscriptions, delivery pipelines, and per-sink status
+- [ ] add config/API model for managed logical replication pipelines, including publication selection, table filters, and sink credentials
+- [ ] implement PostgreSQL publication and logical replication slot orchestration for PACMAN-managed downstream delivery
+- [ ] implement failover-safe logical slot handling and readiness checks so planned switchover and failover preserve downstream continuity where PostgreSQL supports it
+- [ ] implement logical change-consumption worker with durable offsets/checkpoints and backpressure handling
+- [ ] implement Kafka sink for logical change delivery, including topic mapping, key selection, retry policy, and delivery state reporting
+- [ ] implement ClickHouse sink for logical change delivery, including table mapping, batching policy, idempotency/deduplication strategy, and delivery state reporting
+- [ ] implement topology reconciliation after promotion/rejoin so logical delivery resumes correctly after primary changes
+- [ ] add `testcontainers-go` integration coverage for PostgreSQL + Kafka + ClickHouse delivery pipelines, including failover/switchover continuity scenarios
 
 ---
 
