@@ -46,6 +46,13 @@ type Runner struct {
 	container testcontainers.Container
 }
 
+// ExecResult captures the exit status and combined command output from a
+// process executed inside a runner container.
+type ExecResult struct {
+	ExitCode int
+	Output   string
+}
+
 // Node represents a PACMAN node topology with PostgreSQL and pacmand containers on the same test network.
 type Node struct {
 	Name     string
@@ -262,8 +269,8 @@ func (r *Runner) Name() string {
 	return r.name
 }
 
-// RequireExec executes a command in the runner and fails the test if execution fails.
-func (r *Runner) RequireExec(t *testing.T, cmd ...string) string {
+// Exec executes a command in the runner and returns its exit status and output.
+func (r *Runner) Exec(t *testing.T, cmd ...string) ExecResult {
 	t.Helper()
 
 	exitCode, reader, err := r.container.Exec(r.ctx, cmd, tcexec.Multiplexed())
@@ -276,11 +283,23 @@ func (r *Runner) RequireExec(t *testing.T, cmd ...string) string {
 		t.Fatalf("read exec output for %q in %q: %v", strings.Join(cmd, " "), r.name, err)
 	}
 
-	if exitCode != 0 {
-		t.Fatalf("exec %q in %q returned %d: %s", strings.Join(cmd, " "), r.name, exitCode, string(output))
+	return ExecResult{
+		ExitCode: exitCode,
+		Output:   string(output),
+	}
+}
+
+// RequireExec executes a command in the runner and fails the test if execution fails.
+func (r *Runner) RequireExec(t *testing.T, cmd ...string) string {
+	t.Helper()
+
+	result := r.Exec(t, cmd...)
+
+	if result.ExitCode != 0 {
+		t.Fatalf("exec %q in %q returned %d: %s", strings.Join(cmd, " "), r.name, result.ExitCode, result.Output)
 	}
 
-	return string(output)
+	return result.Output
 }
 
 // NetworkAliases returns the Docker network alias map for the runner.

@@ -2,6 +2,7 @@ package pacmand
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -9,9 +10,12 @@ import (
 
 	"go.uber.org/dig"
 
+	"github.com/polkiloo/pacman/internal/agent"
 	"github.com/polkiloo/pacman/internal/config"
 	"github.com/polkiloo/pacman/internal/version"
 )
+
+var errConfigPathRequired = errors.New("pacmand config path is required")
 
 // App is the pacmand process entrypoint.
 type App struct {
@@ -38,7 +42,7 @@ func New(params Params) *App {
 	}
 }
 
-// Run parses process flags and starts the daemon scaffold.
+// Run parses process flags and starts the local agent daemon.
 func (a *App) Run(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("pacmand", flag.ContinueOnError)
 	fs.SetOutput(a.stderr)
@@ -59,22 +63,34 @@ func (a *App) Run(ctx context.Context, args []string) error {
 		return err
 	}
 
-	if *configPath != "" {
-		loadedConfig, err := config.Load(*configPath)
-		if err != nil {
-			return err
-		}
-
-		a.logger.InfoContext(
-			ctx,
-			"loaded node configuration",
-			slog.String("component", "config"),
-			slog.String("path", *configPath),
-			slog.String("node", loadedConfig.Node.Name),
-			slog.String("role", loadedConfig.Node.Role.String()),
-		)
+	if *configPath == "" {
+		return errConfigPathRequired
 	}
 
-	a.logger.InfoContext(ctx, "pacmand scaffold is not implemented yet", slog.String("component", "daemon"))
+	loadedConfig, err := config.Load(*configPath)
+	if err != nil {
+		return err
+	}
+
+	a.logger.InfoContext(
+		ctx,
+		"loaded node configuration",
+		slog.String("component", "config"),
+		slog.String("path", *configPath),
+		slog.String("node", loadedConfig.Node.Name),
+		slog.String("role", loadedConfig.Node.Role.String()),
+	)
+
+	daemon, err := agent.NewDaemon(loadedConfig, a.logger)
+	if err != nil {
+		return fmt.Errorf("construct local agent daemon: %w", err)
+	}
+
+	if err := daemon.Start(ctx); err != nil {
+		return fmt.Errorf("start local agent daemon: %w", err)
+	}
+
+	daemon.Wait()
+
 	return nil
 }

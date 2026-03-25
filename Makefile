@@ -14,6 +14,8 @@ COVERAGE_OUT ?= coverage.out
 COVERAGE_MIN ?= 80.0
 COVERAGE_PACKAGES ?= $(shell $(GO) list ./... | grep -v '/test/')
 PACMAN_TEST_IMAGE ?= pacman-test:local
+DOCKER_BUILD_PROGRESS ?= plain
+GO_TEST_INTEGRATION_FLAGS ?= -v
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -23,7 +25,7 @@ LDFLAGS := -X github.com/polkiloo/pacman/internal/version.Version=$(VERSION) \
 	-X github.com/polkiloo/pacman/internal/version.Commit=$(COMMIT) \
 	-X github.com/polkiloo/pacman/internal/version.BuildDate=$(BUILD_DATE)
 
-.PHONY: fmt test test-integration test-cluster docker-build-test-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl tidy clean
+.PHONY: fmt test test-integration docker-build-test-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl tidy clean
 
 fmt:
 	$(GO) fmt ./...
@@ -32,13 +34,10 @@ test:
 	$(GO) test ./...
 
 docker-build-test-image:
-	docker build -f test/docker/pacman-runner.Dockerfile -t $(PACMAN_TEST_IMAGE) .
+	docker build --progress=$(DOCKER_BUILD_PROGRESS) -f test/docker/pacman-runner.Dockerfile -t $(PACMAN_TEST_IMAGE) .
 
 test-integration: docker-build-test-image
-	PACMAN_TEST_IMAGE=$(PACMAN_TEST_IMAGE) $(GO) test -tags=integration ./test/...
-
-test-cluster: docker-build-test-image
-	PACMAN_TEST_IMAGE=$(PACMAN_TEST_IMAGE) $(GO) test -tags=integration ./test/integration -run TestPACMANClusterEnvironment
+	PACMAN_TEST_IMAGE=$(PACMAN_TEST_IMAGE) $(GO) test $(GO_TEST_INTEGRATION_FLAGS) -tags=integration ./test/...
 
 coverage:
 	$(GO) test -coverprofile=$(COVERAGE_OUT) $(COVERAGE_PACKAGES)

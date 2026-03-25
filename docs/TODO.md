@@ -56,21 +56,38 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ## 4. Local Agent
 
-- [ ] implement daemon startup
-- [ ] implement local heartbeat loop
-- [ ] detect PostgreSQL availability
-- [ ] detect current PostgreSQL role
-- [ ] detect recovery state
-- [ ] collect system identifier
-- [ ] collect timeline information
-- [ ] collect receive / replay / flush LSN
-- [ ] collect replication lag signals
-- [ ] collect local process health
-- [ ] publish observed state to control plane
+- [x] implement daemon startup
+- [x] implement local heartbeat loop
+- [x] detect PostgreSQL availability
+- [x] detect current PostgreSQL role
+- [x] detect recovery state
+- [x] collect system identifier
+- [x] collect timeline information
+- [x] collect receive / replay / flush LSN
+- [x] collect replication lag signals
+- [x] collect local process health
+- [x] publish observed state to control plane
 
 ---
 
-## 5. PostgreSQL Integration Layer
+## 5. PostgreSQL Background Worker Extension
+
+- [ ] define extension boundary between `pacmand` process mode and in-PostgreSQL background-worker mode
+- [ ] extract reusable local-agent core from `pacmand` so the extension stays a thin bootstrap layer
+- [ ] define extension name, on-disk layout, and PostgreSQL version support policy
+- [ ] scaffold PostgreSQL extension sources, `.control` file, and SQL install/upgrade scripts
+- [ ] implement background worker registration via `shared_preload_libraries`
+- [ ] define GUC-based configuration bridge from PostgreSQL settings to PACMAN node-runtime config
+- [ ] wire extension startup, shutdown, and restart handling to the shared PACMAN local-agent lifecycle
+- [ ] define logging, error propagation, and failure-isolation rules for the embedded worker
+- [ ] add dedicated build target for the PostgreSQL extension artifact separate from `pacmand`
+- [ ] add packaging/install flow for extension binaries, control files, and SQL assets
+- [ ] add `testcontainers-go` fixture/image variant with the extension installed and preloaded
+- [ ] add Docker-backed integration tests for extension startup, shutdown, invalid config, and local state observation
+
+---
+
+## 6. PostgreSQL Integration Layer
 
 - [ ] implement PostgreSQL connection layer
 - [ ] implement health queries
@@ -87,7 +104,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ---
 
-## 6. Control Plane
+## 7. Control Plane
 
 - [ ] implement member registration
 - [ ] implement member discovery
@@ -104,7 +121,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ---
 
-## 7. Failover Engine
+## 8. Failover Engine
 
 - [ ] define failover eligibility rules
 - [ ] define candidate ranking rules
@@ -118,7 +135,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ---
 
-## 8. Switchover Engine
+## 9. Switchover Engine
 
 - [ ] define switchover validation rules
 - [ ] validate target standby readiness
@@ -130,7 +147,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ---
 
-## 9. Rejoin Flow
+## 10. Rejoin Flow
 
 - [ ] detect former primary state
 - [ ] detect divergence requirements
@@ -143,7 +160,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ---
 
-## 10. API
+## 11. API
 
 ### Contract
 - [x] draft OpenAPI spec for control-plane API
@@ -172,7 +189,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ---
 
-## 11. CLI (`pacmanctl`)
+## 12. CLI (`pacmanctl`)
 
 - [ ] implement `cluster status`
 - [ ] implement `members list`
@@ -187,7 +204,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ---
 
-## 12. Security
+## 13. Security
 
 - [ ] add TLS for external endpoints
 - [ ] add mTLS between cluster members
@@ -198,7 +215,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ---
 
-## 13. Observability
+## 14. Observability
 
 - [ ] add Prometheus metrics
 - [ ] add health endpoints
@@ -209,7 +226,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ---
 
-## 14. Packaging and Operations
+## 15. Packaging and Operations
 
 - [ ] add systemd unit files
 - [ ] add example configs
@@ -221,7 +238,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ---
 
-## 15. Testing
+## 16. Testing
 
 ### Testcontainers Environment
 - [x] add Docker test image for `pacmand` and `pacmanctl` with PostgreSQL 17 client tools
@@ -282,7 +299,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [ ] add distributed-topology and MPP coverage inspired by Patroni `tests/test_citus.py` and `tests/test_mpp.py`
 ---
 
-## 16. Kubernetes-Native MVP
+## 17. Kubernetes-Native MVP
 
 This track captures the Kubernetes-native operator model described in [ARCHITECTURE_K8S.md](ARCHITECTURE_K8S.md).
 
@@ -384,6 +401,18 @@ This track captures the Kubernetes-native operator model described in [ARCHITECT
 - [ ] add standby-cluster / DR support
 - [ ] automate endpoint management
 - [ ] add web UI
+
+### Managed Logical Replication and Downstream Delivery
+- [ ] define post-MVP product scope for `physical HA + managed logical replication`, including guarantees, non-goals, and failure model relative to core HA
+- [ ] define cluster/domain model for logical publications, downstream subscriptions, delivery pipelines, and per-sink status
+- [ ] add config/API model for managed logical replication pipelines, including publication selection, table filters, and sink credentials
+- [ ] implement PostgreSQL publication and logical replication slot orchestration for PACMAN-managed downstream delivery
+- [ ] implement failover-safe logical slot handling and readiness checks so planned switchover and failover preserve downstream continuity where PostgreSQL supports it
+- [ ] implement logical change-consumption worker with durable offsets/checkpoints and backpressure handling
+- [ ] implement Kafka sink for logical change delivery, including topic mapping, key selection, retry policy, and delivery state reporting
+- [ ] implement ClickHouse sink for logical change delivery, including table mapping, batching policy, idempotency/deduplication strategy, and delivery state reporting
+- [ ] implement topology reconciliation after promotion/rejoin so logical delivery resumes correctly after primary changes
+- [ ] add `testcontainers-go` integration coverage for PostgreSQL + Kafka + ClickHouse delivery pipelines, including failover/switchover continuity scenarios
 
 ---
 

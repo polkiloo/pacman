@@ -1,14 +1,51 @@
 package main
 
 import (
+	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
-func TestRunReturnsSuccessForScaffold(t *testing.T) {
-	exitCode, stdout, stderr := runWithCapturedIO(t, nil)
+func TestRunReturnsErrorWhenConfigPathIsMissing(t *testing.T) {
+	exitCode, stdout, stderr := runWithCapturedIO(t, context.Background(), nil)
+
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d", exitCode)
+	}
+
+	if stdout != "" {
+		t.Fatalf("expected no stdout output, got %q", stdout)
+	}
+
+	assertContains(t, stderr, "pacmand config path is required")
+	assertContains(t, stderr, `"msg":"app run failed"`)
+}
+
+func TestRunReturnsSuccessForConfiguredDaemonStartup(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pacmand.yaml")
+	payload := `
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: alpha-1
+  role: data
+postgres:
+  dataDir: /var/lib/postgresql/data
+`
+
+	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	exitCode, stdout, stderr := runWithCapturedIO(t, ctx, []string{"-config", path})
 
 	if exitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d", exitCode)
@@ -18,12 +55,14 @@ func TestRunReturnsSuccessForScaffold(t *testing.T) {
 		t.Fatalf("expected no stdout output, got %q", stdout)
 	}
 
-	assertContains(t, stderr, `"msg":"pacmand scaffold is not implemented yet"`)
-	assertContains(t, stderr, `"service":"pacmand"`)
+	assertContains(t, stderr, `"msg":"started local agent daemon"`)
+	assertContains(t, stderr, `"msg":"observed PostgreSQL unavailability"`)
+	assertContains(t, stderr, `"msg":"published local state to control plane"`)
+	assertContains(t, stderr, `"postgres_up":false`)
 }
 
 func TestRunReturnsErrorForInvalidFlag(t *testing.T) {
-	exitCode, _, stderr := runWithCapturedIO(t, []string{"-invalid"})
+	exitCode, _, stderr := runWithCapturedIO(t, context.Background(), []string{"-invalid"})
 
 	if exitCode != 1 {
 		t.Fatalf("expected exit code 1, got %d", exitCode)
@@ -33,7 +72,7 @@ func TestRunReturnsErrorForInvalidFlag(t *testing.T) {
 	assertContains(t, stderr, `"msg":"app run failed"`)
 }
 
-func runWithCapturedIO(t *testing.T, args []string) (int, string, string) {
+func runWithCapturedIO(t *testing.T, ctx context.Context, args []string) (int, string, string) {
 	t.Helper()
 
 	stdoutR, stdoutW, err := os.Pipe()
@@ -60,7 +99,7 @@ func runWithCapturedIO(t *testing.T, args []string) (int, string, string) {
 		os.Stderr = oldStderr
 	}()
 
-	exitCode := run()
+	exitCode := runContext(ctx)
 
 	if err := stdoutW.Close(); err != nil {
 		t.Fatalf("close stdout writer: %v", err)
