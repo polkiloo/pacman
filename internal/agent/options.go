@@ -55,11 +55,3 @@ func withPostgresStateProbe(probe postgresStateProbe) Option {
 		}
 	}
 }
-
-func withProbeTimeout(timeout time.Duration) Option {
-	return func(daemon *Daemon) {
-		if timeout > 0 {
-			daemon.probeTimeout = timeout
-		}
-	}
-}
