@@ -188,8 +188,9 @@ func replaceOpenDB(t *testing.T, replacement func(string, string) (*sql.DB, erro
 }
 
 type probeTestResponse struct {
-	row []driver.Value
-	err error
+	columns []string
+	row     []driver.Value
+	err     error
 }
 
 var (
@@ -265,16 +266,22 @@ func (conn probeTestConn) QueryContext(context.Context, string, []driver.NamedVa
 	}
 
 	return &probeTestRows{
-		values: conn.response.row,
+		columns: conn.response.columns,
+		values:  conn.response.row,
 	}, nil
 }
 
 type probeTestRows struct {
-	sent   bool
-	values []driver.Value
+	sent    bool
+	columns []string
+	values  []driver.Value
 }
 
 func (rows *probeTestRows) Columns() []string {
+	if len(rows.columns) > 0 {
+		return rows.columns
+	}
+
 	return []string{
 		"in_recovery",
 		"server_version",

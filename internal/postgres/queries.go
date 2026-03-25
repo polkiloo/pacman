@@ -1,5 +1,9 @@
 package postgres
 
+const queryHealthSQL = `
+select current_setting('server_version_num')::integer
+`
+
 const queryObservationSQL = `
 with local as (
 	select

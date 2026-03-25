@@ -89,8 +89,8 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ## 6. PostgreSQL Integration Layer
 
-- [ ] implement PostgreSQL connection layer
-- [ ] implement health queries
+- [x] implement PostgreSQL connection layer
+- [x] implement health queries
 - [ ] implement role detection queries
 - [ ] implement recovery-state detection
 - [ ] implement system identifier lookup

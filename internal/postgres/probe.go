@@ -48,13 +48,19 @@ type WALProgress struct {
 // querying recovery state, system identifier, and timeline over a direct SQL
 // connection.
 func QueryObservation(ctx context.Context, address string) (Observation, error) {
-	db, err := openDB("postgres", connectionString(address))
+	client, err := Connect(address)
 	if err != nil {
 		return unknownObservation(), err
 	}
-	defer db.Close()
+	defer client.Close()
 
-	row, err := queryObservationRow(ctx, db)
+	return client.QueryObservation(ctx)
+}
+
+// QueryObservation determines the local PostgreSQL runtime observation through
+// the connected PostgreSQL client.
+func (client *Client) QueryObservation(ctx context.Context) (Observation, error) {
+	row, err := queryObservationRow(ctx, client.db)
 	if err != nil {
 		return unknownObservation(), err
 	}
