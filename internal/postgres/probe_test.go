@@ -34,6 +34,14 @@ func TestConnectionStringUsesDefaults(t *testing.T) {
 	}
 }
 
+func TestConnectionStringReturnsEmptyForInvalidAddress(t *testing.T) {
+	t.Parallel()
+
+	if got := connectionString("invalid-address"); got != "" {
+		t.Fatalf("expected empty connection string for invalid address, got %q", got)
+	}
+}
+
 func TestQueryObservationReturnsOpenError(t *testing.T) {
 	restore := replaceOpenDB(t, func(string, string) (*sql.DB, error) {
 		return nil, errors.New("open failed")

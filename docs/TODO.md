@@ -91,10 +91,10 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 - [x] implement PostgreSQL connection layer
 - [x] implement health queries
-- [ ] implement role detection queries
-- [ ] implement recovery-state detection
-- [ ] implement system identifier lookup
-- [ ] implement WAL progress queries
+- [x] implement role detection queries
+- [x] implement recovery-state detection
+- [x] implement system identifier lookup
+- [x] implement WAL progress queries
 - [ ] implement lag estimation
 - [ ] integrate with `pg_ctl`
 - [ ] integrate with `pg_rewind`
