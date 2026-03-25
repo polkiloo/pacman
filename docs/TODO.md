@@ -89,18 +89,18 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ## 6. PostgreSQL Integration Layer
 
-- [ ] implement PostgreSQL connection layer
-- [ ] implement health queries
-- [ ] implement role detection queries
-- [ ] implement recovery-state detection
-- [ ] implement system identifier lookup
-- [ ] implement WAL progress queries
-- [ ] implement lag estimation
-- [ ] integrate with `pg_ctl`
-- [ ] integrate with `pg_rewind`
-- [ ] implement local standby configuration rendering
-- [ ] implement promote action
-- [ ] implement restart / reload handling
+- [x] implement PostgreSQL connection layer
+- [x] implement health queries
+- [x] implement role detection queries
+- [x] implement recovery-state detection
+- [x] implement system identifier lookup
+- [x] implement WAL progress queries
+- [x] implement lag estimation
+- [x] integrate with `pg_ctl`
+- [x] integrate with `pg_rewind`
+- [x] implement local standby configuration rendering
+- [x] implement promote action
+- [x] implement restart / reload handling
 
 ---
 
@@ -401,6 +401,30 @@ This track captures the Kubernetes-native operator model described in [ARCHITECT
 - [ ] add standby-cluster / DR support
 - [ ] automate endpoint management
 - [ ] add web UI
+
+### Cascading Replication
+- [ ] define post-MVP product scope and safety rules for cascading replication, including when PACMAN may prefer direct vs cascaded upstreams
+- [ ] extend the domain model with explicit replication upstream metadata so a replica can stream either from the current primary or from another replica
+- [ ] extend config and API surfaces to declare cascade-eligible members, preferred upstreams, and topology constraints for WAN / AZ-aware layouts
+- [ ] teach the local standby renderer to emit upstream-specific `primary_conninfo`, slot naming, and reconfiguration artifacts for cascade chains
+- [ ] collect upstream identity and cascade health signals from local agents so control-plane decisions can see who each replica is following
+- [ ] add topology validation rules that reject unsafe cascade graphs such as loops, disconnected branches, or chains that violate failover policy
+- [ ] teach reconciliation to rewire cascaded replicas after switchover and failover so replicas move to the correct new upstream automatically
+- [ ] extend failover candidate ranking to account for cascade depth, upstream health, and lag amplification across the replication tree
+- [ ] define slot and retention policy for cascaded replicas so WAL retention remains sufficient for downstream branches during outages
+- [ ] add `testcontainers-go` integration coverage for primary -> replica -> replica topologies, including upstream loss, promotion, and topology rewire scenarios
+
+### Multiple Replicas and Topology Policies
+- [ ] define the post-MVP product scope for clusters with many replicas, including supported replica counts, placement assumptions, and operator guarantees
+- [ ] extend the domain model with per-replica priority, availability-zone / location metadata, and promotion constraints used by failover ranking
+- [ ] add config and API support for replica tags such as `no_failover`, `no_sync`, `preferred_candidate`, and read-only routing hints
+- [ ] implement control-plane aggregation that maintains a cluster-wide replica set view with lag, timeline, replay progress, and health per replica
+- [ ] define candidate-ranking rules for many-replica clusters so failover prefers the safest and most current replica rather than a simple first-ready member
+- [ ] implement dynamic synchronous-standby selection policies for clusters with multiple replicas and changing health / lag conditions
+- [ ] add replication-slot and sender management rules for many-replica topologies so the primary can track and protect all attached standbys safely
+- [ ] implement reconciliation for adding, removing, and replacing replicas without destabilizing the current primary or existing healthy replicas
+- [ ] add API and CLI views that expose the full ordered replica set, promotion eligibility, and current upstream / sync state for each member
+- [ ] add `testcontainers-go` integration coverage for clusters with 3+ replicas, including direct-replication fanout, replica replacement, sync-standby rotation, and candidate ranking scenarios
 
 ### Managed Logical Replication and Downstream Delivery
 - [ ] define post-MVP product scope for `physical HA + managed logical replication`, including guarantees, non-goals, and failure model relative to core HA
