@@ -72,6 +72,41 @@ func (ctl PGCtl) Status(ctx context.Context) (bool, error) {
 	return false, wrapCommandError("query postgres status via pg_ctl", result, err)
 }
 
+// Promote waits for PostgreSQL to finish promotion through pg_ctl.
+func (ctl PGCtl) Promote(ctx context.Context) error {
+	result, err := ctl.run(ctx, "promote", "-w")
+	if err != nil {
+		return wrapCommandError("promote postgres via pg_ctl", result, err)
+	}
+
+	return nil
+}
+
+// Reload requests PostgreSQL to reload its configuration through pg_ctl.
+func (ctl PGCtl) Reload(ctx context.Context) error {
+	result, err := ctl.run(ctx, "reload")
+	if err != nil {
+		return wrapCommandError("reload postgres via pg_ctl", result, err)
+	}
+
+	return nil
+}
+
+// Restart waits for PostgreSQL to restart through pg_ctl using the provided
+// shutdown mode.
+func (ctl PGCtl) Restart(ctx context.Context, mode ShutdownMode) error {
+	if !mode.IsValid() {
+		return ErrShutdownModeInvalid
+	}
+
+	result, err := ctl.run(ctx, "restart", "-w", "-m", string(mode))
+	if err != nil {
+		return wrapCommandError("restart postgres via pg_ctl", result, err)
+	}
+
+	return nil
+}
+
 func (ctl PGCtl) run(ctx context.Context, action string, extraArgs ...string) (commandResult, error) {
 	args, err := ctl.commandArgs(action, extraArgs...)
 	if err != nil {

@@ -147,3 +147,138 @@ func TestPGCtlStatusWrapsUnexpectedError(t *testing.T) {
 		t.Fatalf("unexpected wrapped error: %v", err)
 	}
 }
+
+func TestPGCtlPromoteRunsExpectedCommand(t *testing.T) {
+	t.Parallel()
+
+	var gotArgs []string
+	ctl := PGCtl{
+		DataDir: "/srv/postgres",
+		runner: func(_ context.Context, _ string, args ...string) (commandResult, error) {
+			gotArgs = append([]string(nil), args...)
+			return commandResult{}, nil
+		},
+	}
+
+	if err := ctl.Promote(context.Background()); err != nil {
+		t.Fatalf("promote postgres: %v", err)
+	}
+
+	wantArgs := []string{"promote", "-D", "/srv/postgres", "-w"}
+	if !slices.Equal(gotArgs, wantArgs) {
+		t.Fatalf("unexpected args: got %v, want %v", gotArgs, wantArgs)
+	}
+}
+
+func TestPGCtlPromoteWrapsCommandError(t *testing.T) {
+	t.Parallel()
+
+	ctl := PGCtl{
+		DataDir: "/srv/postgres",
+		runner: func(_ context.Context, _ string, _ ...string) (commandResult, error) {
+			return commandResult{output: "promotion failed", exitCode: 1}, errors.New("exit status 1")
+		},
+	}
+
+	err := ctl.Promote(context.Background())
+	if err == nil {
+		t.Fatal("expected promote error")
+	}
+
+	if !strings.Contains(err.Error(), "promotion failed") {
+		t.Fatalf("unexpected wrapped error: %v", err)
+	}
+}
+
+func TestPGCtlReloadRunsExpectedCommand(t *testing.T) {
+	t.Parallel()
+
+	var gotArgs []string
+	ctl := PGCtl{
+		DataDir: "/srv/postgres",
+		runner: func(_ context.Context, _ string, args ...string) (commandResult, error) {
+			gotArgs = append([]string(nil), args...)
+			return commandResult{}, nil
+		},
+	}
+
+	if err := ctl.Reload(context.Background()); err != nil {
+		t.Fatalf("reload postgres: %v", err)
+	}
+
+	wantArgs := []string{"reload", "-D", "/srv/postgres"}
+	if !slices.Equal(gotArgs, wantArgs) {
+		t.Fatalf("unexpected args: got %v, want %v", gotArgs, wantArgs)
+	}
+}
+
+func TestPGCtlReloadWrapsCommandError(t *testing.T) {
+	t.Parallel()
+
+	ctl := PGCtl{
+		DataDir: "/srv/postgres",
+		runner: func(_ context.Context, _ string, _ ...string) (commandResult, error) {
+			return commandResult{output: "reload failed", exitCode: 1}, errors.New("exit status 1")
+		},
+	}
+
+	err := ctl.Reload(context.Background())
+	if err == nil {
+		t.Fatal("expected reload error")
+	}
+
+	if !strings.Contains(err.Error(), "reload failed") {
+		t.Fatalf("unexpected wrapped error: %v", err)
+	}
+}
+
+func TestPGCtlRestartRunsExpectedCommand(t *testing.T) {
+	t.Parallel()
+
+	var gotArgs []string
+	ctl := PGCtl{
+		DataDir: "/srv/postgres",
+		runner: func(_ context.Context, _ string, args ...string) (commandResult, error) {
+			gotArgs = append([]string(nil), args...)
+			return commandResult{}, nil
+		},
+	}
+
+	if err := ctl.Restart(context.Background(), ShutdownModeFast); err != nil {
+		t.Fatalf("restart postgres: %v", err)
+	}
+
+	wantArgs := []string{"restart", "-D", "/srv/postgres", "-w", "-m", "fast"}
+	if !slices.Equal(gotArgs, wantArgs) {
+		t.Fatalf("unexpected args: got %v, want %v", gotArgs, wantArgs)
+	}
+}
+
+func TestPGCtlRestartRejectsInvalidMode(t *testing.T) {
+	t.Parallel()
+
+	err := (PGCtl{DataDir: "/srv/postgres"}).Restart(context.Background(), "broken")
+	if !errors.Is(err, ErrShutdownModeInvalid) {
+		t.Fatalf("expected invalid shutdown mode error, got %v", err)
+	}
+}
+
+func TestPGCtlRestartWrapsCommandError(t *testing.T) {
+	t.Parallel()
+
+	ctl := PGCtl{
+		DataDir: "/srv/postgres",
+		runner: func(_ context.Context, _ string, _ ...string) (commandResult, error) {
+			return commandResult{output: "restart failed", exitCode: 1}, errors.New("exit status 1")
+		},
+	}
+
+	err := ctl.Restart(context.Background(), ShutdownModeFast)
+	if err == nil {
+		t.Fatal("expected restart error")
+	}
+
+	if !strings.Contains(err.Error(), "restart failed") {
+		t.Fatalf("unexpected wrapped error: %v", err)
+	}
+}

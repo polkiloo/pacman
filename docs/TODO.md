@@ -99,8 +99,8 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] integrate with `pg_ctl`
 - [x] integrate with `pg_rewind`
 - [x] implement local standby configuration rendering
-- [ ] implement promote action
-- [ ] implement restart / reload handling
+- [x] implement promote action
+- [x] implement restart / reload handling
 
 ---
 
