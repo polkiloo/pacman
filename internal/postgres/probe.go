@@ -14,6 +14,8 @@ import (
 	"github.com/polkiloo/pacman/internal/cluster"
 )
 
+var openDB = sql.Open
+
 // Observation describes the latest PostgreSQL state collected from a direct
 // SQL connection.
 type Observation struct {
@@ -46,7 +48,7 @@ type WALProgress struct {
 // querying recovery state, system identifier, and timeline over a direct SQL
 // connection.
 func QueryObservation(ctx context.Context, address string) (Observation, error) {
-	db, err := sql.Open("postgres", connectionString(address))
+	db, err := openDB("postgres", connectionString(address))
 	if err != nil {
 		return unknownObservation(), err
 	}
