@@ -490,7 +490,6 @@ func TestDaemonPublishesNodeStatusToControlPlane(t *testing.T) {
 	t.Parallel()
 
 	store := controlplane.NewMemoryStateStore()
-	store.SetLeader(true)
 
 	daemon, err := NewDaemon(
 		validDataConfig(),
@@ -538,6 +537,15 @@ func TestDaemonPublishesNodeStatusToControlPlane(t *testing.T) {
 
 	if registration.ControlAddress != config.DefaultControlAddress {
 		t.Fatalf("unexpected registered control address: got %q", registration.ControlAddress)
+	}
+
+	leader, ok := store.Leader()
+	if !ok {
+		t.Fatal("expected elected control-plane leader")
+	}
+
+	if leader.LeaderNode != "alpha-1" {
+		t.Fatalf("unexpected control-plane leader: got %+v", leader)
 	}
 
 	status, ok := store.NodeStatus("alpha-1")
