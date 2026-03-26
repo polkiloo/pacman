@@ -106,8 +106,8 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ## 7. Control Plane
 
-- [ ] implement member registration
-- [ ] implement member discovery
+- [x] implement member registration
+- [x] implement member discovery
 - [ ] implement control-plane leader election
 - [ ] implement logical replicated state store
 - [ ] implement cluster source of truth model

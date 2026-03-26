@@ -527,6 +527,19 @@ func TestDaemonPublishesNodeStatusToControlPlane(t *testing.T) {
 		t.Fatalf("start daemon: %v", err)
 	}
 
+	registration, ok := store.RegisteredMember("alpha-1")
+	if !ok {
+		t.Fatal("expected registered member")
+	}
+
+	if registration.APIAddress != config.DefaultAPIAddress {
+		t.Fatalf("unexpected registered api address: got %q", registration.APIAddress)
+	}
+
+	if registration.ControlAddress != config.DefaultControlAddress {
+		t.Fatalf("unexpected registered control address: got %q", registration.ControlAddress)
+	}
+
 	status, ok := store.NodeStatus("alpha-1")
 	if !ok {
 		t.Fatal("expected published node status")
@@ -550,6 +563,19 @@ func TestDaemonPublishesNodeStatusToControlPlane(t *testing.T) {
 
 	if status.Postgres.WAL.FlushLSN != "0/4000200" {
 		t.Fatalf("unexpected published flush lsn: got %q", status.Postgres.WAL.FlushLSN)
+	}
+
+	member, ok := store.Member("alpha-1")
+	if !ok {
+		t.Fatal("expected discovered member")
+	}
+
+	if member.APIURL != "http://0.0.0.0:8080" {
+		t.Fatalf("unexpected discovered api url: got %q", member.APIURL)
+	}
+
+	if !member.Healthy {
+		t.Fatalf("expected discovered member to be healthy, got %+v", member)
 	}
 
 	cancel()
