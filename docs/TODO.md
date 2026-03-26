@@ -112,10 +112,10 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] implement logical replicated state store
 - [x] implement cluster source of truth model
 - [x] implement desired state storage
-- [ ] implement observed state aggregation
-- [ ] implement desired vs observed reconciliation
-- [ ] implement maintenance mode
-- [ ] implement operation journal
+- [x] implement observed state aggregation
+- [x] implement desired vs observed reconciliation
+- [x] implement maintenance mode
+- [x] implement operation journal
 - [ ] implement member priorities
 - [ ] implement no-failover tags
 

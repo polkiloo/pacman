@@ -726,8 +726,12 @@ func TestMemoryStateStoreStoresDesiredStateAndSourceOfTruth(t *testing.T) {
 		t.Fatalf("validate source of truth: %v", err)
 	}
 
-	if truth.Desired == nil || truth.Observed != nil {
+	if truth.Desired == nil || truth.Observed == nil {
 		t.Fatalf("unexpected source of truth snapshot: %+v", truth)
+	}
+
+	if truth.Observed.Phase != cluster.ClusterPhaseInitializing {
+		t.Fatalf("expected observed cluster state to initialize from desired state, got %+v", truth.Observed)
 	}
 
 	if !truth.UpdatedAt.Equal(updatedAt) {

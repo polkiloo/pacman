@@ -20,15 +20,19 @@ type NodeStatePublisher interface {
 // MemoryStateStore is an in-memory replicated control-plane state store used
 // until the distributed source of truth is implemented.
 type MemoryStateStore struct {
-	mu            sync.RWMutex
-	registrations map[string]MemberRegistration
-	nodeStatuses  map[string]agentmodel.NodeStatus
-	clusterSpec   *cluster.ClusterSpec
-	leaderLease   LeaderLease
-	now           func() time.Time
-	leaseDuration time.Duration
-	sourceUpdated time.Time
-	lastDCSSeenAt time.Time
+	mu              sync.RWMutex
+	registrations   map[string]MemberRegistration
+	nodeStatuses    map[string]agentmodel.NodeStatus
+	clusterSpec     *cluster.ClusterSpec
+	clusterStatus   *cluster.ClusterStatus
+	maintenance     cluster.MaintenanceModeStatus
+	activeOperation *cluster.Operation
+	history         []cluster.HistoryEntry
+	leaderLease     LeaderLease
+	now             func() time.Time
+	leaseDuration   time.Duration
+	sourceUpdated   time.Time
+	lastDCSSeenAt   time.Time
 }
 
 // NewMemoryStateStore constructs an in-memory replicated control-plane store.
@@ -136,6 +140,7 @@ func (store *MemoryStateStore) PublishNodeStatus(ctx context.Context, status age
 	published.LastDCSSeenAt = store.lastDCSSeenAt
 	cloned.ControlPlane = published
 	store.nodeStatuses[cloned.NodeName] = cloned
+	store.refreshSourceOfTruthLocked(cloned.ObservedAt.UTC())
 	store.mu.Unlock()
 
 	return published, nil
@@ -199,21 +204,13 @@ func (store *MemoryStateStore) StoreClusterSpec(ctx context.Context, spec cluste
 		return cluster.ClusterSpec{}, err
 	}
 
+	now := store.now().UTC()
+
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	if store.clusterSpec != nil {
-		current := store.clusterSpec.Clone()
-		switch {
-		case sameClusterSpecIgnoringGeneration(current, cloned):
-			cloned.Generation = current.Generation
-		case cloned.Generation <= current.Generation:
-			cloned.Generation = current.Generation + 1
-		}
-	}
-
-	store.clusterSpec = &cloned
-	store.sourceUpdated = store.now().UTC()
+	cloned = store.storeClusterSpecLocked(cloned)
+	store.refreshSourceOfTruthLocked(now)
 
 	return cloned.Clone(), nil
 }
@@ -254,16 +251,7 @@ func (store *MemoryStateStore) SourceOfTruth() ClusterSourceOfTruth {
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 
-	truth := ClusterSourceOfTruth{
-		UpdatedAt: store.sourceUpdated,
-	}
-
-	if store.clusterSpec != nil {
-		desired := store.clusterSpec.Clone()
-		truth.Desired = &desired
-	}
-
-	return truth.Clone()
+	return store.sourceOfTruthLocked()
 }
 
 // Member returns the discovered cluster member view for the given node.
@@ -284,28 +272,7 @@ func (store *MemoryStateStore) Members() []cluster.MemberStatus {
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 
-	nodeNames := make(map[string]struct{}, len(store.registrations)+len(store.nodeStatuses))
-	for nodeName := range store.registrations {
-		nodeNames[nodeName] = struct{}{}
-	}
-
-	for nodeName := range store.nodeStatuses {
-		nodeNames[nodeName] = struct{}{}
-	}
-
-	members := make([]cluster.MemberStatus, 0, len(nodeNames))
-	for nodeName := range nodeNames {
-		member, ok := store.memberLocked(nodeName)
-		if ok {
-			members = append(members, member.Clone())
-		}
-	}
-
-	sort.Slice(members, func(left, right int) bool {
-		return members[left].Name < members[right].Name
-	})
-
-	return members
+	return store.membersLocked()
 }
 
 // MarkDCSSeen records the last time the control-plane storage was observed.

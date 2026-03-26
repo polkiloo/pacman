@@ -15,6 +15,33 @@ type DesiredStateStore interface {
 	StoreClusterSpec(context.Context, cluster.ClusterSpec) (cluster.ClusterSpec, error)
 }
 
+// ObservedStateStore exposes the aggregated cluster-wide observed state derived
+// from registered members and published node observations.
+type ObservedStateStore interface {
+	ClusterStatus() (cluster.ClusterStatus, bool)
+}
+
+// Reconciler compares desired and observed state and refreshes the current
+// control-plane source of truth snapshot.
+type Reconciler interface {
+	Reconcile(context.Context) (ClusterSourceOfTruth, error)
+}
+
+// MaintenanceStore exposes the effective maintenance mode tracked by the
+// control plane and accepts maintenance mode changes.
+type MaintenanceStore interface {
+	MaintenanceStatus() cluster.MaintenanceModeStatus
+	UpdateMaintenanceMode(context.Context, cluster.MaintenanceModeUpdateRequest) (cluster.MaintenanceModeStatus, error)
+}
+
+// OperationJournal exposes the active cluster operation and the finished
+// operation history recorded by the control plane.
+type OperationJournal interface {
+	ActiveOperation() (cluster.Operation, bool)
+	History() []cluster.HistoryEntry
+	JournalOperation(context.Context, cluster.Operation) (cluster.Operation, error)
+}
+
 // SourceOfTruthStore exposes the cluster-wide source of truth snapshot stored
 // in the control plane.
 type SourceOfTruthStore interface {
@@ -29,6 +56,10 @@ type ReplicatedStateStore interface {
 	MemberDiscovery
 	LeaderElector
 	DesiredStateStore
+	ObservedStateStore
+	Reconciler
+	MaintenanceStore
+	OperationJournal
 	SourceOfTruthStore
 }
 
