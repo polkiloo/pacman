@@ -579,6 +579,187 @@ func TestMemoryStateStoreMembersMergeRegistrationAndObservation(t *testing.T) {
 	}
 }
 
+func TestMemoryStateStoreMemberAppliesDesiredPriorityNoFailoverAndTags(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStateStore()
+	observedAt := time.Date(2026, time.March, 24, 9, 0, 0, 0, time.UTC)
+
+	if _, err := store.StoreClusterSpec(context.Background(), cluster.ClusterSpec{
+		ClusterName: "alpha",
+		Members: []cluster.MemberSpec{
+			{
+				Name:       "alpha-1",
+				Priority:   100,
+				NoFailover: true,
+				Tags: map[string]any{
+					"zone": "desired-a",
+					"rack": "r1",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("store cluster spec: %v", err)
+	}
+
+	if err := store.RegisterMember(context.Background(), MemberRegistration{
+		NodeName:       "alpha-1",
+		NodeRole:       cluster.NodeRoleData,
+		APIAddress:     "10.0.0.10:8080",
+		ControlAddress: "10.0.0.10:9090",
+		RegisteredAt:   observedAt.Add(-time.Minute),
+	}); err != nil {
+		t.Fatalf("register member: %v", err)
+	}
+
+	if _, err := store.PublishNodeStatus(context.Background(), agentmodel.NodeStatus{
+		NodeName: "alpha-1",
+		Role:     cluster.MemberRoleReplica,
+		State:    cluster.MemberStateStreaming,
+		Tags: map[string]any{
+			"zone": "observed-a",
+			"az":   "1a",
+		},
+		Postgres: agentmodel.PostgresStatus{
+			Managed: true,
+			Up:      true,
+		},
+		ObservedAt: observedAt,
+	}); err != nil {
+		t.Fatalf("publish node status: %v", err)
+	}
+
+	member, ok := store.Member("alpha-1")
+	if !ok {
+		t.Fatal("expected effective member")
+	}
+
+	if member.Priority != 100 {
+		t.Fatalf("unexpected effective member priority: got %d", member.Priority)
+	}
+
+	if !member.NoFailover {
+		t.Fatalf("expected effective member no-failover flag, got %+v", member)
+	}
+
+	if member.Tags["zone"] != "desired-a" {
+		t.Fatalf("expected desired tags to win on conflict, got %+v", member.Tags)
+	}
+
+	if member.Tags["rack"] != "r1" || member.Tags["az"] != "1a" {
+		t.Fatalf("expected desired and observed tags to merge, got %+v", member.Tags)
+	}
+
+	member.Tags["rack"] = "mutated"
+
+	stored, ok := store.Member("alpha-1")
+	if !ok {
+		t.Fatal("expected stored effective member")
+	}
+
+	if stored.Tags["rack"] != "r1" {
+		t.Fatalf("expected effective member tags to be detached, got %+v", stored.Tags)
+	}
+}
+
+func TestMemoryStateStoreMemberAppliesDesiredPolicyWithoutObservation(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStateStore()
+	registeredAt := time.Date(2026, time.March, 24, 9, 30, 0, 0, time.UTC)
+
+	if _, err := store.StoreClusterSpec(context.Background(), cluster.ClusterSpec{
+		ClusterName: "alpha",
+		Members: []cluster.MemberSpec{
+			{
+				Name:       "alpha-3",
+				Priority:   50,
+				NoFailover: true,
+				Tags: map[string]any{
+					"zone": "witness",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("store cluster spec: %v", err)
+	}
+
+	if err := store.RegisterMember(context.Background(), MemberRegistration{
+		NodeName:       "alpha-3",
+		NodeRole:       cluster.NodeRoleWitness,
+		APIAddress:     "10.0.0.30:8080",
+		ControlAddress: "10.0.0.30:9090",
+		RegisteredAt:   registeredAt,
+	}); err != nil {
+		t.Fatalf("register member: %v", err)
+	}
+
+	member, ok := store.Member("alpha-3")
+	if !ok {
+		t.Fatal("expected member view")
+	}
+
+	if member.Priority != 50 || !member.NoFailover {
+		t.Fatalf("expected desired policy to apply without observation, got %+v", member)
+	}
+
+	if member.Tags["zone"] != "witness" {
+		t.Fatalf("expected desired tags without observation, got %+v", member.Tags)
+	}
+}
+
+func TestMemoryStateStoreMemberLeavesObservedPolicyWhenSpecDoesNotMatch(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStateStore()
+	observedAt := time.Date(2026, time.March, 24, 9, 45, 0, 0, time.UTC)
+
+	if _, err := store.StoreClusterSpec(context.Background(), cluster.ClusterSpec{
+		ClusterName: "alpha",
+		Members: []cluster.MemberSpec{
+			{
+				Name:       "alpha-2",
+				Priority:   100,
+				NoFailover: true,
+				Tags: map[string]any{
+					"zone": "desired-b",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("store cluster spec: %v", err)
+	}
+
+	if _, err := store.PublishNodeStatus(context.Background(), agentmodel.NodeStatus{
+		NodeName: "alpha-1",
+		Role:     cluster.MemberRoleReplica,
+		State:    cluster.MemberStateStreaming,
+		Tags: map[string]any{
+			"zone": "observed-a",
+		},
+		Postgres: agentmodel.PostgresStatus{
+			Managed: true,
+			Up:      true,
+		},
+		ObservedAt: observedAt,
+	}); err != nil {
+		t.Fatalf("publish node status: %v", err)
+	}
+
+	member, ok := store.Member("alpha-1")
+	if !ok {
+		t.Fatal("expected member view")
+	}
+
+	if member.Priority != 0 || member.NoFailover {
+		t.Fatalf("expected unrelated desired policy to be ignored, got %+v", member)
+	}
+
+	if member.Tags["zone"] != "observed-a" {
+		t.Fatalf("expected observed tags to remain unchanged, got %+v", member.Tags)
+	}
+}
+
 func TestMemoryStateStoreMembersReturnsSortedViewsAcrossRegisteredAndObservedNodes(t *testing.T) {
 	t.Parallel()
 

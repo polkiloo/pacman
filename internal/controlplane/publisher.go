@@ -305,6 +305,10 @@ func (store *MemoryStateStore) memberLocked(nodeName string) (cluster.MemberStat
 		member = mergeObservedMember(member, observation.Clone())
 	}
 
+	if spec, ok := store.memberSpecLocked(nodeName); ok {
+		member = mergeDesiredMemberPolicy(member, spec)
+	}
+
 	if member.Role == "" {
 		member.Role = cluster.MemberRoleUnknown
 	}
@@ -343,6 +347,14 @@ func mergeObservedMember(member cluster.MemberStatus, observation agentmodel.Nod
 	return member
 }
 
+func mergeDesiredMemberPolicy(member cluster.MemberStatus, spec cluster.MemberSpec) cluster.MemberStatus {
+	member.Priority = spec.Priority
+	member.NoFailover = spec.NoFailover
+	member.Tags = mergeMemberTags(member.Tags, spec.Tags)
+
+	return member
+}
+
 func observedMemberHealthy(observation agentmodel.NodeStatus) bool {
 	switch observation.State {
 	case cluster.MemberStateRunning, cluster.MemberStateStreaming:
@@ -359,6 +371,37 @@ func observedMemberHealthy(observation agentmodel.NodeStatus) bool {
 	}
 
 	return true
+}
+
+func (store *MemoryStateStore) memberSpecLocked(nodeName string) (cluster.MemberSpec, bool) {
+	if store.clusterSpec == nil {
+		return cluster.MemberSpec{}, false
+	}
+
+	for _, member := range store.clusterSpec.Members {
+		if member.Name == nodeName {
+			return member.Clone(), true
+		}
+	}
+
+	return cluster.MemberSpec{}, false
+}
+
+func mergeMemberTags(observed, desired map[string]any) map[string]any {
+	if observed == nil && desired == nil {
+		return nil
+	}
+
+	merged := make(map[string]any, len(observed)+len(desired))
+	for key, value := range observed {
+		merged[key] = value
+	}
+
+	for key, value := range desired {
+		merged[key] = value
+	}
+
+	return merged
 }
 
 func sameClusterSpecIgnoringGeneration(left, right cluster.ClusterSpec) bool {

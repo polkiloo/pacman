@@ -116,8 +116,8 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] implement desired vs observed reconciliation
 - [x] implement maintenance mode
 - [x] implement operation journal
-- [ ] implement member priorities
-- [ ] implement no-failover tags
+- [x] implement member priorities
+- [x] implement no-failover tags
 
 ---
 

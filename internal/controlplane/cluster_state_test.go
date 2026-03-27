@@ -42,8 +42,21 @@ func TestMemoryStateStoreAggregatesObservedClusterStatus(t *testing.T) {
 	if _, err := store.StoreClusterSpec(context.Background(), cluster.ClusterSpec{
 		ClusterName: "alpha",
 		Members: []cluster.MemberSpec{
-			{Name: "alpha-1"},
-			{Name: "alpha-2"},
+			{
+				Name:       "alpha-1",
+				Priority:   100,
+				NoFailover: true,
+				Tags: map[string]any{
+					"zone": "desired-a",
+				},
+			},
+			{
+				Name:     "alpha-2",
+				Priority: 20,
+				Tags: map[string]any{
+					"zone": "desired-b",
+				},
+			},
 		},
 	}); err != nil {
 		t.Fatalf("store cluster spec: %v", err)
@@ -139,8 +152,20 @@ func TestMemoryStateStoreAggregatesObservedClusterStatus(t *testing.T) {
 		t.Fatalf("expected healthy primary leader, got %+v", status.Members[0])
 	}
 
+	if status.Members[0].Priority != 100 || !status.Members[0].NoFailover {
+		t.Fatalf("expected desired member policy on primary, got %+v", status.Members[0])
+	}
+
+	if status.Members[0].Tags["zone"] != "desired-a" {
+		t.Fatalf("expected desired tag policy on primary, got %+v", status.Members[0].Tags)
+	}
+
 	if status.Members[1].LagBytes != 128 {
 		t.Fatalf("unexpected replica lag bytes: got %d", status.Members[1].LagBytes)
+	}
+
+	if status.Members[1].Priority != 20 || status.Members[1].NoFailover {
+		t.Fatalf("expected desired member policy on replica, got %+v", status.Members[1])
 	}
 
 	truth := store.SourceOfTruth()
