@@ -106,18 +106,18 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ## 7. Control Plane
 
-- [ ] implement member registration
-- [ ] implement member discovery
-- [ ] implement control-plane leader election
-- [ ] implement logical replicated state store
-- [ ] implement cluster source of truth model
-- [ ] implement desired state storage
-- [ ] implement observed state aggregation
-- [ ] implement desired vs observed reconciliation
-- [ ] implement maintenance mode
-- [ ] implement operation journal
-- [ ] implement member priorities
-- [ ] implement no-failover tags
+- [x] implement member registration
+- [x] implement member discovery
+- [x] implement control-plane leader election
+- [x] implement logical replicated state store
+- [x] implement cluster source of truth model
+- [x] implement desired state storage
+- [x] implement observed state aggregation
+- [x] implement desired vs observed reconciliation
+- [x] implement maintenance mode
+- [x] implement operation journal
+- [x] implement member priorities
+- [x] implement no-failover tags
 
 ---
 

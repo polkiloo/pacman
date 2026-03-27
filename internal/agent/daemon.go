@@ -85,6 +85,7 @@ func (daemon *Daemon) Start(ctx context.Context) error {
 	}
 
 	daemon.logStartup(ctx, startup)
+	daemon.registerMember(ctx, startup)
 	daemon.recordHeartbeat(ctx)
 	go daemon.runHeartbeatLoop(ctx)
 
@@ -120,6 +121,45 @@ func (daemon *Daemon) logStartup(ctx context.Context, startup agentmodel.Startup
 		slog.String("node", startup.NodeName),
 		slog.String("role", startup.NodeRole.String()),
 		slog.Bool("manages_postgres", startup.ManagesPostgres),
+		slog.String("api_address", startup.APIAddress),
+		slog.String("control_address", startup.ControlAddress),
+	)
+}
+
+func (daemon *Daemon) registerMember(ctx context.Context, startup agentmodel.Startup) {
+	registrar, ok := daemon.statePublisher.(controlplane.MemberRegistrar)
+	if !ok {
+		return
+	}
+
+	registration := controlplane.MemberRegistration{
+		NodeName:       startup.NodeName,
+		NodeRole:       startup.NodeRole,
+		APIAddress:     startup.APIAddress,
+		ControlAddress: startup.ControlAddress,
+		RegisteredAt:   startup.StartedAt,
+	}
+
+	if err := registrar.RegisterMember(ctx, registration); err != nil {
+		daemon.logger.WarnContext(
+			ctx,
+			"failed to register local member in control plane",
+			slog.String("component", "controlplane"),
+			slog.String("node", startup.NodeName),
+			slog.String("role", startup.NodeRole.String()),
+			slog.String("api_address", startup.APIAddress),
+			slog.String("control_address", startup.ControlAddress),
+			slog.String("register_error", err.Error()),
+		)
+		return
+	}
+
+	daemon.logger.InfoContext(
+		ctx,
+		"registered local member in control plane",
+		slog.String("component", "controlplane"),
+		slog.String("node", startup.NodeName),
+		slog.String("role", startup.NodeRole.String()),
 		slog.String("api_address", startup.APIAddress),
 		slog.String("control_address", startup.ControlAddress),
 	)

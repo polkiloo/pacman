@@ -7,6 +7,7 @@ import (
 
 	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
 	"github.com/polkiloo/pacman/internal/cluster"
+	"github.com/polkiloo/pacman/internal/controlplane"
 )
 
 func (daemon *Daemon) buildNodeStatus(observedAt time.Time, postgres agentmodel.PostgresStatus) agentmodel.NodeStatus {
@@ -23,6 +24,8 @@ func (daemon *Daemon) buildNodeStatus(observedAt time.Time, postgres agentmodel.
 }
 
 func (daemon *Daemon) publishNodeStatus(ctx context.Context, status agentmodel.NodeStatus) agentmodel.ControlPlaneStatus {
+	daemon.campaignLeader(ctx, status.NodeName)
+
 	published, err := daemon.statePublisher.PublishNodeStatus(ctx, status)
 	if err != nil {
 		published.ClusterReachable = false
@@ -30,6 +33,26 @@ func (daemon *Daemon) publishNodeStatus(ctx context.Context, status agentmodel.N
 	}
 
 	return published
+}
+
+func (daemon *Daemon) campaignLeader(ctx context.Context, nodeName string) {
+	elector, ok := daemon.statePublisher.(controlplane.LeaderElector)
+	if !ok {
+		return
+	}
+
+	_, _, err := elector.CampaignLeader(ctx, nodeName)
+	if err == nil || err == controlplane.ErrLeaderCandidateUnknown {
+		return
+	}
+
+	daemon.logger.WarnContext(
+		ctx,
+		"failed to campaign for control-plane leadership",
+		slog.String("component", "controlplane"),
+		slog.String("node", nodeName),
+		slog.String("campaign_error", err.Error()),
+	)
 }
 
 func (daemon *Daemon) logControlPlaneSync(current, previous agentmodel.Heartbeat, node agentmodel.NodeStatus) {
