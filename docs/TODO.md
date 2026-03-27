@@ -123,10 +123,10 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ## 8. Failover Engine
 
-- [ ] define failover eligibility rules
-- [ ] define candidate ranking rules
-- [ ] implement quorum-aware primary failure confirmation
-- [ ] implement failover intent creation
+- [x] define failover eligibility rules
+- [x] define candidate ranking rules
+- [x] implement quorum-aware primary failure confirmation
+- [x] implement failover intent creation
 - [ ] implement fencing hook interface
 - [ ] implement promotion orchestration
 - [ ] publish new epoch after failover
