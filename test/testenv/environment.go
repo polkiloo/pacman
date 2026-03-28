@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/docker/go-connections/nat"
 	testcontainers "github.com/testcontainers/testcontainers-go"
 	tcexec "github.com/testcontainers/testcontainers-go/exec"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -19,6 +21,8 @@ import (
 
 const defaultRunnerImage = "pacman-test:local"
 const defaultPostgresImage = "postgres:17-alpine"
+const dockerOperationTimeout = 30 * time.Second
+const dockerProbeTimeout = 5 * time.Second
 
 // RunnerConfig configures a long-lived PACMAN test container on a shared test network.
 type RunnerConfig struct {
@@ -68,7 +72,7 @@ type Postgres struct {
 	database  string
 	username  string
 	password  string
-	container *tcpostgres.PostgresContainer
+	container testcontainers.Container
 }
 
 // New creates a new integration test environment backed by Docker and testcontainers.
@@ -86,15 +90,21 @@ func New(t *testing.T) *Environment {
 		postgresImage = defaultPostgresImage
 	}
 
-	requireLocalImage(ctx, t, image)
+	requireDockerDaemon(t)
 
-	nw, err := network.New(ctx, network.WithAttachable())
+	networkCtx, cancel := context.WithTimeout(ctx, dockerOperationTimeout)
+	defer cancel()
+
+	nw, err := network.New(networkCtx, network.WithAttachable())
 	if err != nil {
 		t.Fatalf("create integration test network: %v", err)
 	}
 
 	t.Cleanup(func() {
-		if err := nw.Remove(ctx); err != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), dockerOperationTimeout)
+		defer cleanupCancel()
+
+		if err := nw.Remove(cleanupCtx); err != nil {
 			t.Logf("remove integration test network: %v", err)
 		}
 	})
@@ -184,8 +194,11 @@ func (e *Environment) StartPostgres(t *testing.T, name, alias string) *Postgres 
 	username := "pacman"
 	password := "pacman"
 
+	runCtx, cancel := context.WithTimeout(e.ctx, dockerOperationTimeout)
+	defer cancel()
+
 	container, err := tcpostgres.Run(
-		e.ctx,
+		runCtx,
 		e.postgresImage,
 		tcpostgres.WithDatabase(database),
 		tcpostgres.WithUsername(username),
@@ -199,7 +212,10 @@ func (e *Environment) StartPostgres(t *testing.T, name, alias string) *Postgres 
 	}
 
 	t.Cleanup(func() {
-		if err := testcontainers.TerminateContainer(container); err != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), dockerOperationTimeout)
+		defer cleanupCancel()
+
+		if err := testcontainers.TerminateContainer(container, testcontainers.StopContext(cleanupCtx)); err != nil {
 			t.Logf("terminate postgres fixture %q: %v", name, err)
 		}
 	})
@@ -222,6 +238,8 @@ func (e *Environment) StartRunner(t *testing.T, cfg RunnerConfig) *Runner {
 	if strings.TrimSpace(cfg.Name) == "" {
 		t.Fatal("runner name must be provided")
 	}
+
+	requireLocalImage(e.ctx, t, e.image)
 
 	aliases := cfg.Aliases
 	if len(aliases) == 0 {
@@ -246,13 +264,19 @@ func (e *Environment) StartRunner(t *testing.T, cfg RunnerConfig) *Runner {
 		options = append(options, testcontainers.WithCmd(cfg.Cmd...))
 	}
 
-	container, err := testcontainers.Run(e.ctx, e.image, options...)
+	runCtx, cancel := context.WithTimeout(e.ctx, dockerOperationTimeout)
+	defer cancel()
+
+	container, err := testcontainers.Run(runCtx, e.image, options...)
 	if err != nil {
 		t.Fatalf("start runner %q: %v", cfg.Name, err)
 	}
 
 	t.Cleanup(func() {
-		if err := container.Terminate(e.ctx); err != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), dockerOperationTimeout)
+		defer cleanupCancel()
+
+		if err := container.Terminate(cleanupCtx); err != nil {
 			t.Logf("terminate runner %q: %v", cfg.Name, err)
 		}
 	})
@@ -351,6 +375,35 @@ func (p *Postgres) Password() string {
 	return p.password
 }
 
+// Host returns the host-reachable address used for direct connections from the
+// Go test process.
+func (p *Postgres) Host(t *testing.T) string {
+	t.Helper()
+
+	host, err := p.container.Host(p.ctx)
+	if err != nil {
+		t.Fatalf("load host for postgres fixture %q: %v", p.name, err)
+	}
+
+	return host
+}
+
+// Port returns the host-reachable TCP port used for direct connections from
+// the Go test process.
+func (p *Postgres) Port(t *testing.T) int {
+	t.Helper()
+
+	return p.mappedPort(t).Int()
+}
+
+// Address returns the host-reachable host:port pair for direct PostgreSQL
+// access from the Go test process.
+func (p *Postgres) Address(t *testing.T) string {
+	t.Helper()
+
+	return net.JoinHostPort(p.Host(t), p.mappedPort(t).Port())
+}
+
 // NetworkAliases returns the Docker network alias map for the PostgreSQL fixture.
 func (p *Postgres) NetworkAliases(t *testing.T) map[string][]string {
 	t.Helper()
@@ -375,12 +428,90 @@ func (p *Postgres) Networks(t *testing.T) []string {
 	return networks
 }
 
+// Exec executes a command in the PostgreSQL fixture and returns its exit status and output.
+func (p *Postgres) Exec(t *testing.T, cmd ...string) ExecResult {
+	t.Helper()
+
+	exitCode, reader, err := p.container.Exec(p.ctx, cmd, tcexec.Multiplexed())
+	if err != nil {
+		t.Fatalf("exec %q in postgres fixture %q: %v", strings.Join(cmd, " "), p.name, err)
+	}
+
+	output, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read exec output for %q in postgres fixture %q: %v", strings.Join(cmd, " "), p.name, err)
+	}
+
+	return ExecResult{
+		ExitCode: exitCode,
+		Output:   string(output),
+	}
+}
+
+// RequireExec executes a command in the PostgreSQL fixture and fails the test if execution fails.
+func (p *Postgres) RequireExec(t *testing.T, cmd ...string) string {
+	t.Helper()
+
+	result := p.Exec(t, cmd...)
+	if result.ExitCode != 0 {
+		t.Fatalf("exec %q in postgres fixture %q returned %d: %s", strings.Join(cmd, " "), p.name, result.ExitCode, result.Output)
+	}
+
+	return result.Output
+}
+
+// Stop stops the PostgreSQL fixture container.
+func (p *Postgres) Stop(t *testing.T) {
+	t.Helper()
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), dockerOperationTimeout)
+	defer cancel()
+
+	timeout := dockerOperationTimeout
+	if err := p.container.Stop(stopCtx, &timeout); err != nil {
+		t.Fatalf("stop postgres fixture %q: %v", p.name, err)
+	}
+}
+
+func (p *Postgres) mappedPort(t *testing.T) nat.Port {
+	t.Helper()
+
+	port, err := nat.NewPort("tcp", "5432")
+	if err != nil {
+		t.Fatalf("construct postgres port for fixture %q: %v", p.name, err)
+	}
+
+	mapped, err := p.container.MappedPort(p.ctx, port)
+	if err != nil {
+		t.Fatalf("load mapped port for postgres fixture %q: %v", p.name, err)
+	}
+
+	return mapped
+}
+
 func requireLocalImage(ctx context.Context, t *testing.T, image string) {
 	t.Helper()
 
 	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", image)
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("required local test image %q is missing; run `make docker-build-test-image` first: %v", image, err)
+	}
+}
+
+func requireDockerDaemon(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), dockerProbeTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "docker", "version", "--format", "{{.Server.Version}}")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker daemon is not reachable for integration tests: %v (%s)", err, strings.TrimSpace(string(output)))
+	}
+
+	if strings.TrimSpace(string(output)) == "" {
+		t.Fatal("docker daemon is reachable but did not report a server version")
 	}
 }
 

@@ -247,14 +247,15 @@ func (store *MemoryStateStore) aggregateClusterStatusLocked(now time.Time) clust
 	}
 
 	status := cluster.ClusterStatus{
-		ClusterName:     store.clusterSpec.ClusterName,
-		Phase:           aggregateClusterPhase(store.clusterSpec.Clone(), store.maintenance, store.activeOperation, members, hasPrimary, currentPrimary.Name),
-		CurrentPrimary:  currentPrimary.Name,
-		CurrentEpoch:    currentEpoch,
-		Maintenance:     store.maintenance,
-		ActiveOperation: cloneOperationValue(store.activeOperation),
-		Members:         members,
-		ObservedAt:      now,
+		ClusterName:         store.clusterSpec.ClusterName,
+		Phase:               aggregateClusterPhase(store.clusterSpec.Clone(), store.maintenance, store.activeOperation, members, hasPrimary, currentPrimary.Name),
+		CurrentPrimary:      currentPrimary.Name,
+		CurrentEpoch:        currentEpoch,
+		Maintenance:         store.maintenance,
+		ActiveOperation:     cloneOperationValue(store.activeOperation),
+		ScheduledSwitchover: scheduledSwitchoverOperation(store.activeOperation),
+		Members:             members,
+		ObservedAt:          now,
 	}
 
 	return status
@@ -270,7 +271,9 @@ func aggregateClusterPhase(spec cluster.ClusterSpec, maintenance cluster.Mainten
 		case cluster.OperationKindFailover:
 			return cluster.ClusterPhaseFailingOver
 		case cluster.OperationKindSwitchover:
-			return cluster.ClusterPhaseSwitchingOver
+			if operation.State == cluster.OperationStateRunning {
+				return cluster.ClusterPhaseSwitchingOver
+			}
 		case cluster.OperationKindRejoin:
 			return cluster.ClusterPhaseRecovering
 		case cluster.OperationKindMaintenanceChange:
@@ -461,6 +464,29 @@ func cloneOperationValue(operation *cluster.Operation) *cluster.Operation {
 	cloned := operation.Clone()
 
 	return &cloned
+}
+
+func scheduledSwitchoverOperation(operation *cluster.Operation) *cluster.ScheduledSwitchover {
+	if operation == nil || operation.Kind != cluster.OperationKindSwitchover || operation.State.IsTerminal() {
+		return nil
+	}
+
+	at := operation.ScheduledAt
+	if at.IsZero() {
+		at = operation.RequestedAt
+	}
+
+	if at.IsZero() || strings.TrimSpace(operation.FromMember) == "" {
+		return nil
+	}
+
+	scheduled := cluster.ScheduledSwitchover{
+		At:   at,
+		From: operation.FromMember,
+		To:   operation.ToMember,
+	}
+
+	return &scheduled
 }
 
 func cloneHistoryEntries(entries []cluster.HistoryEntry) []cluster.HistoryEntry {
