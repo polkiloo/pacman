@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -200,5 +201,103 @@ ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload`)
 
 	if history[0].Kind != cluster.OperationKindSwitchover || history[0].FromMember != "alpha-1" || history[0].ToMember != "alpha-2" || history[0].Result != cluster.OperationResultSucceeded {
 		t.Fatalf("unexpected switchover history entry: %+v", history[0])
+	}
+}
+
+func TestSwitchoverValidationRejectsUnavailableRealStandby(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Docker-backed integration test in short mode")
+	}
+
+	primary, standby := startReplicatedPostgresPair(t)
+	store := seededRealTopologyStore(t)
+
+	observedAt := time.Now().UTC()
+	publishObservedNodeStatus(t, store, "alpha-1", primary, observedAt)
+	standbyAddress := standby.Address(t)
+	standbyObservation := publishObservedNodeStatus(t, store, "alpha-2", standby, observedAt.Add(time.Second))
+
+	standby.Stop(t)
+	waitForAddressUnavailable(t, standby.Name(), standbyAddress)
+	publishUnavailableNodeStatus(t, store, "alpha-2", standbyAddress, observedAt.Add(2*time.Second), standbyObservation)
+
+	readiness, err := store.SwitchoverTargetReadiness("alpha-2")
+	if err != nil {
+		t.Fatalf("switchover target readiness: %v", err)
+	}
+
+	if readiness.Ready {
+		t.Fatalf("expected stopped standby to fail readiness, got %+v", readiness)
+	}
+
+	_, err = store.ValidateSwitchover(context.Background(), controlplane.SwitchoverRequest{
+		RequestedBy: "integration-test",
+		Reason:      "standby container stopped",
+		Candidate:   "alpha-2",
+	})
+	if !errors.Is(err, controlplane.ErrSwitchoverTargetNotReady) {
+		t.Fatalf("unexpected switchover validation error: got %v, want %v", err, controlplane.ErrSwitchoverTargetNotReady)
+	}
+
+	status, ok := store.ClusterStatus()
+	if !ok {
+		t.Fatal("expected cluster status after standby failure")
+	}
+
+	if status.Phase != cluster.ClusterPhaseDegraded {
+		t.Fatalf("expected failed standby to degrade cluster, got %+v", status)
+	}
+
+	if _, ok := store.ActiveOperation(); ok {
+		t.Fatal("expected rejected switchover validation not to create an active operation")
+	}
+}
+
+func TestSwitchoverExecutionRejectsFutureScheduledIntentWithRealStandby(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Docker-backed integration test in short mode")
+	}
+
+	primary, standby := startReplicatedPostgresPair(t)
+	store := seededRealTopologyStore(t)
+
+	observedAt := time.Now().UTC()
+	publishObservedNodeStatus(t, store, "alpha-1", primary, observedAt)
+	publishObservedNodeStatus(t, store, "alpha-2", standby, observedAt.Add(time.Second))
+
+	scheduledAt := time.Now().UTC().Add(20 * time.Minute)
+	if _, err := store.CreateSwitchoverIntent(context.Background(), controlplane.SwitchoverRequest{
+		RequestedBy: "integration-test",
+		Reason:      "future switchover should not execute yet",
+		Candidate:   "alpha-2",
+		ScheduledAt: scheduledAt,
+	}); err != nil {
+		t.Fatalf("create scheduled switchover intent: %v", err)
+	}
+
+	_, err := store.ExecuteSwitchover(
+		context.Background(),
+		newPostgresDemotionExecutor(t, primary),
+		newPostgresPromotionExecutor(t, standby),
+	)
+	if !errors.Is(err, controlplane.ErrSwitchoverExecutionNotReady) {
+		t.Fatalf("unexpected scheduled switchover execution error: got %v, want %v", err, controlplane.ErrSwitchoverExecutionNotReady)
+	}
+
+	waitForPostgresRole(t, primary, cluster.MemberRolePrimary)
+	waitForPostgresRole(t, standby, cluster.MemberRoleReplica)
+
+	status, ok := store.ClusterStatus()
+	if !ok {
+		t.Fatal("expected cluster status after rejected scheduled switchover")
+	}
+
+	if status.ScheduledSwitchover == nil || !status.ScheduledSwitchover.At.Equal(scheduledAt) {
+		t.Fatalf("expected scheduled switchover projection to remain after rejected execution, got %+v", status.ScheduledSwitchover)
+	}
+
+	active, ok := store.ActiveOperation()
+	if !ok || active.State != cluster.OperationStateScheduled {
+		t.Fatalf("expected scheduled switchover intent to remain active, got ok=%v operation=%+v", ok, active)
 	}
 }

@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -31,15 +32,7 @@ func TestFailoverPromotesRealStandbyAndRecordsHistory(t *testing.T) {
 	primary.Stop(t)
 	waitForAddressUnavailable(t, primary.Name(), primaryAddress)
 
-	failedPrimaryStatus := nodeStatusFromObservation("alpha-1", primaryAddress, primaryObservedAt.Add(2*time.Second), primaryObservation)
-	failedPrimaryStatus.State = cluster.MemberStateFailed
-	failedPrimaryStatus.Postgres.Up = false
-	failedPrimaryStatus.Postgres.CheckedAt = failedPrimaryStatus.ObservedAt
-	failedPrimaryStatus.Postgres.Errors.Availability = "postgres is unavailable"
-
-	if _, err := store.PublishNodeStatus(context.Background(), failedPrimaryStatus); err != nil {
-		t.Fatalf("publish failed primary state: %v", err)
-	}
+	failedPrimaryStatus := publishUnavailableNodeStatus(t, store, "alpha-1", primaryAddress, primaryObservedAt.Add(2*time.Second), primaryObservation)
 
 	if _, err := store.PublishNodeStatus(context.Background(), nodeStatusFromObservation("alpha-2", standby.Address(t), failedPrimaryStatus.ObservedAt.Add(time.Second), standbyObservation)); err != nil {
 		t.Fatalf("refresh standby state before failover: %v", err)
@@ -105,5 +98,43 @@ ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload`)
 
 	if history[0].Kind != cluster.OperationKindFailover || history[0].FromMember != "alpha-1" || history[0].ToMember != "alpha-2" || history[0].Result != cluster.OperationResultSucceeded {
 		t.Fatalf("unexpected failover history entry: %+v", history[0])
+	}
+}
+
+func TestFailoverIntentRejectsHealthyPrimaryWithRealStreamingStandby(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Docker-backed integration test in short mode")
+	}
+
+	primary, standby := startReplicatedPostgresPair(t)
+	store := seededRealTopologyStore(t)
+
+	observedAt := time.Now().UTC()
+	publishObservedNodeStatus(t, store, "alpha-1", primary, observedAt)
+	publishObservedNodeStatus(t, store, "alpha-2", standby, observedAt.Add(time.Second))
+
+	confirmation, err := store.ConfirmPrimaryFailure()
+	if err != nil {
+		t.Fatalf("confirm primary failure: %v", err)
+	}
+
+	if confirmation.CurrentPrimary != "alpha-1" || !confirmation.PrimaryHealthy || confirmation.Confirmed {
+		t.Fatalf("unexpected real primary confirmation state: %+v", confirmation)
+	}
+
+	_, err = store.CreateFailoverIntent(context.Background(), controlplane.FailoverIntentRequest{
+		RequestedBy: "integration-test",
+		Reason:      "healthy primary must block failover",
+	})
+	if !errors.Is(err, controlplane.ErrFailoverPrimaryHealthy) {
+		t.Fatalf("unexpected failover intent error: got %v, want %v", err, controlplane.ErrFailoverPrimaryHealthy)
+	}
+
+	if _, ok := store.ActiveOperation(); ok {
+		t.Fatal("expected rejected failover intent not to create an active operation")
+	}
+
+	if history := store.History(); len(history) != 0 {
+		t.Fatalf("expected rejected failover intent not to record history, got %+v", history)
 	}
 }

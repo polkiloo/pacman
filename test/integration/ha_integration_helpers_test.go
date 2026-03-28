@@ -88,6 +88,22 @@ func publishObservedNodeStatus(t *testing.T, store *controlplane.MemoryStateStor
 	return observation
 }
 
+func publishUnavailableNodeStatus(t *testing.T, store *controlplane.MemoryStateStore, nodeName, address string, observedAt time.Time, observation pgobs.Observation) agentmodel.NodeStatus {
+	t.Helper()
+
+	status := nodeStatusFromObservation(nodeName, address, observedAt, observation)
+	status.State = cluster.MemberStateFailed
+	status.Postgres.Up = false
+	status.Postgres.CheckedAt = observedAt
+	status.Postgres.Errors.Availability = "postgres is unavailable"
+
+	if _, err := store.PublishNodeStatus(context.Background(), status); err != nil {
+		t.Fatalf("publish unavailable node status for %s: %v", nodeName, err)
+	}
+
+	return status
+}
+
 func nodeStatusFromObservation(nodeName, address string, observedAt time.Time, observation pgobs.Observation) agentmodel.NodeStatus {
 	status := agentmodel.NodeStatus{
 		NodeName:   nodeName,
