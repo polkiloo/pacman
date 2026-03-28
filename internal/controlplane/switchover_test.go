@@ -67,6 +67,117 @@ func TestMemoryStateStoreValidateSwitchoverAcceptsReadyStandby(t *testing.T) {
 	}
 }
 
+func TestMemoryStateStoreCreateSwitchoverIntentCreatesPlannedTransition(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.March, 29, 12, 30, 0, 0, time.UTC)
+
+	t.Run("immediate switchover", func(t *testing.T) {
+		t.Parallel()
+
+		store := seededFailoverStore(t, cluster.ClusterSpec{
+			ClusterName: "alpha",
+			Switchover: cluster.SwitchoverPolicy{
+				AllowScheduled: true,
+			},
+			Members: []cluster.MemberSpec{
+				{Name: "alpha-1"},
+				{Name: "alpha-2"},
+			},
+		}, []agentmodel.NodeStatus{
+			readyPrimaryStatus("alpha-1", now, 18),
+			readyStandbyStatus("alpha-2", now.Add(time.Second), 18, 0),
+		})
+		store.now = func() time.Time { return now.Add(5 * time.Minute) }
+
+		intent, err := store.CreateSwitchoverIntent(context.Background(), SwitchoverRequest{
+			RequestedBy: "operator",
+			Reason:      "planned maintenance",
+			Candidate:   "alpha-2",
+		})
+		if err != nil {
+			t.Fatalf("create switchover intent: %v", err)
+		}
+
+		if intent.Operation.Kind != cluster.OperationKindSwitchover || intent.Operation.State != cluster.OperationStateAccepted || intent.Operation.Result != cluster.OperationResultPending {
+			t.Fatalf("unexpected switchover operation: %+v", intent.Operation)
+		}
+
+		if intent.Operation.FromMember != "alpha-1" || intent.Operation.ToMember != "alpha-2" {
+			t.Fatalf("unexpected switchover operation members: %+v", intent.Operation)
+		}
+
+		active, ok := store.ActiveOperation()
+		if !ok || active.ID != intent.Operation.ID {
+			t.Fatalf("expected active switchover operation, got ok=%v operation=%+v", ok, active)
+		}
+
+		status, ok := store.ClusterStatus()
+		if !ok {
+			t.Fatal("expected cluster status after switchover intent")
+		}
+
+		if status.Phase != cluster.ClusterPhaseHealthy {
+			t.Fatalf("expected accepted switchover to keep healthy phase before execution, got %+v", status)
+		}
+
+		if status.ScheduledSwitchover == nil {
+			t.Fatal("expected planned switchover projection in cluster status")
+		}
+
+		if status.ScheduledSwitchover.At != intent.Operation.RequestedAt || status.ScheduledSwitchover.From != "alpha-1" || status.ScheduledSwitchover.To != "alpha-2" {
+			t.Fatalf("unexpected planned switchover projection: %+v", status.ScheduledSwitchover)
+		}
+	})
+
+	t.Run("scheduled switchover", func(t *testing.T) {
+		t.Parallel()
+
+		scheduledAt := now.Add(20 * time.Minute)
+		store := seededFailoverStore(t, cluster.ClusterSpec{
+			ClusterName: "alpha",
+			Switchover: cluster.SwitchoverPolicy{
+				AllowScheduled: true,
+			},
+			Members: []cluster.MemberSpec{
+				{Name: "alpha-1"},
+				{Name: "alpha-2"},
+			},
+		}, []agentmodel.NodeStatus{
+			readyPrimaryStatus("alpha-1", now, 18),
+			readyStandbyStatus("alpha-2", now.Add(time.Second), 18, 0),
+		})
+		store.now = func() time.Time { return now.Add(5 * time.Minute) }
+
+		intent, err := store.CreateSwitchoverIntent(context.Background(), SwitchoverRequest{
+			RequestedBy: "operator",
+			Reason:      "capacity balancing",
+			Candidate:   "alpha-2",
+			ScheduledAt: scheduledAt,
+		})
+		if err != nil {
+			t.Fatalf("create scheduled switchover intent: %v", err)
+		}
+
+		if intent.Operation.State != cluster.OperationStateScheduled || !intent.Operation.ScheduledAt.Equal(scheduledAt) {
+			t.Fatalf("expected scheduled switchover operation, got %+v", intent.Operation)
+		}
+
+		status, ok := store.ClusterStatus()
+		if !ok || status.ScheduledSwitchover == nil {
+			t.Fatalf("expected scheduled switchover status projection, got ok=%v status=%+v", ok, status)
+		}
+
+		if !status.ScheduledSwitchover.At.Equal(scheduledAt) || status.ScheduledSwitchover.From != "alpha-1" || status.ScheduledSwitchover.To != "alpha-2" {
+			t.Fatalf("unexpected scheduled switchover projection: %+v", status.ScheduledSwitchover)
+		}
+
+		if status.Phase != cluster.ClusterPhaseHealthy {
+			t.Fatalf("expected scheduled switchover to keep cluster healthy until execution, got %+v", status)
+		}
+	})
+}
+
 func TestMemoryStateStoreValidateSwitchoverRejectsBlockedRequests(t *testing.T) {
 	t.Parallel()
 
@@ -235,13 +346,13 @@ func TestMemoryStateStoreSwitchoverTargetReadinessReportsReadinessReasons(t *tes
 	}
 
 	wantReasons := []string{
-		"member state is not ready for switchover",
-		"member is not healthy",
-		"member requires rejoin",
-		"member replication lag exceeds configured maximum",
-		"member timeline does not match current primary",
-		"member postgres is not up",
-		"member recovery state is unknown",
+		reasonStateNotReadyForSwitchover,
+		reasonMemberUnhealthy,
+		reasonMemberRequiresRejoin,
+		reasonLagExceedsSwitchoverMaximum,
+		reasonTimelineMismatch,
+		reasonPostgresNotUp,
+		reasonRecoveryStateUnknown,
 	}
 	for _, want := range wantReasons {
 		if !containsString(readiness.Reasons, want) {
@@ -267,6 +378,225 @@ func TestMemoryStateStoreSwitchoverTargetReadinessRejectsUnknownTarget(t *testin
 	_, err := store.SwitchoverTargetReadiness("alpha-2")
 	if !errors.Is(err, ErrSwitchoverTargetUnknown) {
 		t.Fatalf("unexpected switchover target readiness error: got %v, want %v", err, ErrSwitchoverTargetUnknown)
+	}
+}
+
+func TestMemoryStateStoreExecuteSwitchoverCoordinatesPrimaryDemotion(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.March, 29, 15, 30, 0, 0, time.UTC)
+	store := seededFailoverStore(t, cluster.ClusterSpec{
+		ClusterName: "alpha",
+		Switchover: cluster.SwitchoverPolicy{
+			AllowScheduled: true,
+		},
+		Members: []cluster.MemberSpec{
+			{Name: "alpha-1"},
+			{Name: "alpha-2"},
+		},
+	}, []agentmodel.NodeStatus{
+		readyPrimaryStatus("alpha-1", now, 22),
+		readyStandbyStatus("alpha-2", now.Add(time.Second), 22, 0),
+	})
+	store.now = func() time.Time { return now.Add(10 * time.Second) }
+
+	if _, err := store.CreateSwitchoverIntent(context.Background(), SwitchoverRequest{
+		RequestedBy: "operator",
+		Reason:      "planned switchover",
+		Candidate:   "alpha-2",
+	}); err != nil {
+		t.Fatalf("create switchover intent: %v", err)
+	}
+
+	store.mu.Lock()
+	store.clusterStatus.CurrentEpoch = 9
+	store.mu.Unlock()
+
+	demoter := &recordingDemoter{}
+	execution, err := store.ExecuteSwitchover(context.Background(), demoter)
+	if err != nil {
+		t.Fatalf("execute switchover: %v", err)
+	}
+
+	if execution.CurrentPrimary != "alpha-1" || execution.Candidate != "alpha-2" || execution.PreviousEpoch != 9 || !execution.Demoted {
+		t.Fatalf("unexpected switchover execution: %+v", execution)
+	}
+
+	if len(demoter.requests) != 1 || demoter.requests[0].CurrentPrimary != "alpha-1" || demoter.requests[0].Candidate != "alpha-2" || demoter.requests[0].CurrentEpoch != 9 {
+		t.Fatalf("unexpected demotion requests: %+v", demoter.requests)
+	}
+
+	active, ok := store.ActiveOperation()
+	if !ok {
+		t.Fatal("expected running switchover operation after demotion")
+	}
+
+	if active.Kind != cluster.OperationKindSwitchover || active.State != cluster.OperationStateRunning || active.Result != cluster.OperationResultPending {
+		t.Fatalf("unexpected active switchover operation after demotion: %+v", active)
+	}
+
+	status, ok := store.ClusterStatus()
+	if !ok {
+		t.Fatal("expected cluster status after switchover demotion")
+	}
+
+	if status.Phase != cluster.ClusterPhaseSwitchingOver {
+		t.Fatalf("expected switching_over phase while switchover is running, got %+v", status)
+	}
+
+	if status.ScheduledSwitchover == nil || status.ScheduledSwitchover.From != "alpha-1" || status.ScheduledSwitchover.To != "alpha-2" {
+		t.Fatalf("expected running switchover projection in cluster status, got %+v", status.ScheduledSwitchover)
+	}
+
+	primary, ok := store.NodeStatus("alpha-1")
+	if !ok {
+		t.Fatal("expected current primary node status after demotion")
+	}
+
+	if primary.Role != cluster.MemberRolePrimary || primary.State != cluster.MemberStateStopping {
+		t.Fatalf("expected primary to be marked stopping during switchover, got %+v", primary)
+	}
+
+	candidate, ok := store.NodeStatus("alpha-2")
+	if !ok {
+		t.Fatal("expected target standby node status")
+	}
+
+	if candidate.Role != cluster.MemberRoleReplica || candidate.State != cluster.MemberStateStreaming {
+		t.Fatalf("expected target standby to remain replica before promotion, got %+v", candidate)
+	}
+
+	if history := store.History(); len(history) != 0 {
+		t.Fatalf("expected switchover demotion phase not to record terminal history yet, got %+v", history)
+	}
+}
+
+func TestMemoryStateStoreExecuteSwitchoverRejectsInvalidExecutionPrerequisites(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.March, 29, 16, 0, 0, 0, time.UTC)
+
+	testCases := []struct {
+		name     string
+		spec     cluster.ClusterSpec
+		statuses []agentmodel.NodeStatus
+		prepare  func(t *testing.T, store *MemoryStateStore)
+		demoter  DemotionExecutor
+		wantErr  error
+	}{
+		{
+			name: "active switchover intent is required",
+			spec: cluster.ClusterSpec{
+				ClusterName: "alpha",
+				Members: []cluster.MemberSpec{
+					{Name: "alpha-1"},
+					{Name: "alpha-2"},
+				},
+			},
+			statuses: []agentmodel.NodeStatus{
+				readyPrimaryStatus("alpha-1", now, 23),
+				readyStandbyStatus("alpha-2", now, 23, 0),
+			},
+			demoter: &recordingDemoter{},
+			wantErr: ErrSwitchoverIntentRequired,
+		},
+		{
+			name: "demotion executor is required",
+			spec: cluster.ClusterSpec{
+				ClusterName: "alpha",
+				Members: []cluster.MemberSpec{
+					{Name: "alpha-1"},
+					{Name: "alpha-2"},
+				},
+			},
+			statuses: []agentmodel.NodeStatus{
+				readyPrimaryStatus("alpha-1", now, 23),
+				readyStandbyStatus("alpha-2", now, 23, 0),
+			},
+			prepare: func(t *testing.T, store *MemoryStateStore) {
+				t.Helper()
+				if _, err := store.CreateSwitchoverIntent(context.Background(), SwitchoverRequest{Candidate: "alpha-2"}); err != nil {
+					t.Fatalf("create switchover intent: %v", err)
+				}
+			},
+			wantErr: ErrSwitchoverDemotionExecutorRequired,
+		},
+		{
+			name: "scheduled switchover waits for execution time",
+			spec: cluster.ClusterSpec{
+				ClusterName: "alpha",
+				Switchover: cluster.SwitchoverPolicy{
+					AllowScheduled: true,
+				},
+				Members: []cluster.MemberSpec{
+					{Name: "alpha-1"},
+					{Name: "alpha-2"},
+				},
+			},
+			statuses: []agentmodel.NodeStatus{
+				readyPrimaryStatus("alpha-1", now, 23),
+				readyStandbyStatus("alpha-2", now, 23, 0),
+			},
+			prepare: func(t *testing.T, store *MemoryStateStore) {
+				t.Helper()
+				store.now = func() time.Time { return now }
+				if _, err := store.CreateSwitchoverIntent(context.Background(), SwitchoverRequest{
+					Candidate:   "alpha-2",
+					ScheduledAt: now.Add(10 * time.Minute),
+				}); err != nil {
+					t.Fatalf("create scheduled switchover intent: %v", err)
+				}
+			},
+			demoter: &recordingDemoter{},
+			wantErr: ErrSwitchoverExecutionNotReady,
+		},
+		{
+			name: "target readiness is revalidated before demotion",
+			spec: cluster.ClusterSpec{
+				ClusterName: "alpha",
+				Failover: cluster.FailoverPolicy{
+					MaximumLagBytes: 64,
+				},
+				Members: []cluster.MemberSpec{
+					{Name: "alpha-1"},
+					{Name: "alpha-2"},
+				},
+			},
+			statuses: []agentmodel.NodeStatus{
+				readyPrimaryStatus("alpha-1", now, 23),
+				readyStandbyStatus("alpha-2", now, 23, 0),
+			},
+			prepare: func(t *testing.T, store *MemoryStateStore) {
+				t.Helper()
+				if _, err := store.CreateSwitchoverIntent(context.Background(), SwitchoverRequest{Candidate: "alpha-2"}); err != nil {
+					t.Fatalf("create switchover intent: %v", err)
+				}
+
+				if _, err := store.PublishNodeStatus(context.Background(), notReadyStandbyStatus("alpha-2", now.Add(time.Minute), 22, 128)); err != nil {
+					t.Fatalf("publish degraded standby state: %v", err)
+				}
+			},
+			demoter: &recordingDemoter{},
+			wantErr: ErrSwitchoverTargetNotReady,
+		},
+	}
+
+	for _, testCase := range testCases {
+		testCase := testCase
+
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			store := seededFailoverStore(t, testCase.spec, testCase.statuses)
+			if testCase.prepare != nil {
+				testCase.prepare(t, store)
+			}
+
+			_, err := store.ExecuteSwitchover(context.Background(), testCase.demoter)
+			if !errors.Is(err, testCase.wantErr) {
+				t.Fatalf("unexpected switchover execution error: got %v, want %v", err, testCase.wantErr)
+			}
+		})
 	}
 }
 
@@ -296,4 +626,13 @@ func notReadyStandbyStatus(nodeName string, observedAt time.Time, timeline int64
 	status.Postgres.InRecovery = false
 
 	return status
+}
+
+type recordingDemoter struct {
+	requests []DemotionRequest
+}
+
+func (demoter *recordingDemoter) Demote(_ context.Context, request DemotionRequest) error {
+	demoter.requests = append(demoter.requests, request)
+	return nil
 }

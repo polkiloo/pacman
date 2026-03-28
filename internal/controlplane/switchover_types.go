@@ -12,6 +12,8 @@ import (
 type SwitchoverEngine interface {
 	SwitchoverTargetReadiness(string) (SwitchoverTargetReadiness, error)
 	ValidateSwitchover(context.Context, SwitchoverRequest) (SwitchoverValidation, error)
+	CreateSwitchoverIntent(context.Context, SwitchoverRequest) (SwitchoverIntent, error)
+	ExecuteSwitchover(context.Context, DemotionExecutor) (SwitchoverExecution, error)
 }
 
 // SwitchoverRequest captures the operator intent for a planned topology
@@ -65,6 +67,57 @@ func (validation SwitchoverValidation) Clone() SwitchoverValidation {
 	clone.Request = validation.Request.Clone()
 	clone.CurrentPrimary = validation.CurrentPrimary.Clone()
 	clone.Target = validation.Target.Clone()
+
+	return clone
+}
+
+// SwitchoverIntent captures the accepted planned topology transition recorded
+// in the operation journal.
+type SwitchoverIntent struct {
+	Operation  cluster.Operation
+	Validation SwitchoverValidation
+	CreatedAt  time.Time
+}
+
+// Clone returns a detached copy of the switchover intent.
+func (intent SwitchoverIntent) Clone() SwitchoverIntent {
+	clone := intent
+	clone.Operation = intent.Operation.Clone()
+	clone.Validation = intent.Validation.Clone()
+
+	return clone
+}
+
+// DemotionExecutor performs the node-local demotion or drain of the current
+// primary during a planned switchover.
+type DemotionExecutor interface {
+	Demote(context.Context, DemotionRequest) error
+}
+
+// DemotionRequest describes the current primary that should stop accepting
+// writes before the target standby is promoted.
+type DemotionRequest struct {
+	Operation      cluster.Operation
+	CurrentPrimary string
+	Candidate      string
+	CurrentEpoch   cluster.Epoch
+}
+
+// SwitchoverExecution captures the in-flight switchover after the current
+// primary has been demoted but before the target standby is promoted.
+type SwitchoverExecution struct {
+	Operation      cluster.Operation
+	CurrentPrimary string
+	Candidate      string
+	PreviousEpoch  cluster.Epoch
+	Demoted        bool
+	ExecutedAt     time.Time
+}
+
+// Clone returns a detached copy of the switchover execution result.
+func (execution SwitchoverExecution) Clone() SwitchoverExecution {
+	clone := execution
+	clone.Operation = execution.Operation.Clone()
 
 	return clone
 }

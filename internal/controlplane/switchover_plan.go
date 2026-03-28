@@ -41,38 +41,44 @@ func (store *MemoryStateStore) ValidateSwitchover(ctx context.Context, request S
 		return SwitchoverValidation{}, err
 	}
 
-	if err := validateSwitchoverRequest(spec, normalized, store.activeOperation); err != nil {
-		return SwitchoverValidation{}, err
+	return store.evaluateSwitchoverRequestLocked(spec, status, normalized, store.activeOperation, now)
+}
+
+// CreateSwitchoverIntent validates and journals a planned switchover
+// operation so the control plane can coordinate a safe topology handoff.
+func (store *MemoryStateStore) CreateSwitchoverIntent(ctx context.Context, request SwitchoverRequest) (SwitchoverIntent, error) {
+	if err := ctx.Err(); err != nil {
+		return SwitchoverIntent{}, err
 	}
 
-	currentPrimary, ok := switchoverCurrentPrimary(status)
-	if !ok {
-		return SwitchoverValidation{}, ErrSwitchoverPrimaryUnknown
-	}
+	now := store.now().UTC()
+	normalized := normalizeSwitchoverRequest(request)
 
-	if !currentPrimary.Healthy {
-		return SwitchoverValidation{}, ErrSwitchoverPrimaryUnhealthy
-	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
 
-	if normalized.Candidate == currentPrimary.Name {
-		return SwitchoverValidation{}, ErrSwitchoverTargetIsCurrentPrimary
-	}
-
-	target, err := store.switchoverTargetReadinessLocked(spec, status, normalized.Candidate, now)
+	spec, status, err := store.switchoverInputsLocked()
 	if err != nil {
-		return SwitchoverValidation{}, err
+		return SwitchoverIntent{}, err
 	}
 
-	if !target.Ready {
-		return SwitchoverValidation{}, ErrSwitchoverTargetNotReady
+	validation, err := store.evaluateSwitchoverRequestLocked(spec, status, normalized, store.activeOperation, now)
+	if err != nil {
+		return SwitchoverIntent{}, err
 	}
 
-	return SwitchoverValidation{
-		Request:        normalized,
-		CurrentPrimary: currentPrimary,
-		Target:         target,
-		CurrentEpoch:   status.CurrentEpoch,
-		ValidatedAt:    now,
+	operation, err := buildSwitchoverIntentOperation(now, validation)
+	if err != nil {
+		return SwitchoverIntent{}, err
+	}
+
+	store.journalOperationLocked(operation, now)
+	store.refreshSourceOfTruthLocked(now)
+
+	return SwitchoverIntent{
+		Operation:  operation.Clone(),
+		Validation: validation.Clone(),
+		CreatedAt:  now,
 	}.Clone(), nil
 }
 
@@ -104,6 +110,42 @@ func validateSwitchoverRequest(spec cluster.ClusterSpec, request SwitchoverReque
 	return nil
 }
 
+func (store *MemoryStateStore) evaluateSwitchoverRequestLocked(spec cluster.ClusterSpec, status cluster.ClusterStatus, request SwitchoverRequest, activeOperation *cluster.Operation, checkedAt time.Time) (SwitchoverValidation, error) {
+	if err := validateSwitchoverRequest(spec, request, activeOperation); err != nil {
+		return SwitchoverValidation{}, err
+	}
+
+	currentPrimary, ok := switchoverCurrentPrimary(status)
+	if !ok {
+		return SwitchoverValidation{}, ErrSwitchoverPrimaryUnknown
+	}
+
+	if !currentPrimary.Healthy {
+		return SwitchoverValidation{}, ErrSwitchoverPrimaryUnhealthy
+	}
+
+	if request.Candidate == currentPrimary.Name {
+		return SwitchoverValidation{}, ErrSwitchoverTargetIsCurrentPrimary
+	}
+
+	target, err := store.switchoverTargetReadinessLocked(spec, status, request.Candidate, checkedAt)
+	if err != nil {
+		return SwitchoverValidation{}, err
+	}
+
+	if !target.Ready {
+		return SwitchoverValidation{}, ErrSwitchoverTargetNotReady
+	}
+
+	return SwitchoverValidation{
+		Request:        request.Clone(),
+		CurrentPrimary: currentPrimary,
+		Target:         target,
+		CurrentEpoch:   status.CurrentEpoch,
+		ValidatedAt:    checkedAt,
+	}.Clone(), nil
+}
+
 func normalizeSwitchoverRequest(request SwitchoverRequest) SwitchoverRequest {
 	normalized := request
 	normalized.RequestedBy = strings.TrimSpace(normalized.RequestedBy)
@@ -122,6 +164,51 @@ func normalizeSwitchoverRequest(request SwitchoverRequest) SwitchoverRequest {
 	}
 
 	return normalized
+}
+
+func buildSwitchoverIntentOperation(now time.Time, validation SwitchoverValidation) (cluster.Operation, error) {
+	operation := cluster.Operation{
+		ID:          switchoverOperationID(now),
+		Kind:        cluster.OperationKindSwitchover,
+		State:       switchoverIntentOperationState(now, validation.Request),
+		RequestedBy: validation.Request.RequestedBy,
+		RequestedAt: now,
+		Reason:      validation.Request.Reason,
+		FromMember:  validation.CurrentPrimary.Name,
+		ToMember:    validation.Target.Member.Name,
+		Result:      cluster.OperationResultPending,
+		Message:     switchoverOperationMessage(validation),
+	}
+
+	if validation.Request.ScheduledAt.After(now) {
+		operation.ScheduledAt = validation.Request.ScheduledAt
+	}
+
+	if err := operation.Validate(); err != nil {
+		return cluster.Operation{}, err
+	}
+
+	return operation, nil
+}
+
+func switchoverIntentOperationState(now time.Time, request SwitchoverRequest) cluster.OperationState {
+	if request.ScheduledAt.After(now) {
+		return cluster.OperationStateScheduled
+	}
+
+	return cluster.OperationStateAccepted
+}
+
+func switchoverOperationID(now time.Time) string {
+	return "switchover-" + now.UTC().Format("20060102T150405.000000000Z07:00")
+}
+
+func switchoverOperationMessage(validation SwitchoverValidation) string {
+	if validation.Request.ScheduledAt.IsZero() || !validation.Request.ScheduledAt.After(validation.ValidatedAt) {
+		return "planned switchover from " + validation.CurrentPrimary.Name + " to " + validation.Target.Member.Name + " accepted"
+	}
+
+	return "planned switchover from " + validation.CurrentPrimary.Name + " to " + validation.Target.Member.Name + " scheduled"
 }
 
 func switchoverCurrentPrimary(status cluster.ClusterStatus) (cluster.MemberStatus, bool) {
@@ -168,27 +255,27 @@ func switchoverTargetReasons(spec cluster.ClusterSpec, currentPrimary, target cl
 	reasons := make([]string, 0, 8)
 
 	if !isSwitchoverStandbyRole(target.Role) {
-		reasons = append(reasons, "member role is not a standby")
+		reasons = append(reasons, reasonRoleNotStandby)
 	}
 
 	if target.State != cluster.MemberStateStreaming && target.State != cluster.MemberStateRunning {
-		reasons = append(reasons, "member state is not ready for switchover")
+		reasons = append(reasons, reasonStateNotReadyForSwitchover)
 	}
 
 	if !target.Healthy {
-		reasons = append(reasons, "member is not healthy")
+		reasons = append(reasons, reasonMemberUnhealthy)
 	}
 
 	if target.NeedsRejoin {
-		reasons = append(reasons, "member requires rejoin")
+		reasons = append(reasons, reasonMemberRequiresRejoin)
 	}
 
 	if spec.Failover.MaximumLagBytes > 0 && target.LagBytes > spec.Failover.MaximumLagBytes {
-		reasons = append(reasons, "member replication lag exceeds configured maximum")
+		reasons = append(reasons, reasonLagExceedsSwitchoverMaximum)
 	}
 
 	if currentPrimary.Timeline > 0 && target.Timeline != currentPrimary.Timeline {
-		reasons = append(reasons, "member timeline does not match current primary")
+		reasons = append(reasons, reasonTimelineMismatch)
 	}
 
 	reasons = appendSwitchoverObservedReadinessReasons(reasons, observed, observedOK)
@@ -198,25 +285,25 @@ func switchoverTargetReasons(spec cluster.ClusterSpec, currentPrimary, target cl
 
 func appendSwitchoverObservedReadinessReasons(reasons []string, observed agentmodel.NodeStatus, observedOK bool) []string {
 	if !observedOK {
-		return append(reasons, "member node state has not been observed")
+		return append(reasons, reasonNodeStateNotObserved)
 	}
 
 	if !observed.Postgres.Managed {
-		return append(reasons, "member postgres is not managed")
+		return append(reasons, reasonPostgresNotManaged)
 	}
 
 	if !observed.Postgres.Up {
-		reasons = append(reasons, "member postgres is not up")
+		reasons = append(reasons, reasonPostgresNotUp)
 	}
 
 	if !observed.Postgres.RecoveryKnown {
-		reasons = append(reasons, "member recovery state is unknown")
+		reasons = append(reasons, reasonRecoveryStateUnknown)
 	} else if !observed.Postgres.InRecovery {
-		reasons = append(reasons, "member is not currently in recovery")
+		reasons = append(reasons, reasonNotInRecovery)
 	}
 
 	if observed.Postgres.Role != "" && !isSwitchoverStandbyRole(observed.Postgres.Role) {
-		reasons = append(reasons, "member postgres role is not a standby")
+		reasons = append(reasons, reasonPostgresRoleNotStandby)
 	}
 
 	return reasons

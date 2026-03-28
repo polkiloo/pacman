@@ -48,7 +48,7 @@ func failoverCandidateReasons(spec cluster.ClusterSpec, member, primary cluster.
 	reasons := make([]string, 0, 6)
 
 	if member.Name == primary.Name && primary.Name != "" {
-		reasons = append(reasons, "member is the current primary")
+		reasons = append(reasons, reasonCurrentPrimary)
 	}
 
 	reasons = appendFailoverPromotableRoleReason(reasons, member)
@@ -63,17 +63,17 @@ func appendFailoverPromotableRoleReason(reasons []string, member cluster.MemberS
 	case cluster.MemberRoleReplica, cluster.MemberRoleStandbyLeader:
 		return reasons
 	default:
-		return append(reasons, "member role is not promotable")
+		return append(reasons, reasonRoleNotPromotable)
 	}
 }
 
 func appendFailoverHealthReason(reasons []string, member cluster.MemberStatus) []string {
 	if !member.Healthy {
-		reasons = append(reasons, "member is not healthy")
+		reasons = append(reasons, reasonMemberUnhealthy)
 	}
 
 	if member.NeedsRejoin {
-		reasons = append(reasons, "member requires rejoin")
+		reasons = append(reasons, reasonMemberRequiresRejoin)
 	}
 
 	return reasons
@@ -81,15 +81,15 @@ func appendFailoverHealthReason(reasons []string, member cluster.MemberStatus) [
 
 func appendFailoverPolicyReasons(reasons []string, spec cluster.ClusterSpec, member cluster.MemberStatus, primaryTimeline int64) []string {
 	if member.NoFailover {
-		reasons = append(reasons, "member is tagged no-failover")
+		reasons = append(reasons, reasonNoFailoverTagged)
 	}
 
 	if spec.Failover.MaximumLagBytes > 0 && member.LagBytes > spec.Failover.MaximumLagBytes {
-		reasons = append(reasons, "member replication lag exceeds failover policy")
+		reasons = append(reasons, reasonLagExceedsFailoverPolicy)
 	}
 
 	if spec.Failover.CheckTimeline && primaryTimeline > 0 && member.Timeline != primaryTimeline {
-		reasons = append(reasons, "member timeline does not match current primary")
+		reasons = append(reasons, reasonTimelineMismatch)
 	}
 
 	return reasons

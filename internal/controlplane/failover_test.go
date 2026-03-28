@@ -79,23 +79,23 @@ func TestMemoryStateStoreFailoverCandidatesApplyEligibilityAndRankingRules(t *te
 		t.Fatalf("expected lower-priority replica to rank third, got %+v", candidates[2])
 	}
 
-	if candidates[3].Eligible || !containsString(candidates[3].Reasons, "member is the current primary") {
+	if candidates[3].Eligible || !containsString(candidates[3].Reasons, reasonCurrentPrimary) {
 		t.Fatalf("expected current primary to be rejected, got %+v", candidates[3])
 	}
 
-	if candidates[4].Eligible || !containsString(candidates[4].Reasons, "member is tagged no-failover") {
+	if candidates[4].Eligible || !containsString(candidates[4].Reasons, reasonNoFailoverTagged) {
 		t.Fatalf("expected no-failover member to be rejected, got %+v", candidates[4])
 	}
 
-	if candidates[5].Eligible || !containsString(candidates[5].Reasons, "member replication lag exceeds failover policy") {
+	if candidates[5].Eligible || !containsString(candidates[5].Reasons, reasonLagExceedsFailoverPolicy) {
 		t.Fatalf("expected lagging member to be rejected, got %+v", candidates[5])
 	}
 
-	if candidates[6].Eligible || !containsString(candidates[6].Reasons, "member timeline does not match current primary") {
+	if candidates[6].Eligible || !containsString(candidates[6].Reasons, reasonTimelineMismatch) {
 		t.Fatalf("expected timeline-mismatched member to be rejected, got %+v", candidates[6])
 	}
 
-	if candidates[7].Eligible || !containsString(candidates[7].Reasons, "member role is not promotable") {
+	if candidates[7].Eligible || !containsString(candidates[7].Reasons, reasonRoleNotPromotable) {
 		t.Fatalf("expected witness to be rejected, got %+v", candidates[7])
 	}
 }
