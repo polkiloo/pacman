@@ -72,7 +72,7 @@ type Postgres struct {
 	database  string
 	username  string
 	password  string
-	container *tcpostgres.PostgresContainer
+	container testcontainers.Container
 }
 
 // New creates a new integration test environment backed by Docker and testcontainers.
@@ -426,6 +426,51 @@ func (p *Postgres) Networks(t *testing.T) []string {
 	}
 
 	return networks
+}
+
+// Exec executes a command in the PostgreSQL fixture and returns its exit status and output.
+func (p *Postgres) Exec(t *testing.T, cmd ...string) ExecResult {
+	t.Helper()
+
+	exitCode, reader, err := p.container.Exec(p.ctx, cmd, tcexec.Multiplexed())
+	if err != nil {
+		t.Fatalf("exec %q in postgres fixture %q: %v", strings.Join(cmd, " "), p.name, err)
+	}
+
+	output, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read exec output for %q in postgres fixture %q: %v", strings.Join(cmd, " "), p.name, err)
+	}
+
+	return ExecResult{
+		ExitCode: exitCode,
+		Output:   string(output),
+	}
+}
+
+// RequireExec executes a command in the PostgreSQL fixture and fails the test if execution fails.
+func (p *Postgres) RequireExec(t *testing.T, cmd ...string) string {
+	t.Helper()
+
+	result := p.Exec(t, cmd...)
+	if result.ExitCode != 0 {
+		t.Fatalf("exec %q in postgres fixture %q returned %d: %s", strings.Join(cmd, " "), p.name, result.ExitCode, result.Output)
+	}
+
+	return result.Output
+}
+
+// Stop stops the PostgreSQL fixture container.
+func (p *Postgres) Stop(t *testing.T) {
+	t.Helper()
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), dockerOperationTimeout)
+	defer cancel()
+
+	timeout := dockerOperationTimeout
+	if err := p.container.Stop(stopCtx, &timeout); err != nil {
+		t.Fatalf("stop postgres fixture %q: %v", p.name, err)
+	}
 }
 
 func (p *Postgres) mappedPort(t *testing.T) nat.Port {

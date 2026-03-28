@@ -137,8 +137,8 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ## 9. Switchover Engine
 
-- [ ] define switchover validation rules
-- [ ] validate target standby readiness
+- [x] define switchover validation rules
+- [x] validate target standby readiness
 - [ ] implement planned topology transition
 - [ ] coordinate demotion of current primary
 - [ ] coordinate promotion of target standby
