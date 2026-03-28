@@ -127,9 +127,9 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] define candidate ranking rules
 - [x] implement quorum-aware primary failure confirmation
 - [x] implement failover intent creation
-- [ ] implement fencing hook interface
-- [ ] implement promotion orchestration
-- [ ] publish new epoch after failover
+- [x] implement fencing hook interface
+- [x] implement promotion orchestration
+- [x] publish new epoch after failover
 - [ ] mark former primary as `needs_rejoin`
 - [ ] record failover history
 

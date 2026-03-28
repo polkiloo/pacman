@@ -405,6 +405,247 @@ func TestMemoryStateStoreCreateFailoverIntentRejectsBlockedFailover(t *testing.T
 	}
 }
 
+func TestMemoryStateStoreExecuteFailoverRunsFencingPromotionAndAdvancesEpoch(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.March, 29, 9, 0, 0, 0, time.UTC)
+	store := seededFailoverStore(t, cluster.ClusterSpec{
+		ClusterName: "alpha",
+		Failover: cluster.FailoverPolicy{
+			Mode:            cluster.FailoverModeAutomatic,
+			RequireQuorum:   true,
+			FencingRequired: true,
+		},
+		Members: []cluster.MemberSpec{
+			{Name: "alpha-1"},
+			{Name: "alpha-2", Priority: 100},
+			{Name: "witness-1"},
+		},
+	}, []agentmodel.NodeStatus{
+		failoverNodeStatus("alpha-1", cluster.MemberRolePrimary, cluster.MemberStateFailed, now, false, 15, 0),
+		failoverNodeStatus("alpha-2", cluster.MemberRoleReplica, cluster.MemberStateStreaming, now, true, 15, 4),
+		failoverNodeStatus("witness-1", cluster.MemberRoleWitness, cluster.MemberStateRunning, now, false, 0, 0),
+	})
+	store.now = func() time.Time { return now.Add(10 * time.Second) }
+
+	intent, err := store.CreateFailoverIntent(context.Background(), FailoverIntentRequest{
+		RequestedBy: "controller",
+		Reason:      "primary unavailable",
+	})
+	if err != nil {
+		t.Fatalf("create failover intent: %v", err)
+	}
+
+	store.mu.Lock()
+	store.clusterStatus.CurrentEpoch = 4
+	store.mu.Unlock()
+
+	fencer := &recordingFencer{}
+	promoter := &recordingPromoter{}
+
+	execution, err := store.ExecuteFailover(context.Background(), promoter, fencer)
+	if err != nil {
+		t.Fatalf("execute failover: %v", err)
+	}
+
+	if execution.CurrentPrimary != intent.CurrentPrimary || execution.Candidate != intent.Candidate {
+		t.Fatalf("unexpected execution members: %+v", execution)
+	}
+
+	if !execution.Fenced || !execution.Promoted {
+		t.Fatalf("expected fenced and promoted execution, got %+v", execution)
+	}
+
+	if execution.PreviousEpoch != 4 || execution.CurrentEpoch != 5 {
+		t.Fatalf("unexpected failover epoch transition: %+v", execution)
+	}
+
+	if len(fencer.requests) != 1 || fencer.requests[0].Candidate != "alpha-2" || fencer.requests[0].CurrentEpoch != 4 {
+		t.Fatalf("unexpected fencing requests: %+v", fencer.requests)
+	}
+
+	if len(promoter.requests) != 1 || promoter.requests[0].Candidate != "alpha-2" || promoter.requests[0].CurrentEpoch != 4 {
+		t.Fatalf("unexpected promotion requests: %+v", promoter.requests)
+	}
+
+	active, ok := store.ActiveOperation()
+	if !ok {
+		t.Fatal("expected running failover operation after execution")
+	}
+
+	if active.State != cluster.OperationStateRunning || active.StartedAt.IsZero() {
+		t.Fatalf("expected running failover operation after execution, got %+v", active)
+	}
+
+	status, ok := store.ClusterStatus()
+	if !ok {
+		t.Fatal("expected cluster status after failover execution")
+	}
+
+	if status.CurrentPrimary != "alpha-2" || status.CurrentEpoch != 5 {
+		t.Fatalf("expected promoted primary and advanced epoch, got %+v", status)
+	}
+
+	if status.Phase != cluster.ClusterPhaseFailingOver {
+		t.Fatalf("expected running failover to keep failing_over phase, got %+v", status)
+	}
+
+	candidate, ok := store.NodeStatus("alpha-2")
+	if !ok {
+		t.Fatal("expected promoted candidate node status")
+	}
+
+	if candidate.Role != cluster.MemberRolePrimary || candidate.State != cluster.MemberStateRunning {
+		t.Fatalf("expected promoted candidate to be published as primary, got %+v", candidate)
+	}
+
+	if !candidate.Postgres.Up || candidate.Postgres.InRecovery || candidate.Postgres.Role != cluster.MemberRolePrimary {
+		t.Fatalf("expected promoted postgres status, got %+v", candidate.Postgres)
+	}
+}
+
+func TestMemoryStateStoreExecuteFailoverSkipsOptionalFencing(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.March, 29, 10, 0, 0, 0, time.UTC)
+	store := seededFailoverStore(t, cluster.ClusterSpec{
+		ClusterName: "alpha",
+		Failover: cluster.FailoverPolicy{
+			Mode: cluster.FailoverModeAutomatic,
+		},
+		Members: []cluster.MemberSpec{
+			{Name: "alpha-1"},
+			{Name: "alpha-2", Priority: 100},
+		},
+	}, []agentmodel.NodeStatus{
+		failoverNodeStatus("alpha-1", cluster.MemberRolePrimary, cluster.MemberStateFailed, now, false, 16, 0),
+		failoverNodeStatus("alpha-2", cluster.MemberRoleReplica, cluster.MemberStateStreaming, now, true, 16, 0),
+	})
+	store.now = func() time.Time { return now.Add(5 * time.Second) }
+
+	if _, err := store.CreateFailoverIntent(context.Background(), FailoverIntentRequest{}); err != nil {
+		t.Fatalf("create failover intent: %v", err)
+	}
+
+	promoter := &recordingPromoter{}
+	execution, err := store.ExecuteFailover(context.Background(), promoter, nil)
+	if err != nil {
+		t.Fatalf("execute failover without fencing: %v", err)
+	}
+
+	if execution.Fenced {
+		t.Fatalf("expected failover without fencing requirement to skip hook, got %+v", execution)
+	}
+
+	if len(promoter.requests) != 1 || promoter.requests[0].Candidate != "alpha-2" {
+		t.Fatalf("unexpected promotion requests without fencing: %+v", promoter.requests)
+	}
+}
+
+func TestMemoryStateStoreExecuteFailoverRejectsInvalidExecutionPrerequisites(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.March, 29, 11, 0, 0, 0, time.UTC)
+
+	testCases := []struct {
+		name     string
+		spec     cluster.ClusterSpec
+		statuses []agentmodel.NodeStatus
+		prepare  func(t *testing.T, store *MemoryStateStore)
+		promoter PromotionExecutor
+		fencer   FencingHook
+		wantErr  error
+	}{
+		{
+			name: "active failover intent is required",
+			spec: cluster.ClusterSpec{
+				ClusterName: "alpha",
+				Failover: cluster.FailoverPolicy{
+					Mode: cluster.FailoverModeAutomatic,
+				},
+				Members: []cluster.MemberSpec{
+					{Name: "alpha-1"},
+					{Name: "alpha-2", Priority: 100},
+				},
+			},
+			statuses: []agentmodel.NodeStatus{
+				failoverNodeStatus("alpha-1", cluster.MemberRolePrimary, cluster.MemberStateFailed, now, false, 17, 0),
+				failoverNodeStatus("alpha-2", cluster.MemberRoleReplica, cluster.MemberStateStreaming, now, true, 17, 0),
+			},
+			promoter: &recordingPromoter{},
+			wantErr:  ErrFailoverIntentRequired,
+		},
+		{
+			name: "promotion executor is required",
+			spec: cluster.ClusterSpec{
+				ClusterName: "alpha",
+				Failover: cluster.FailoverPolicy{
+					Mode: cluster.FailoverModeAutomatic,
+				},
+				Members: []cluster.MemberSpec{
+					{Name: "alpha-1"},
+					{Name: "alpha-2", Priority: 100},
+				},
+			},
+			statuses: []agentmodel.NodeStatus{
+				failoverNodeStatus("alpha-1", cluster.MemberRolePrimary, cluster.MemberStateFailed, now, false, 17, 0),
+				failoverNodeStatus("alpha-2", cluster.MemberRoleReplica, cluster.MemberStateStreaming, now, true, 17, 0),
+			},
+			prepare: func(t *testing.T, store *MemoryStateStore) {
+				t.Helper()
+				if _, err := store.CreateFailoverIntent(context.Background(), FailoverIntentRequest{}); err != nil {
+					t.Fatalf("create failover intent: %v", err)
+				}
+			},
+			wantErr: ErrFailoverPromotionExecutorRequired,
+		},
+		{
+			name: "fencing hook is required when policy demands it",
+			spec: cluster.ClusterSpec{
+				ClusterName: "alpha",
+				Failover: cluster.FailoverPolicy{
+					Mode:            cluster.FailoverModeAutomatic,
+					FencingRequired: true,
+				},
+				Members: []cluster.MemberSpec{
+					{Name: "alpha-1"},
+					{Name: "alpha-2", Priority: 100},
+				},
+			},
+			statuses: []agentmodel.NodeStatus{
+				failoverNodeStatus("alpha-1", cluster.MemberRolePrimary, cluster.MemberStateFailed, now, false, 17, 0),
+				failoverNodeStatus("alpha-2", cluster.MemberRoleReplica, cluster.MemberStateStreaming, now, true, 17, 0),
+			},
+			prepare: func(t *testing.T, store *MemoryStateStore) {
+				t.Helper()
+				if _, err := store.CreateFailoverIntent(context.Background(), FailoverIntentRequest{}); err != nil {
+					t.Fatalf("create failover intent: %v", err)
+				}
+			},
+			promoter: &recordingPromoter{},
+			wantErr:  ErrFailoverFencingHookRequired,
+		},
+	}
+
+	for _, testCase := range testCases {
+		testCase := testCase
+
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			store := seededFailoverStore(t, testCase.spec, testCase.statuses)
+			if testCase.prepare != nil {
+				testCase.prepare(t, store)
+			}
+
+			_, err := store.ExecuteFailover(context.Background(), testCase.promoter, testCase.fencer)
+			if !errors.Is(err, testCase.wantErr) {
+				t.Fatalf("unexpected failover execution error: got %v, want %v", err, testCase.wantErr)
+			}
+		})
+	}
+}
+
 func seededFailoverStore(t *testing.T, spec cluster.ClusterSpec, statuses []agentmodel.NodeStatus) *MemoryStateStore {
 	t.Helper()
 
@@ -455,4 +696,22 @@ func containsString(items []string, want string) bool {
 	}
 
 	return false
+}
+
+type recordingFencer struct {
+	requests []FencingRequest
+}
+
+func (fencer *recordingFencer) Fence(_ context.Context, request FencingRequest) error {
+	fencer.requests = append(fencer.requests, request)
+	return nil
+}
+
+type recordingPromoter struct {
+	requests []PromotionRequest
+}
+
+func (promoter *recordingPromoter) Promote(_ context.Context, request PromotionRequest) error {
+	promoter.requests = append(promoter.requests, request)
+	return nil
 }
