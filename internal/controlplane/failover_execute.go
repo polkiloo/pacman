@@ -17,9 +17,8 @@ type preparedFailoverExecution struct {
 }
 
 // ExecuteFailover runs the active failover intent through optional fencing,
-// candidate promotion, and epoch publication. It intentionally leaves final
-// cleanup such as former-primary rejoin marking and history recording to later
-// orchestration steps.
+// candidate promotion, former-primary rejoin marking, epoch publication, and
+// terminal history recording.
 func (store *MemoryStateStore) ExecuteFailover(ctx context.Context, promoter PromotionExecutor, fencer FencingHook) (FailoverExecution, error) {
 	if err := ctx.Err(); err != nil {
 		return FailoverExecution{}, err
@@ -103,7 +102,7 @@ func (store *MemoryStateStore) publishFailoverEpoch(prepared preparedFailoverExe
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	updatedOperation, err := store.failoverOperationForPublicationLocked(prepared.operation)
+	runningOperation, err := store.failoverOperationForPublicationLocked(prepared.operation)
 	if err != nil {
 		return FailoverExecution{}, err
 	}
@@ -113,15 +112,17 @@ func (store *MemoryStateStore) publishFailoverEpoch(prepared preparedFailoverExe
 		return FailoverExecution{}, err
 	}
 
+	formerPrimaryStatus := store.formerPrimaryNodeStatusLocked(prepared.operation.FromMember, prepared.executedAt)
 	nextEpoch := nextClusterEpoch(prepared.previousEpoch)
 	store.nodeStatuses[prepared.operation.ToMember] = promotedNodeStatus(candidateStatus, prepared.executedAt)
+	store.nodeStatuses[prepared.operation.FromMember] = formerPrimaryNeedsRejoinStatus(formerPrimaryStatus, prepared.executedAt)
 	store.clusterStatus.CurrentEpoch = nextEpoch
 
-	updatedOperation.Message = failoverEpochPublishedMessage(prepared.operation.ToMember, nextEpoch)
-	store.activeOperation = &updatedOperation
+	completedOperation := completeFailoverExecution(runningOperation, prepared.executedAt, prepared.operation.ToMember, nextEpoch)
+	store.journalOperationLocked(completedOperation, prepared.executedAt)
 	store.refreshSourceOfTruthLocked(prepared.executedAt)
 
-	return buildFailoverExecution(prepared, updatedOperation, nextEpoch), nil
+	return buildFailoverExecution(prepared, completedOperation, nextEpoch), nil
 }
 
 func (store *MemoryStateStore) activeFailoverOperationLocked() (cluster.Operation, error) {
@@ -170,6 +171,20 @@ func beginFailoverExecution(operation cluster.Operation, startedAt time.Time) cl
 	return updated
 }
 
+func completeFailoverExecution(operation cluster.Operation, completedAt time.Time, candidate string, epoch cluster.Epoch) cluster.Operation {
+	updated := operation.Clone()
+	updated.State = cluster.OperationStateCompleted
+	updated.CompletedAt = completedAt
+	updated.Result = cluster.OperationResultSucceeded
+	updated.Message = failoverCompletedMessage(candidate, epoch)
+
+	return updated
+}
+
+func failoverCompletedMessage(candidate string, epoch cluster.Epoch) string {
+	return "automatic failover completed on " + candidate + " at epoch " + epoch.String()
+}
+
 func failoverEpochPublishedMessage(candidate string, epoch cluster.Epoch) string {
 	return "automatic failover promoted " + candidate + " and published epoch " + epoch.String()
 }
@@ -191,6 +206,35 @@ func promotedNodeStatus(status agentmodel.NodeStatus, observedAt time.Time) agen
 	updated.Postgres.Role = cluster.MemberRolePrimary
 	updated.Postgres.RecoveryKnown = true
 	updated.Postgres.InRecovery = false
+
+	return updated
+}
+
+func (store *MemoryStateStore) formerPrimaryNodeStatusLocked(nodeName string, observedAt time.Time) agentmodel.NodeStatus {
+	status, ok := store.nodeStatuses[nodeName]
+	if ok {
+		return status.Clone()
+	}
+
+	return agentmodel.NodeStatus{
+		NodeName:   nodeName,
+		MemberName: nodeName,
+		ObservedAt: observedAt,
+	}
+}
+
+func formerPrimaryNeedsRejoinStatus(status agentmodel.NodeStatus, observedAt time.Time) agentmodel.NodeStatus {
+	updated := status.Clone()
+	updated.Role = cluster.MemberRoleReplica
+	updated.State = cluster.MemberStateNeedsRejoin
+	updated.NeedsRejoin = true
+	if updated.ObservedAt.IsZero() {
+		updated.ObservedAt = observedAt
+	}
+
+	if updated.Postgres.Managed {
+		updated.Postgres.Role = cluster.MemberRoleReplica
+	}
 
 	return updated
 }

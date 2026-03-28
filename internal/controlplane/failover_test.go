@@ -468,13 +468,8 @@ func TestMemoryStateStoreExecuteFailoverRunsFencingPromotionAndAdvancesEpoch(t *
 		t.Fatalf("unexpected promotion requests: %+v", promoter.requests)
 	}
 
-	active, ok := store.ActiveOperation()
-	if !ok {
-		t.Fatal("expected running failover operation after execution")
-	}
-
-	if active.State != cluster.OperationStateRunning || active.StartedAt.IsZero() {
-		t.Fatalf("expected running failover operation after execution, got %+v", active)
+	if _, ok := store.ActiveOperation(); ok {
+		t.Fatal("expected completed failover to clear active operation")
 	}
 
 	status, ok := store.ClusterStatus()
@@ -486,8 +481,8 @@ func TestMemoryStateStoreExecuteFailoverRunsFencingPromotionAndAdvancesEpoch(t *
 		t.Fatalf("expected promoted primary and advanced epoch, got %+v", status)
 	}
 
-	if status.Phase != cluster.ClusterPhaseFailingOver {
-		t.Fatalf("expected running failover to keep failing_over phase, got %+v", status)
+	if status.Phase != cluster.ClusterPhaseDegraded {
+		t.Fatalf("expected former primary needs_rejoin to degrade cluster, got %+v", status)
 	}
 
 	candidate, ok := store.NodeStatus("alpha-2")
@@ -501,6 +496,32 @@ func TestMemoryStateStoreExecuteFailoverRunsFencingPromotionAndAdvancesEpoch(t *
 
 	if !candidate.Postgres.Up || candidate.Postgres.InRecovery || candidate.Postgres.Role != cluster.MemberRolePrimary {
 		t.Fatalf("expected promoted postgres status, got %+v", candidate.Postgres)
+	}
+
+	formerPrimary, ok := store.NodeStatus("alpha-1")
+	if !ok {
+		t.Fatal("expected former primary node status")
+	}
+
+	if formerPrimary.Role != cluster.MemberRoleReplica || formerPrimary.State != cluster.MemberStateNeedsRejoin || !formerPrimary.NeedsRejoin {
+		t.Fatalf("expected former primary to be marked needs_rejoin, got %+v", formerPrimary)
+	}
+
+	history := store.History()
+	if len(history) != 1 {
+		t.Fatalf("expected failover history entry after execution, got %+v", history)
+	}
+
+	if history[0].OperationID != intent.Operation.ID || history[0].Kind != cluster.OperationKindFailover {
+		t.Fatalf("unexpected failover history entry: %+v", history[0])
+	}
+
+	if history[0].FromMember != "alpha-1" || history[0].ToMember != "alpha-2" || history[0].Result != cluster.OperationResultSucceeded {
+		t.Fatalf("unexpected failover history members/result: %+v", history[0])
+	}
+
+	if execution.Operation.State != cluster.OperationStateCompleted || execution.Operation.Result != cluster.OperationResultSucceeded || execution.Operation.CompletedAt.IsZero() {
+		t.Fatalf("expected completed failover execution operation, got %+v", execution.Operation)
 	}
 }
 
@@ -539,6 +560,10 @@ func TestMemoryStateStoreExecuteFailoverSkipsOptionalFencing(t *testing.T) {
 
 	if len(promoter.requests) != 1 || promoter.requests[0].Candidate != "alpha-2" {
 		t.Fatalf("unexpected promotion requests without fencing: %+v", promoter.requests)
+	}
+
+	if execution.Operation.State != cluster.OperationStateCompleted || execution.Operation.Result != cluster.OperationResultSucceeded {
+		t.Fatalf("expected completed failover execution without fencing, got %+v", execution.Operation)
 	}
 }
 
