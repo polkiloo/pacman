@@ -185,10 +185,6 @@ func failoverCompletedMessage(candidate string, epoch cluster.Epoch) string {
 	return "automatic failover completed on " + candidate + " at epoch " + epoch.String()
 }
 
-func failoverEpochPublishedMessage(candidate string, epoch cluster.Epoch) string {
-	return "automatic failover promoted " + candidate + " and published epoch " + epoch.String()
-}
-
 func nextClusterEpoch(current cluster.Epoch) cluster.Epoch {
 	return current + 1
 }
