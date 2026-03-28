@@ -381,7 +381,7 @@ func TestMemoryStateStoreSwitchoverTargetReadinessRejectsUnknownTarget(t *testin
 	}
 }
 
-func TestMemoryStateStoreExecuteSwitchoverCoordinatesPrimaryDemotion(t *testing.T) {
+func TestMemoryStateStoreExecuteSwitchoverPromotesTargetAndRecordsHistory(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, time.March, 29, 15, 30, 0, 0, time.UTC)
@@ -413,12 +413,17 @@ func TestMemoryStateStoreExecuteSwitchoverCoordinatesPrimaryDemotion(t *testing.
 	store.mu.Unlock()
 
 	demoter := &recordingDemoter{}
-	execution, err := store.ExecuteSwitchover(context.Background(), demoter)
+	promoter := &recordingPromoter{}
+	execution, err := store.ExecuteSwitchover(context.Background(), demoter, promoter)
 	if err != nil {
 		t.Fatalf("execute switchover: %v", err)
 	}
 
-	if execution.CurrentPrimary != "alpha-1" || execution.Candidate != "alpha-2" || execution.PreviousEpoch != 9 || !execution.Demoted {
+	if execution.CurrentPrimary != "alpha-1" || execution.Candidate != "alpha-2" || execution.PreviousEpoch != 9 || execution.CurrentEpoch != 10 {
+		t.Fatalf("unexpected switchover execution members/epoch: %+v", execution)
+	}
+
+	if !execution.Demoted || !execution.Promoted {
 		t.Fatalf("unexpected switchover execution: %+v", execution)
 	}
 
@@ -426,48 +431,68 @@ func TestMemoryStateStoreExecuteSwitchoverCoordinatesPrimaryDemotion(t *testing.
 		t.Fatalf("unexpected demotion requests: %+v", demoter.requests)
 	}
 
-	active, ok := store.ActiveOperation()
-	if !ok {
-		t.Fatal("expected running switchover operation after demotion")
+	if len(promoter.requests) != 1 || promoter.requests[0].CurrentPrimary != "alpha-1" || promoter.requests[0].Candidate != "alpha-2" || promoter.requests[0].CurrentEpoch != 9 {
+		t.Fatalf("unexpected promotion requests: %+v", promoter.requests)
 	}
 
-	if active.Kind != cluster.OperationKindSwitchover || active.State != cluster.OperationStateRunning || active.Result != cluster.OperationResultPending {
-		t.Fatalf("unexpected active switchover operation after demotion: %+v", active)
+	if _, ok := store.ActiveOperation(); ok {
+		t.Fatal("expected completed switchover to clear active operation")
 	}
 
 	status, ok := store.ClusterStatus()
 	if !ok {
-		t.Fatal("expected cluster status after switchover demotion")
+		t.Fatal("expected cluster status after switchover execution")
 	}
 
-	if status.Phase != cluster.ClusterPhaseSwitchingOver {
-		t.Fatalf("expected switching_over phase while switchover is running, got %+v", status)
+	if status.CurrentPrimary != "alpha-2" || status.CurrentEpoch != 10 {
+		t.Fatalf("expected promoted primary and advanced epoch, got %+v", status)
 	}
 
-	if status.ScheduledSwitchover == nil || status.ScheduledSwitchover.From != "alpha-1" || status.ScheduledSwitchover.To != "alpha-2" {
-		t.Fatalf("expected running switchover projection in cluster status, got %+v", status.ScheduledSwitchover)
+	if status.Phase != cluster.ClusterPhaseDegraded {
+		t.Fatalf("expected former primary transition to keep cluster degraded until rejoin, got %+v", status)
+	}
+
+	if status.ScheduledSwitchover != nil {
+		t.Fatalf("expected completed switchover to clear scheduled projection, got %+v", status.ScheduledSwitchover)
 	}
 
 	primary, ok := store.NodeStatus("alpha-1")
 	if !ok {
-		t.Fatal("expected current primary node status after demotion")
+		t.Fatal("expected former primary node status after switchover")
 	}
 
-	if primary.Role != cluster.MemberRolePrimary || primary.State != cluster.MemberStateStopping {
-		t.Fatalf("expected primary to be marked stopping during switchover, got %+v", primary)
+	if primary.Role != cluster.MemberRoleReplica || primary.State != cluster.MemberStateStopping || primary.NeedsRejoin {
+		t.Fatalf("expected former primary to be demoted without needs_rejoin, got %+v", primary)
+	}
+
+	if primary.Postgres.Up || primary.Postgres.Role != cluster.MemberRoleReplica {
+		t.Fatalf("expected former primary postgres to be demoted and unavailable, got %+v", primary.Postgres)
 	}
 
 	candidate, ok := store.NodeStatus("alpha-2")
 	if !ok {
-		t.Fatal("expected target standby node status")
+		t.Fatal("expected promoted standby node status")
 	}
 
-	if candidate.Role != cluster.MemberRoleReplica || candidate.State != cluster.MemberStateStreaming {
-		t.Fatalf("expected target standby to remain replica before promotion, got %+v", candidate)
+	if candidate.Role != cluster.MemberRolePrimary || candidate.State != cluster.MemberStateRunning {
+		t.Fatalf("expected target standby to be promoted, got %+v", candidate)
 	}
 
-	if history := store.History(); len(history) != 0 {
-		t.Fatalf("expected switchover demotion phase not to record terminal history yet, got %+v", history)
+	if !candidate.Postgres.Up || candidate.Postgres.InRecovery || candidate.Postgres.Role != cluster.MemberRolePrimary {
+		t.Fatalf("expected promoted standby postgres status, got %+v", candidate.Postgres)
+	}
+
+	history := store.History()
+	if len(history) != 1 {
+		t.Fatalf("expected terminal switchover history, got %+v", history)
+	}
+
+	if history[0].Kind != cluster.OperationKindSwitchover || history[0].FromMember != "alpha-1" || history[0].ToMember != "alpha-2" || history[0].Result != cluster.OperationResultSucceeded {
+		t.Fatalf("unexpected switchover history entry: %+v", history[0])
+	}
+
+	if execution.Operation.State != cluster.OperationStateCompleted || execution.Operation.Result != cluster.OperationResultSucceeded || execution.Operation.CompletedAt.IsZero() {
+		t.Fatalf("expected completed switchover execution operation, got %+v", execution.Operation)
 	}
 }
 
@@ -482,6 +507,7 @@ func TestMemoryStateStoreExecuteSwitchoverRejectsInvalidExecutionPrerequisites(t
 		statuses []agentmodel.NodeStatus
 		prepare  func(t *testing.T, store *MemoryStateStore)
 		demoter  DemotionExecutor
+		promoter PromotionExecutor
 		wantErr  error
 	}{
 		{
@@ -497,8 +523,9 @@ func TestMemoryStateStoreExecuteSwitchoverRejectsInvalidExecutionPrerequisites(t
 				readyPrimaryStatus("alpha-1", now, 23),
 				readyStandbyStatus("alpha-2", now, 23, 0),
 			},
-			demoter: &recordingDemoter{},
-			wantErr: ErrSwitchoverIntentRequired,
+			demoter:  &recordingDemoter{},
+			promoter: &recordingPromoter{},
+			wantErr:  ErrSwitchoverIntentRequired,
 		},
 		{
 			name: "demotion executor is required",
@@ -520,6 +547,28 @@ func TestMemoryStateStoreExecuteSwitchoverRejectsInvalidExecutionPrerequisites(t
 				}
 			},
 			wantErr: ErrSwitchoverDemotionExecutorRequired,
+		},
+		{
+			name: "promotion executor is required",
+			spec: cluster.ClusterSpec{
+				ClusterName: "alpha",
+				Members: []cluster.MemberSpec{
+					{Name: "alpha-1"},
+					{Name: "alpha-2"},
+				},
+			},
+			statuses: []agentmodel.NodeStatus{
+				readyPrimaryStatus("alpha-1", now, 23),
+				readyStandbyStatus("alpha-2", now, 23, 0),
+			},
+			prepare: func(t *testing.T, store *MemoryStateStore) {
+				t.Helper()
+				if _, err := store.CreateSwitchoverIntent(context.Background(), SwitchoverRequest{Candidate: "alpha-2"}); err != nil {
+					t.Fatalf("create switchover intent: %v", err)
+				}
+			},
+			demoter: &recordingDemoter{},
+			wantErr: ErrSwitchoverPromotionExecutorRequired,
 		},
 		{
 			name: "scheduled switchover waits for execution time",
@@ -547,8 +596,9 @@ func TestMemoryStateStoreExecuteSwitchoverRejectsInvalidExecutionPrerequisites(t
 					t.Fatalf("create scheduled switchover intent: %v", err)
 				}
 			},
-			demoter: &recordingDemoter{},
-			wantErr: ErrSwitchoverExecutionNotReady,
+			demoter:  &recordingDemoter{},
+			promoter: &recordingPromoter{},
+			wantErr:  ErrSwitchoverExecutionNotReady,
 		},
 		{
 			name: "target readiness is revalidated before demotion",
@@ -576,8 +626,9 @@ func TestMemoryStateStoreExecuteSwitchoverRejectsInvalidExecutionPrerequisites(t
 					t.Fatalf("publish degraded standby state: %v", err)
 				}
 			},
-			demoter: &recordingDemoter{},
-			wantErr: ErrSwitchoverTargetNotReady,
+			demoter:  &recordingDemoter{},
+			promoter: &recordingPromoter{},
+			wantErr:  ErrSwitchoverTargetNotReady,
 		},
 	}
 
@@ -592,7 +643,7 @@ func TestMemoryStateStoreExecuteSwitchoverRejectsInvalidExecutionPrerequisites(t
 				testCase.prepare(t, store)
 			}
 
-			_, err := store.ExecuteSwitchover(context.Background(), testCase.demoter)
+			_, err := store.ExecuteSwitchover(context.Background(), testCase.demoter, testCase.promoter)
 			if !errors.Is(err, testCase.wantErr) {
 				t.Fatalf("unexpected switchover execution error: got %v, want %v", err, testCase.wantErr)
 			}

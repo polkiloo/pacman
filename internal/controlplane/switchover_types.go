@@ -13,7 +13,7 @@ type SwitchoverEngine interface {
 	SwitchoverTargetReadiness(string) (SwitchoverTargetReadiness, error)
 	ValidateSwitchover(context.Context, SwitchoverRequest) (SwitchoverValidation, error)
 	CreateSwitchoverIntent(context.Context, SwitchoverRequest) (SwitchoverIntent, error)
-	ExecuteSwitchover(context.Context, DemotionExecutor) (SwitchoverExecution, error)
+	ExecuteSwitchover(context.Context, DemotionExecutor, PromotionExecutor) (SwitchoverExecution, error)
 }
 
 // SwitchoverRequest captures the operator intent for a planned topology
@@ -103,14 +103,16 @@ type DemotionRequest struct {
 	CurrentEpoch   cluster.Epoch
 }
 
-// SwitchoverExecution captures the in-flight switchover after the current
-// primary has been demoted but before the target standby is promoted.
+// SwitchoverExecution captures the outcome of executing the accepted
+// switchover intent up to the point where the new epoch is published.
 type SwitchoverExecution struct {
 	Operation      cluster.Operation
 	CurrentPrimary string
 	Candidate      string
 	PreviousEpoch  cluster.Epoch
+	CurrentEpoch   cluster.Epoch
 	Demoted        bool
+	Promoted       bool
 	ExecutedAt     time.Time
 }
 

@@ -15,16 +15,14 @@ type preparedSwitchoverExecution struct {
 	executedAt    time.Time
 }
 
-// ExecuteSwitchover moves the accepted switchover through the first execution
-// phase by demoting the current primary and marking the topology transition as
-// running. Promotion, epoch publication, and terminal history recording follow
-// in later switchover phases.
-func (store *MemoryStateStore) ExecuteSwitchover(ctx context.Context, demoter DemotionExecutor) (SwitchoverExecution, error) {
+// ExecuteSwitchover demotes the current primary, promotes the chosen standby,
+// publishes the next epoch, and records the completed topology transition.
+func (store *MemoryStateStore) ExecuteSwitchover(ctx context.Context, demoter DemotionExecutor, promoter PromotionExecutor) (SwitchoverExecution, error) {
 	if err := ctx.Err(); err != nil {
 		return SwitchoverExecution{}, err
 	}
 
-	prepared, err := store.prepareSwitchoverExecution(demoter)
+	prepared, err := store.prepareSwitchoverExecution(demoter, promoter)
 	if err != nil {
 		return SwitchoverExecution{}, err
 	}
@@ -33,11 +31,23 @@ func (store *MemoryStateStore) ExecuteSwitchover(ctx context.Context, demoter De
 		return SwitchoverExecution{}, err
 	}
 
-	return store.publishSwitchoverDemotion(prepared)
+	if err := store.publishSwitchoverDemotion(prepared); err != nil {
+		return SwitchoverExecution{}, err
+	}
+
+	if err := runSwitchoverPromotion(ctx, prepared, promoter); err != nil {
+		return SwitchoverExecution{}, err
+	}
+
+	return store.publishSwitchoverCompletion(prepared)
 }
 
-func (store *MemoryStateStore) prepareSwitchoverExecution(demoter DemotionExecutor) (preparedSwitchoverExecution, error) {
+func (store *MemoryStateStore) prepareSwitchoverExecution(demoter DemotionExecutor, promoter PromotionExecutor) (preparedSwitchoverExecution, error) {
 	if err := validateSwitchoverDemoter(demoter); err != nil {
+		return preparedSwitchoverExecution{}, err
+	}
+
+	if err := validateSwitchoverPromoter(promoter); err != nil {
 		return preparedSwitchoverExecution{}, err
 	}
 
@@ -71,6 +81,14 @@ func (store *MemoryStateStore) prepareSwitchoverExecution(demoter DemotionExecut
 func validateSwitchoverDemoter(demoter DemotionExecutor) error {
 	if demoter == nil {
 		return ErrSwitchoverDemotionExecutorRequired
+	}
+
+	return nil
+}
+
+func validateSwitchoverPromoter(promoter PromotionExecutor) error {
+	if promoter == nil {
+		return ErrSwitchoverPromotionExecutorRequired
 	}
 
 	return nil
@@ -144,27 +162,55 @@ func runSwitchoverDemotion(ctx context.Context, prepared preparedSwitchoverExecu
 	})
 }
 
-func (store *MemoryStateStore) publishSwitchoverDemotion(prepared preparedSwitchoverExecution) (SwitchoverExecution, error) {
+func runSwitchoverPromotion(ctx context.Context, prepared preparedSwitchoverExecution, promoter PromotionExecutor) error {
+	return promoter.Promote(ctx, PromotionRequest{
+		Operation:      prepared.operation.Clone(),
+		CurrentPrimary: prepared.operation.FromMember,
+		Candidate:      prepared.operation.ToMember,
+		CurrentEpoch:   prepared.previousEpoch,
+	})
+}
+
+func (store *MemoryStateStore) publishSwitchoverDemotion(prepared preparedSwitchoverExecution) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	operation, err := store.switchoverOperationForPublicationLocked(prepared.operation)
-	if err != nil {
-		return SwitchoverExecution{}, err
+	if _, err := store.switchoverOperationForPublicationLocked(prepared.operation); err != nil {
+		return err
 	}
 
 	primaryStatus := store.memberNodeStatusLocked(prepared.operation.FromMember, prepared.executedAt)
 	store.nodeStatuses[prepared.operation.FromMember] = demotingPrimaryNodeStatus(primaryStatus, prepared.executedAt)
 	store.refreshSourceOfTruthLocked(prepared.executedAt)
 
-	return SwitchoverExecution{
-		Operation:      operation.Clone(),
-		CurrentPrimary: prepared.operation.FromMember,
-		Candidate:      prepared.operation.ToMember,
-		PreviousEpoch:  prepared.previousEpoch,
-		Demoted:        true,
-		ExecutedAt:     prepared.executedAt,
-	}.Clone(), nil
+	return nil
+}
+
+func (store *MemoryStateStore) publishSwitchoverCompletion(prepared preparedSwitchoverExecution) (SwitchoverExecution, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	runningOperation, err := store.switchoverOperationForPublicationLocked(prepared.operation)
+	if err != nil {
+		return SwitchoverExecution{}, err
+	}
+
+	targetStatus, err := store.switchoverTargetStatusLocked(prepared.operation.ToMember)
+	if err != nil {
+		return SwitchoverExecution{}, err
+	}
+
+	formerPrimaryStatus := store.formerPrimaryNodeStatusLocked(prepared.operation.FromMember, prepared.executedAt)
+	nextEpoch := nextClusterEpoch(prepared.previousEpoch)
+	store.nodeStatuses[prepared.operation.ToMember] = promotedNodeStatus(targetStatus, prepared.executedAt)
+	store.nodeStatuses[prepared.operation.FromMember] = demotedFormerPrimaryStatus(formerPrimaryStatus, prepared.executedAt)
+	store.clusterStatus.CurrentEpoch = nextEpoch
+
+	completedOperation := completeSwitchoverExecution(runningOperation, prepared.executedAt, prepared.operation.ToMember, nextEpoch)
+	store.journalOperationLocked(completedOperation, prepared.executedAt)
+	store.refreshSourceOfTruthLocked(prepared.executedAt)
+
+	return buildSwitchoverExecution(prepared, completedOperation, nextEpoch), nil
 }
 
 func (store *MemoryStateStore) activeSwitchoverOperationLocked() (cluster.Operation, error) {
@@ -204,6 +250,29 @@ func beginSwitchoverExecution(operation cluster.Operation, startedAt time.Time) 
 	return updated
 }
 
+func completeSwitchoverExecution(operation cluster.Operation, completedAt time.Time, candidate string, epoch cluster.Epoch) cluster.Operation {
+	updated := operation.Clone()
+	updated.State = cluster.OperationStateCompleted
+	updated.CompletedAt = completedAt
+	updated.Result = cluster.OperationResultSucceeded
+	updated.Message = switchoverCompletedMessage(candidate, epoch)
+
+	return updated
+}
+
+func switchoverCompletedMessage(candidate string, epoch cluster.Epoch) string {
+	return "planned switchover completed on " + candidate + " at epoch " + epoch.String()
+}
+
+func (store *MemoryStateStore) switchoverTargetStatusLocked(target string) (agentmodel.NodeStatus, error) {
+	status, ok := store.nodeStatuses[target]
+	if !ok {
+		return agentmodel.NodeStatus{}, ErrSwitchoverTargetUnknown
+	}
+
+	return status.Clone(), nil
+}
+
 func (store *MemoryStateStore) memberNodeStatusLocked(nodeName string, observedAt time.Time) agentmodel.NodeStatus {
 	status, ok := store.nodeStatuses[nodeName]
 	if ok {
@@ -231,4 +300,35 @@ func demotingPrimaryNodeStatus(status agentmodel.NodeStatus, observedAt time.Tim
 	}
 
 	return updated
+}
+
+func demotedFormerPrimaryStatus(status agentmodel.NodeStatus, observedAt time.Time) agentmodel.NodeStatus {
+	updated := status.Clone()
+	updated.Role = cluster.MemberRoleReplica
+	updated.State = cluster.MemberStateStopping
+	updated.ObservedAt = observedAt
+	updated.NeedsRejoin = false
+
+	if updated.Postgres.Managed {
+		updated.Postgres.Up = false
+		updated.Postgres.CheckedAt = observedAt
+		updated.Postgres.Role = cluster.MemberRoleReplica
+		updated.Postgres.RecoveryKnown = false
+		updated.Postgres.InRecovery = false
+	}
+
+	return updated
+}
+
+func buildSwitchoverExecution(prepared preparedSwitchoverExecution, operation cluster.Operation, currentEpoch cluster.Epoch) SwitchoverExecution {
+	return SwitchoverExecution{
+		Operation:      operation.Clone(),
+		CurrentPrimary: prepared.operation.FromMember,
+		Candidate:      prepared.operation.ToMember,
+		PreviousEpoch:  prepared.previousEpoch,
+		CurrentEpoch:   currentEpoch,
+		Demoted:        true,
+		Promoted:       true,
+		ExecutedAt:     prepared.executedAt,
+	}.Clone()
 }
