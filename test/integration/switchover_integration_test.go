@@ -111,3 +111,94 @@ func TestSwitchoverIntentSchedulesRealStreamingStandby(t *testing.T) {
 		t.Fatalf("unexpected scheduled switchover projection: %+v", status.ScheduledSwitchover)
 	}
 }
+
+func TestSwitchoverPromotesRealStandbyAndRecordsHistory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Docker-backed integration test in short mode")
+	}
+
+	primary, standby := startReplicatedPostgresPair(t)
+	store := seededRealTopologyStore(t)
+
+	observedAt := time.Now().UTC()
+	primaryObservation := publishObservedNodeStatus(t, store, "alpha-1", primary, observedAt)
+	standbyObservation := publishObservedNodeStatus(t, store, "alpha-2", standby, observedAt.Add(time.Second))
+
+	if primaryObservation.Role != cluster.MemberRolePrimary || primaryObservation.InRecovery {
+		t.Fatalf("expected real primary observation, got %+v", primaryObservation)
+	}
+
+	if standbyObservation.Role != cluster.MemberRoleReplica || !standbyObservation.InRecovery {
+		t.Fatalf("expected real standby observation, got %+v", standbyObservation)
+	}
+
+	if _, err := store.CreateSwitchoverIntent(context.Background(), controlplane.SwitchoverRequest{
+		RequestedBy: "integration-test",
+		Reason:      "planned switchover integration test",
+		Candidate:   "alpha-2",
+	}); err != nil {
+		t.Fatalf("create switchover intent: %v", err)
+	}
+
+	execution, err := store.ExecuteSwitchover(
+		context.Background(),
+		newPostgresDemotionExecutor(t, primary),
+		newPostgresPromotionExecutor(t, standby),
+	)
+	if err != nil {
+		t.Fatalf("execute switchover: %v", err)
+	}
+
+	waitForPostgresRole(t, standby, cluster.MemberRolePrimary)
+
+	promotedObservedAt := time.Now().UTC()
+	promotedObservation := publishObservedNodeStatus(t, store, "alpha-2", standby, promotedObservedAt)
+	if promotedObservation.Role != cluster.MemberRolePrimary || promotedObservation.InRecovery {
+		t.Fatalf("expected promoted standby to become primary, got %+v", promotedObservation)
+	}
+
+	execSQL(t, standby, `
+CREATE TABLE IF NOT EXISTS switchover_writable_marker (
+	id integer PRIMARY KEY,
+	payload text NOT NULL
+)`)
+	execSQL(t, standby, `
+INSERT INTO switchover_writable_marker (id, payload)
+VALUES (1, 'promoted')
+ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload`)
+
+	status, ok := store.ClusterStatus()
+	if !ok {
+		t.Fatal("expected cluster status after switchover")
+	}
+
+	if status.CurrentPrimary != "alpha-2" || status.CurrentEpoch != execution.CurrentEpoch {
+		t.Fatalf("unexpected cluster status after switchover: %+v", status)
+	}
+
+	if status.ScheduledSwitchover != nil {
+		t.Fatalf("expected completed switchover to clear scheduled projection, got %+v", status.ScheduledSwitchover)
+	}
+
+	if _, ok := store.ActiveOperation(); ok {
+		t.Fatal("expected completed switchover to clear active operation")
+	}
+
+	formerPrimary, ok := store.NodeStatus("alpha-1")
+	if !ok {
+		t.Fatal("expected former primary state after switchover")
+	}
+
+	if formerPrimary.Role != cluster.MemberRoleReplica || formerPrimary.State != cluster.MemberStateStopping || formerPrimary.NeedsRejoin {
+		t.Fatalf("expected former primary to be demoted without rejoin flag, got %+v", formerPrimary)
+	}
+
+	history := store.History()
+	if len(history) != 1 {
+		t.Fatalf("expected one switchover history entry, got %+v", history)
+	}
+
+	if history[0].Kind != cluster.OperationKindSwitchover || history[0].FromMember != "alpha-1" || history[0].ToMember != "alpha-2" || history[0].Result != cluster.OperationResultSucceeded {
+		t.Fatalf("unexpected switchover history entry: %+v", history[0])
+	}
+}

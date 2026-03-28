@@ -291,6 +291,50 @@ func (executor postgresPromotionExecutor) Promote(_ context.Context, request con
 	return nil
 }
 
+type postgresDemotionExecutor struct {
+	t        *testing.T
+	fixture  *testenv.Postgres
+	host     string
+	port     int
+	database string
+	username string
+	password string
+}
+
+func newPostgresDemotionExecutor(t *testing.T, fixture *testenv.Postgres) postgresDemotionExecutor {
+	t.Helper()
+
+	return postgresDemotionExecutor{
+		t:        t,
+		fixture:  fixture,
+		host:     fixture.Host(t),
+		port:     fixture.Port(t),
+		database: fixture.Database(),
+		username: fixture.Username(),
+		password: fixture.Password(),
+	}
+}
+
+func (executor postgresDemotionExecutor) Demote(_ context.Context, request controlplane.DemotionRequest) error {
+	db, err := openDB(
+		executor.host,
+		executor.port,
+		executor.database,
+		executor.username,
+		executor.password,
+	)
+	if err == nil {
+		_, _ = db.Exec(`CHECKPOINT`)
+		_ = db.Close()
+	}
+
+	address := net.JoinHostPort(executor.host, fmt.Sprintf("%d", executor.port))
+	executor.fixture.Stop(executor.t)
+	waitForAddressUnavailable(executor.t, executor.fixture.Name(), address)
+
+	return nil
+}
+
 func openDB(host string, port int, database, username, password string) (*sql.DB, error) {
 	dsn := fmt.Sprintf(
 		"host=%s port=%d dbname=%s user=%s password=%s sslmode=disable connect_timeout=5",
