@@ -49,11 +49,21 @@ ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload`)
 	return primary, standby
 }
 
-func seededRealTopologyStore(t *testing.T) *controlplane.MemoryStateStore {
+func seededRealStore(t *testing.T, spec cluster.ClusterSpec) *controlplane.MemoryStateStore {
 	t.Helper()
 
 	store := controlplane.NewMemoryStateStore()
-	if _, err := store.StoreClusterSpec(context.Background(), cluster.ClusterSpec{
+	if _, err := store.StoreClusterSpec(context.Background(), spec); err != nil {
+		t.Fatalf("store cluster spec: %v", err)
+	}
+
+	return store
+}
+
+func seededRealTopologyStore(t *testing.T) *controlplane.MemoryStateStore {
+	t.Helper()
+
+	return seededRealStore(t, cluster.ClusterSpec{
 		ClusterName: "alpha",
 		Failover: cluster.FailoverPolicy{
 			Mode:            cluster.FailoverModeAutomatic,
@@ -67,11 +77,7 @@ func seededRealTopologyStore(t *testing.T) *controlplane.MemoryStateStore {
 			{Name: "alpha-1", Priority: 100},
 			{Name: "alpha-2", Priority: 90},
 		},
-	}); err != nil {
-		t.Fatalf("store real topology spec: %v", err)
-	}
-
-	return store
+	})
 }
 
 func publishObservedNodeStatus(t *testing.T, store *controlplane.MemoryStateStore, nodeName string, fixture *testenv.Postgres, observedAt time.Time) pgobs.Observation {
@@ -88,6 +94,17 @@ func publishObservedNodeStatus(t *testing.T, store *controlplane.MemoryStateStor
 	return observation
 }
 
+func publishObservedNodeStatusFromObservation(t *testing.T, store *controlplane.MemoryStateStore, nodeName, address string, observedAt time.Time, observation pgobs.Observation) agentmodel.NodeStatus {
+	t.Helper()
+
+	status := nodeStatusFromObservation(nodeName, address, observedAt, observation)
+	if _, err := store.PublishNodeStatus(context.Background(), status); err != nil {
+		t.Fatalf("publish node status for %s: %v", nodeName, err)
+	}
+
+	return status
+}
+
 func publishUnavailableNodeStatus(t *testing.T, store *controlplane.MemoryStateStore, nodeName, address string, observedAt time.Time, observation pgobs.Observation) agentmodel.NodeStatus {
 	t.Helper()
 
@@ -99,6 +116,28 @@ func publishUnavailableNodeStatus(t *testing.T, store *controlplane.MemoryStateS
 
 	if _, err := store.PublishNodeStatus(context.Background(), status); err != nil {
 		t.Fatalf("publish unavailable node status for %s: %v", nodeName, err)
+	}
+
+	return status
+}
+
+func publishWitnessNodeStatus(t *testing.T, store *controlplane.MemoryStateStore, nodeName string, observedAt time.Time, state cluster.MemberState) agentmodel.NodeStatus {
+	t.Helper()
+
+	status := agentmodel.NodeStatus{
+		NodeName:   nodeName,
+		MemberName: nodeName,
+		Role:       cluster.MemberRoleWitness,
+		State:      state,
+		Postgres: agentmodel.PostgresStatus{
+			Managed:   false,
+			CheckedAt: observedAt,
+		},
+		ObservedAt: observedAt,
+	}
+
+	if _, err := store.PublishNodeStatus(context.Background(), status); err != nil {
+		t.Fatalf("publish witness node status for %s: %v", nodeName, err)
 	}
 
 	return status
