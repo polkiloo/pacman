@@ -7,6 +7,7 @@ import (
 
 	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
 	"github.com/polkiloo/pacman/internal/cluster"
+	"github.com/polkiloo/pacman/internal/postgres"
 )
 
 type preparedRejoinExecution struct {
@@ -16,6 +17,7 @@ type preparedRejoinExecution struct {
 	currentPrimaryNode agentmodel.NodeStatus
 	operation          cluster.Operation
 	currentEpoch       cluster.Epoch
+	standby            postgres.StandbyConfig
 	executedAt         time.Time
 }
 
@@ -33,7 +35,7 @@ func (store *MemoryStateStore) ExecuteRejoinRewind(ctx context.Context, request 
 	}
 
 	if err := rewinder.Rewind(ctx, buildRewindRequest(prepared)); err != nil {
-		store.failRejoinExecution(prepared, err)
+		store.failRejoinExecution(prepared, rejoinRewindFailedMessage(prepared.decision.Member.Name, prepared.decision.CurrentPrimary.Name))
 		return RejoinExecution{}, err
 	}
 
@@ -149,10 +151,10 @@ func (store *MemoryStateStore) publishRejoinRewind(prepared preparedRejoinExecut
 		State:        cluster.RejoinStateRewinding,
 		Rewound:      true,
 		ExecutedAt:   prepared.executedAt,
-	}
+	}.Clone()
 }
 
-func (store *MemoryStateStore) failRejoinExecution(prepared preparedRejoinExecution, _ error) {
+func (store *MemoryStateStore) failRejoinExecution(prepared preparedRejoinExecution, message string) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
@@ -160,7 +162,7 @@ func (store *MemoryStateStore) failRejoinExecution(prepared preparedRejoinExecut
 	failed.State = cluster.OperationStateFailed
 	failed.Result = cluster.OperationResultFailed
 	failed.CompletedAt = prepared.executedAt
-	failed.Message = rejoinRewindFailedMessage(prepared.decision.Member.Name, prepared.decision.CurrentPrimary.Name)
+	failed.Message = message
 	store.journalOperationLocked(failed, prepared.executedAt)
 	store.refreshSourceOfTruthLocked(prepared.executedAt)
 }

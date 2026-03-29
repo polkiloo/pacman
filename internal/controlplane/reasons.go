@@ -27,4 +27,6 @@ const (
 	reasonMemberTimelineUnknown                 = "member timeline is unknown"
 	reasonCurrentPrimaryTimelineUnknown         = "current primary timeline is unknown"
 	reasonSystemIdentifierMismatch              = "member system identifier does not match current primary"
+	reasonRejoinRestartPending                  = "member restart as standby is still pending"
+	reasonRejoinReplicationNotStreaming         = "member is not yet streaming from current primary"
 )

@@ -153,10 +153,10 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] detect divergence requirements
 - [x] decide rewind vs reclone path
 - [x] run `pg_rewind` workflow
-- [ ] render standby configuration
-- [ ] restart as standby
-- [ ] verify replication health after rejoin
-- [ ] mark node as healthy cluster member again
+- [x] render standby configuration
+- [x] restart as standby
+- [x] verify replication health after rejoin
+- [x] mark node as healthy cluster member again
 
 ---
 

@@ -168,8 +168,6 @@ func TestMemoryStateStoreAssessRejoinMemberReportsBlockedReasons(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		testCase := testCase
-
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -257,8 +255,6 @@ func TestMemoryStateStoreDetectRejoinDivergenceRequirements(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		testCase := testCase
-
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -336,8 +332,6 @@ func TestMemoryStateStoreDecideRejoinStrategyChoosesRepairPath(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		testCase := testCase
-
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -568,8 +562,6 @@ func TestMemoryStateStoreExecuteRejoinRewindRejectsBlockedExecution(t *testing.T
 	}
 
 	for _, testCase := range testCases {
-		testCase := testCase
-
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -683,8 +675,6 @@ func TestMemoryStateStoreRejoinAssessmentsRequireKnownTarget(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		testCase := testCase
-
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -699,12 +689,14 @@ func TestMemoryStateStoreRejoinAssessmentsRequireKnownTarget(t *testing.T) {
 func rejoinFormerPrimaryStatus(nodeName string, observedAt time.Time, timeline int64, systemIdentifier string) agentmodel.NodeStatus {
 	status := failoverNodeStatus(nodeName, cluster.MemberRoleReplica, cluster.MemberStateNeedsRejoin, observedAt, false, timeline, 0)
 	status.NeedsRejoin = true
+	status.Postgres.Address = nodeName + "-postgres:5432"
 	status.Postgres.Details.SystemIdentifier = systemIdentifier
 	return status
 }
 
 func rejoinPrimaryStatus(nodeName string, observedAt time.Time, timeline int64, systemIdentifier string) agentmodel.NodeStatus {
 	status := readyPrimaryStatus(nodeName, observedAt, timeline)
+	status.Postgres.Address = nodeName + "-postgres:5432"
 	status.Postgres.Details.SystemIdentifier = systemIdentifier
 	return status
 }

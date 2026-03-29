@@ -6,15 +6,20 @@ import (
 
 	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
 	"github.com/polkiloo/pacman/internal/cluster"
+	"github.com/polkiloo/pacman/internal/postgres"
 )
 
-// RejoinEngine exposes rejoin-planning and early execution against the
-// replicated control-plane state.
+// RejoinEngine exposes rejoin planning and the currently implemented rejoin
+// execution phases against the replicated control-plane state.
 type RejoinEngine interface {
 	AssessRejoinMember(string) (RejoinMemberAssessment, error)
 	DetectRejoinDivergence(string) (RejoinDivergenceAssessment, error)
 	DecideRejoinStrategy(string) (RejoinStrategyDecision, error)
 	ExecuteRejoinRewind(context.Context, RejoinRequest, RewindExecutor) (RejoinExecution, error)
+	ExecuteRejoinStandbyConfig(context.Context, StandbyConfigExecutor) (RejoinExecution, error)
+	ExecuteRejoinRestartAsStandby(context.Context, StandbyRestartExecutor) (RejoinExecution, error)
+	VerifyRejoinReplication(context.Context) (RejoinExecution, error)
+	CompleteRejoin(context.Context) (RejoinExecution, error)
 }
 
 // RejoinMemberAssessment captures whether an observed member looks like a
@@ -122,15 +127,52 @@ type RewindRequest struct {
 	CurrentEpoch       cluster.Epoch
 }
 
-// RejoinExecution captures the outcome of executing the pg_rewind phase of an
-// in-flight rejoin.
+// StandbyConfigExecutor renders and persists the local standby configuration
+// for the rejoining member after rewind has completed.
+type StandbyConfigExecutor interface {
+	ConfigureStandby(context.Context, StandbyConfigRequest) error
+}
+
+// StandbyConfigRequest describes the local standby configuration the rejoining
+// member should apply before PostgreSQL is restarted in replica mode.
+type StandbyConfigRequest struct {
+	Operation          cluster.Operation
+	Decision           RejoinStrategyDecision
+	MemberNode         agentmodel.NodeStatus
+	CurrentPrimaryNode agentmodel.NodeStatus
+	CurrentEpoch       cluster.Epoch
+	Standby            postgres.StandbyConfig
+}
+
+// StandbyRestartExecutor restarts the former primary in standby mode after the
+// local standby configuration has been rendered.
+type StandbyRestartExecutor interface {
+	RestartAsStandby(context.Context, StandbyRestartRequest) error
+}
+
+// StandbyRestartRequest describes the local member that should be restarted in
+// standby mode against the current primary.
+type StandbyRestartRequest struct {
+	Operation          cluster.Operation
+	Decision           RejoinStrategyDecision
+	MemberNode         agentmodel.NodeStatus
+	CurrentPrimaryNode agentmodel.NodeStatus
+	CurrentEpoch       cluster.Epoch
+}
+
+// RejoinExecution captures the outcome of executing one of the currently
+// implemented rejoin phases.
 type RejoinExecution struct {
-	Operation    cluster.Operation
-	Decision     RejoinStrategyDecision
-	CurrentEpoch cluster.Epoch
-	State        cluster.RejoinState
-	Rewound      bool
-	ExecutedAt   time.Time
+	Operation           cluster.Operation
+	Decision            RejoinStrategyDecision
+	CurrentEpoch        cluster.Epoch
+	State               cluster.RejoinState
+	Rewound             bool
+	StandbyConfigured   bool
+	RestartedAsStandby  bool
+	ReplicationVerified bool
+	Completed           bool
+	ExecutedAt          time.Time
 }
 
 // Clone returns a detached copy of the rejoin execution result.
