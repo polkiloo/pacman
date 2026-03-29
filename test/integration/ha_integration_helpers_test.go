@@ -225,6 +225,16 @@ func waitForPostgresRole(t *testing.T, fixture *testenv.Postgres, role cluster.M
 	})
 }
 
+func waitForPromotedPrimaryTimeline(t *testing.T, fixture *testenv.Postgres, previousTimeline int64) pgobs.Observation {
+	t.Helper()
+
+	return waitForObservation(t, fixture, func(observation pgobs.Observation) bool {
+		return observation.Role == cluster.MemberRolePrimary &&
+			!observation.InRecovery &&
+			observation.Details.Timeline > previousTimeline
+	})
+}
+
 func waitForAddressUnavailable(t *testing.T, name, address string) {
 	t.Helper()
 
@@ -388,6 +398,51 @@ func (executor postgresDemotionExecutor) Demote(_ context.Context, request contr
 	waitForAddressUnavailable(executor.t, executor.fixture.Name(), address)
 
 	return nil
+}
+
+type containerPGRewindExecutor struct {
+	t          *testing.T
+	fixture    *testenv.Postgres
+	markerPath string
+}
+
+func newContainerPGRewindExecutor(t *testing.T, fixture *testenv.Postgres) containerPGRewindExecutor {
+	t.Helper()
+
+	return containerPGRewindExecutor{
+		t:          t,
+		fixture:    fixture,
+		markerPath: "/tmp/pacman-rejoin-rewind.ok",
+	}
+}
+
+func (executor containerPGRewindExecutor) Rewind(_ context.Context, request controlplane.RewindRequest) error {
+	if request.Decision.Strategy != cluster.RejoinStrategyRewind {
+		return fmt.Errorf("unexpected rejoin strategy %q", request.Decision.Strategy)
+	}
+
+	if request.CurrentPrimaryNode.Postgres.Address == "" {
+		return fmt.Errorf("current primary postgres address is required")
+	}
+
+	command := fmt.Sprintf(
+		"pg_rewind --version >/dev/null && printf 'member=%s primary=%s\\n' > %s",
+		request.Decision.Member.Name,
+		request.Decision.CurrentPrimary.Name,
+		executor.markerPath,
+	)
+	result := executor.fixture.Exec(executor.t, "sh", "-lc", command)
+	if result.ExitCode != 0 {
+		return fmt.Errorf("exec pg_rewind in %s returned %d: %s", executor.fixture.Name(), result.ExitCode, result.Output)
+	}
+
+	return nil
+}
+
+func (executor containerPGRewindExecutor) RequireMarker(t *testing.T) string {
+	t.Helper()
+
+	return executor.fixture.RequireExec(t, "sh", "-lc", "cat "+executor.markerPath)
 }
 
 func openDB(host string, port int, database, username, password string) (*sql.DB, error) {
