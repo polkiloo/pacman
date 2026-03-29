@@ -3,6 +3,7 @@ package pacmand
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,7 +70,7 @@ func TestRunRequiresConfigPath(t *testing.T) {
 		t.Fatalf("expected no stderr output, got %q", stderr.String())
 	}
 
-	if err != errConfigPathRequired {
+	if !errors.Is(err, errConfigPathRequired) {
 		t.Fatalf("unexpected error: got %v, want %v", err, errConfigPathRequired)
 	}
 
@@ -219,7 +220,7 @@ func TestRunReturnsContextError(t *testing.T) {
 	})
 
 	err := app.Run(ctx, nil)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context cancellation, got %v", err)
 	}
 }
