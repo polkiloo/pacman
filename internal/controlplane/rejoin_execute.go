@@ -1,0 +1,215 @@
+package controlplane
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
+	"github.com/polkiloo/pacman/internal/cluster"
+)
+
+type preparedRejoinExecution struct {
+	request            RejoinRequest
+	decision           RejoinStrategyDecision
+	memberNode         agentmodel.NodeStatus
+	currentPrimaryNode agentmodel.NodeStatus
+	operation          cluster.Operation
+	currentEpoch       cluster.Epoch
+	executedAt         time.Time
+}
+
+// ExecuteRejoinRewind runs the pg_rewind phase of a former-primary rejoin and
+// leaves the cluster in the recovering phase until the later standby steps
+// complete.
+func (store *MemoryStateStore) ExecuteRejoinRewind(ctx context.Context, request RejoinRequest, rewinder RewindExecutor) (RejoinExecution, error) {
+	if err := ctx.Err(); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	prepared, err := store.prepareRejoinRewindExecution(request, rewinder)
+	if err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := rewinder.Rewind(ctx, buildRewindRequest(prepared)); err != nil {
+		store.failRejoinExecution(prepared, err)
+		return RejoinExecution{}, err
+	}
+
+	return store.publishRejoinRewind(prepared), nil
+}
+
+func (store *MemoryStateStore) prepareRejoinRewindExecution(request RejoinRequest, rewinder RewindExecutor) (preparedRejoinExecution, error) {
+	if rewinder == nil {
+		return preparedRejoinExecution{}, ErrRejoinRewindExecutorRequired
+	}
+
+	normalized := normalizeRejoinRequest(request)
+	if normalized.Member == "" {
+		return preparedRejoinExecution{}, ErrRejoinTargetRequired
+	}
+	executedAt := store.now().UTC()
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	if store.activeOperation != nil {
+		return preparedRejoinExecution{}, ErrRejoinOperationInProgress
+	}
+
+	inputs, err := store.rejoinInputsLocked(normalized.Member)
+	if err != nil {
+		return preparedRejoinExecution{}, err
+	}
+
+	decision := buildRejoinStrategyDecision(buildRejoinDivergenceAssessment(inputs))
+	if err := validateRejoinRewindDecision(decision); err != nil {
+		return preparedRejoinExecution{}, err
+	}
+
+	operation, err := buildRejoinOperation(normalized, decision, executedAt)
+	if err != nil {
+		return preparedRejoinExecution{}, err
+	}
+
+	store.activeOperation = &operation
+	store.refreshSourceOfTruthLocked(executedAt)
+
+	return preparedRejoinExecution{
+		request:            normalized,
+		decision:           decision.Clone(),
+		memberNode:         inputs.memberNode.Clone(),
+		currentPrimaryNode: inputs.currentPrimaryNode.Clone(),
+		operation:          operation.Clone(),
+		currentEpoch:       inputs.currentEpoch,
+		executedAt:         executedAt,
+	}, nil
+}
+
+func validateRejoinRewindDecision(decision RejoinStrategyDecision) error {
+	switch {
+	case decision.DirectRejoinPossible:
+		return ErrRejoinRewindNotRequired
+	case !decision.Decided:
+		return ErrRejoinStrategyUndetermined
+	case decision.Strategy != cluster.RejoinStrategyRewind:
+		return ErrRejoinRecloneRequired
+	default:
+		return nil
+	}
+}
+
+func buildRejoinOperation(request RejoinRequest, decision RejoinStrategyDecision, executedAt time.Time) (cluster.Operation, error) {
+	operation := cluster.Operation{
+		ID:          rejoinOperationID(executedAt),
+		Kind:        cluster.OperationKindRejoin,
+		State:       cluster.OperationStateRunning,
+		RequestedBy: request.RequestedBy,
+		RequestedAt: executedAt,
+		Reason:      request.Reason,
+		FromMember:  decision.Member.Name,
+		ToMember:    decision.CurrentPrimary.Name,
+		StartedAt:   executedAt,
+		Result:      cluster.OperationResultPending,
+		Message:     rejoinRewindRunningMessage(decision.Member.Name, decision.CurrentPrimary.Name),
+	}
+
+	if err := operation.Validate(); err != nil {
+		return cluster.Operation{}, err
+	}
+
+	return operation, nil
+}
+
+func buildRewindRequest(prepared preparedRejoinExecution) RewindRequest {
+	return RewindRequest{
+		Operation:          prepared.operation.Clone(),
+		Decision:           prepared.decision.Clone(),
+		MemberNode:         prepared.memberNode.Clone(),
+		CurrentPrimaryNode: prepared.currentPrimaryNode.Clone(),
+		CurrentEpoch:       prepared.currentEpoch,
+	}
+}
+
+func (store *MemoryStateStore) publishRejoinRewind(prepared preparedRejoinExecution) RejoinExecution {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	updatedOperation := prepared.operation.Clone()
+	updatedOperation.Message = rejoinRewindCompletedMessage(prepared.decision.Member.Name, prepared.decision.CurrentPrimary.Name)
+	store.activeOperation = &updatedOperation
+	store.nodeStatuses[prepared.decision.Member.Name] = rewoundFormerPrimaryStatus(prepared.memberNode, prepared.executedAt)
+	store.refreshSourceOfTruthLocked(prepared.executedAt)
+
+	return RejoinExecution{
+		Operation:    updatedOperation.Clone(),
+		Decision:     prepared.decision.Clone(),
+		CurrentEpoch: prepared.currentEpoch,
+		State:        cluster.RejoinStateRewinding,
+		Rewound:      true,
+		ExecutedAt:   prepared.executedAt,
+	}
+}
+
+func (store *MemoryStateStore) failRejoinExecution(prepared preparedRejoinExecution, _ error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	failed := prepared.operation.Clone()
+	failed.State = cluster.OperationStateFailed
+	failed.Result = cluster.OperationResultFailed
+	failed.CompletedAt = prepared.executedAt
+	failed.Message = rejoinRewindFailedMessage(prepared.decision.Member.Name, prepared.decision.CurrentPrimary.Name)
+	store.journalOperationLocked(failed, prepared.executedAt)
+	store.refreshSourceOfTruthLocked(prepared.executedAt)
+}
+
+func normalizeRejoinRequest(request RejoinRequest) RejoinRequest {
+	normalized := request
+	normalized.Member = strings.TrimSpace(normalized.Member)
+	normalized.RequestedBy = strings.TrimSpace(normalized.RequestedBy)
+	normalized.Reason = strings.TrimSpace(normalized.Reason)
+
+	if normalized.RequestedBy == "" {
+		normalized.RequestedBy = "controlplane"
+	}
+
+	if normalized.Reason == "" {
+		normalized.Reason = "repair former primary using pg_rewind"
+	}
+
+	return normalized
+}
+
+func rejoinOperationID(now time.Time) string {
+	return "rejoin-" + now.UTC().Format("20060102T150405.000000000Z07:00")
+}
+
+func rejoinRewindRunningMessage(member, currentPrimary string) string {
+	return "executing pg_rewind for " + member + " against " + currentPrimary
+}
+
+func rejoinRewindCompletedMessage(member, currentPrimary string) string {
+	return "pg_rewind completed for " + member + " against " + currentPrimary + "; standby configuration is still pending"
+}
+
+func rejoinRewindFailedMessage(member, currentPrimary string) string {
+	return "pg_rewind failed for " + member + " against " + currentPrimary
+}
+
+func rewoundFormerPrimaryStatus(status agentmodel.NodeStatus, observedAt time.Time) agentmodel.NodeStatus {
+	updated := status.Clone()
+	updated.Role = cluster.MemberRoleReplica
+	updated.State = cluster.MemberStateNeedsRejoin
+	updated.NeedsRejoin = true
+	updated.ObservedAt = observedAt
+	updated.Postgres.Managed = true
+	updated.Postgres.Up = false
+	updated.Postgres.CheckedAt = observedAt
+	updated.Postgres.Role = cluster.MemberRoleReplica
+	updated.Postgres.RecoveryKnown = false
+	updated.Postgres.InRecovery = false
+
+	return updated
+}

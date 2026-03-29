@@ -56,6 +56,7 @@ type ReplicatedStateStore interface {
 	MemberDiscovery
 	LeaderElector
 	SwitchoverEngine
+	RejoinEngine
 	DesiredStateStore
 	ObservedStateStore
 	Reconciler
