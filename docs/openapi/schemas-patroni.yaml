@@ -1,0 +1,289 @@
+openapi: 3.1.0
+info:
+  title: PACMAN Patroni Schemas
+  version: 0.1.0
+components:
+  schemas:
+    BuildInfo:
+      type: object
+      required:
+        - version
+        - commit
+        - buildDate
+      properties:
+        version:
+          type: string
+        commit:
+          type: string
+        buildDate:
+          type: string
+          format: date-time
+    NodeHealthStatus:
+      type: object
+      required:
+        - nodeName
+        - role
+        - state
+        - postgresUp
+        - ready
+        - observedAt
+      properties:
+        nodeName:
+          type: string
+        role:
+          $ref: '#/components/schemas/MemberRole'
+        state:
+          $ref: '#/components/schemas/MemberState'
+        postgresUp:
+          type: boolean
+        ready:
+          type: boolean
+        leader:
+          type: boolean
+        lagBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        timeline:
+          type: integer
+          minimum: 0
+        observedAt:
+          type: string
+          format: date-time
+        build:
+          $ref: '#/components/schemas/BuildInfo'
+    PatroniNodeStatus:
+      type: object
+      additionalProperties: true
+      required:
+        - state
+        - role
+        - patroni
+      properties:
+        state:
+          type: string
+        role:
+          $ref: '#/components/schemas/PatroniRole'
+        postmaster_start_time:
+          type: string
+          format: date-time
+        server_version:
+          type: integer
+        timeline:
+          type: integer
+          minimum: 0
+        tags:
+          type: object
+          additionalProperties: true
+        database_system_identifier:
+          type: string
+        cluster_unlocked:
+          type: boolean
+        failsafe_mode_is_active:
+          type: boolean
+        pause:
+          type: boolean
+        pending_restart:
+          type: boolean
+        pending_restart_reason:
+          type: object
+          additionalProperties: true
+        dcs_last_seen:
+          type: integer
+          format: int64
+          minimum: 0
+        xlog:
+          $ref: '#/components/schemas/PatroniXLogStatus'
+        replication:
+          type: array
+          items:
+            $ref: '#/components/schemas/PatroniReplicationConnection'
+        patroni:
+          $ref: '#/components/schemas/PatroniIdentity'
+    PatroniXLogStatus:
+      type: object
+      properties:
+        location:
+          type: integer
+          format: int64
+          minimum: 0
+        received_location:
+          type: integer
+          format: int64
+          minimum: 0
+        replayed_location:
+          type: integer
+          format: int64
+          minimum: 0
+        replayed_timestamp:
+          type: string
+          format: date-time
+          nullable: true
+        paused:
+          type: boolean
+    PatroniReplicationConnection:
+      type: object
+      properties:
+        usename:
+          type: string
+        application_name:
+          type: string
+        client_addr:
+          type: string
+        state:
+          type: string
+        sync_state:
+          type: string
+        sync_priority:
+          type: integer
+    PatroniIdentity:
+      type: object
+      required:
+        - version
+        - scope
+        - name
+      properties:
+        version:
+          type: string
+        scope:
+          type: string
+        name:
+          type: string
+    PatroniClusterStatus:
+      type: object
+      additionalProperties: true
+      required:
+        - members
+        - scope
+      properties:
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/PatroniClusterMember'
+        scope:
+          type: string
+        scheduled_switchover:
+          $ref: '#/components/schemas/PatroniScheduledSwitchover'
+    PatroniClusterMember:
+      type: object
+      additionalProperties: true
+      required:
+        - name
+        - role
+        - state
+      properties:
+        name:
+          type: string
+        role:
+          $ref: '#/components/schemas/PatroniMemberRole'
+        state:
+          type: string
+        api_url:
+          type: string
+          format: uri
+        host:
+          type: string
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        timeline:
+          type: integer
+          minimum: 0
+        tags:
+          type: object
+          additionalProperties: true
+        receive_lag:
+          type: integer
+          format: int64
+          minimum: 0
+        receive_lsn:
+          type: string
+        replay_lag:
+          type: integer
+          format: int64
+          minimum: 0
+        replay_lsn:
+          type: string
+        lag:
+          type: integer
+          format: int64
+          minimum: 0
+        lsn:
+          type: string
+    PatroniScheduledSwitchover:
+      type: object
+      required:
+        - at
+        - from
+      properties:
+        at:
+          type: string
+          format: date-time
+        from:
+          type: string
+        to:
+          type: string
+    PatroniHistory:
+      type: array
+      items:
+        $ref: '#/components/schemas/PatroniHistoryLine'
+    PatroniHistoryLine:
+      type: array
+      minItems: 4
+      maxItems: 4
+      prefixItems:
+        - type: integer
+          minimum: 0
+        - type: integer
+          format: int64
+          minimum: 0
+        - type: string
+        - type: string
+          format: date-time
+    PatroniDynamicConfig:
+      type: object
+      additionalProperties: true
+      properties:
+        ttl:
+          type: integer
+          minimum: 1
+        loop_wait:
+          type: integer
+          minimum: 1
+        retry_timeout:
+          type: integer
+          minimum: 1
+        maximum_lag_on_failover:
+          type: integer
+          format: int64
+          minimum: 0
+        check_timeline:
+          type: boolean
+        synchronous_mode:
+          type: boolean
+        synchronous_mode_strict:
+          type: boolean
+        failsafe_mode:
+          type: boolean
+        postgresql:
+          $ref: '#/components/schemas/PatroniPostgresqlConfig'
+    PatroniPostgresqlConfig:
+      type: object
+      additionalProperties: true
+      properties:
+        use_slots:
+          type: boolean
+        use_pg_rewind:
+          type: boolean
+        parameters:
+          type: object
+          additionalProperties: true
+    MemberRole:
+      $ref: './schemas-enums.yaml#/components/schemas/MemberRole'
+    MemberState:
+      $ref: './schemas-enums.yaml#/components/schemas/MemberState'
+    PatroniRole:
+      $ref: './schemas-enums.yaml#/components/schemas/PatroniRole'
+    PatroniMemberRole:
+      $ref: './schemas-enums.yaml#/components/schemas/PatroniMemberRole'

@@ -164,11 +164,12 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ### Contract
 - [x] draft OpenAPI spec for control-plane API
-- [ ] review OpenAPI contract against domain model and failover safety rules
-- [ ] define API authentication and authorization model
-- [ ] define stable API versioning and compatibility policy
+- [x] review OpenAPI contract against domain model and failover safety rules
+- [x] define API authentication and authorization model
+- [x] define stable API versioning and compatibility policy
 
 ### Implementation
+- [ ] implement API router with Fiber
 - [ ] expose `GET /health`
 - [ ] expose `GET /liveness`
 - [ ] expose `GET /readiness`

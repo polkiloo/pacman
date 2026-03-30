@@ -1,0 +1,408 @@
+openapi: 3.1.0
+info:
+  title: PACMAN Cluster Schemas
+  version: 0.1.0
+components:
+  schemas:
+    ClusterStatus:
+      type: object
+      required:
+        - clusterName
+        - phase
+        - currentEpoch
+        - maintenance
+        - members
+        - observedAt
+      properties:
+        clusterName:
+          type: string
+        phase:
+          $ref: '#/components/schemas/ClusterPhase'
+        currentPrimary:
+          type: string
+        currentEpoch:
+          type: integer
+          format: int64
+          minimum: 0
+        observedAt:
+          type: string
+          format: date-time
+        maintenance:
+          $ref: '#/components/schemas/MaintenanceModeStatus'
+        activeOperation:
+          $ref: '#/components/schemas/Operation'
+        scheduledSwitchover:
+          $ref: '#/components/schemas/ScheduledSwitchover'
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemberStatus'
+    ClusterSpec:
+      type: object
+      required:
+        - clusterName
+        - generation
+      properties:
+        clusterName:
+          type: string
+        generation:
+          type: integer
+          format: int64
+          minimum: 0
+        maintenance:
+          $ref: '#/components/schemas/MaintenanceDesiredState'
+        failover:
+          $ref: '#/components/schemas/FailoverPolicy'
+        switchover:
+          $ref: '#/components/schemas/SwitchoverPolicy'
+        postgres:
+          $ref: '#/components/schemas/PostgresPolicy'
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemberSpec'
+    MemberSpec:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        priority:
+          type: integer
+          minimum: 0
+        noFailover:
+          type: boolean
+        tags:
+          type: object
+          additionalProperties: true
+    FailoverPolicy:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum:
+            - automatic
+            - manual_only
+            - disabled
+        maximumLagBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        checkTimeline:
+          type: boolean
+        requireQuorum:
+          type: boolean
+        fencingRequired:
+          type: boolean
+    SwitchoverPolicy:
+      type: object
+      properties:
+        allowScheduled:
+          type: boolean
+        requireSpecificCandidateDuringMaintenance:
+          type: boolean
+    PostgresPolicy:
+      type: object
+      properties:
+        synchronousMode:
+          type: string
+          enum:
+            - disabled
+            - quorum
+            - strict
+        usePgRewind:
+          type: boolean
+        parameters:
+          type: object
+          additionalProperties: true
+    MemberStatus:
+      type: object
+      required:
+        - name
+        - role
+        - state
+        - healthy
+        - lastSeenAt
+      properties:
+        name:
+          type: string
+        apiUrl:
+          type: string
+          format: uri
+        host:
+          type: string
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        role:
+          $ref: '#/components/schemas/MemberRole'
+        state:
+          $ref: '#/components/schemas/MemberState'
+        healthy:
+          type: boolean
+        leader:
+          type: boolean
+        timeline:
+          type: integer
+          minimum: 0
+        lagBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        priority:
+          type: integer
+          minimum: 0
+        noFailover:
+          type: boolean
+        needsRejoin:
+          type: boolean
+        tags:
+          type: object
+          additionalProperties: true
+        lastSeenAt:
+          type: string
+          format: date-time
+    NodeStatus:
+      type: object
+      required:
+        - nodeName
+        - role
+        - state
+        - postgres
+        - controlPlane
+        - observedAt
+      properties:
+        nodeName:
+          type: string
+        memberName:
+          type: string
+        role:
+          $ref: '#/components/schemas/MemberRole'
+        state:
+          $ref: '#/components/schemas/MemberState'
+        pendingRestart:
+          type: boolean
+        needsRejoin:
+          type: boolean
+        tags:
+          type: object
+          additionalProperties: true
+        postgres:
+          $ref: '#/components/schemas/PostgresLocalStatus'
+        controlPlane:
+          $ref: '#/components/schemas/ControlPlaneLocalStatus'
+        observedAt:
+          type: string
+          format: date-time
+    PostgresLocalStatus:
+      type: object
+      required:
+        - managed
+        - checkedAt
+        - up
+        - role
+        - recoveryKnown
+        - inRecovery
+      properties:
+        managed:
+          type: boolean
+        address:
+          type: string
+        checkedAt:
+          type: string
+          format: date-time
+        up:
+          type: boolean
+        role:
+          $ref: '#/components/schemas/MemberRole'
+        recoveryKnown:
+          type: boolean
+        inRecovery:
+          type: boolean
+        details:
+          $ref: '#/components/schemas/PostgresDetails'
+        wal:
+          $ref: '#/components/schemas/WalProgress'
+        errors:
+          $ref: '#/components/schemas/PostgresErrors'
+    PostgresDetails:
+      type: object
+      properties:
+        serverVersion:
+          type: integer
+        pendingRestart:
+          type: boolean
+        systemIdentifier:
+          type: string
+        timeline:
+          type: integer
+          minimum: 0
+        postmasterStartAt:
+          type: string
+          format: date-time
+        replicationLagBytes:
+          type: integer
+          format: int64
+          minimum: 0
+    WalProgress:
+      type: object
+      properties:
+        writeLsn:
+          type: string
+        flushLsn:
+          type: string
+        receiveLsn:
+          type: string
+        replayLsn:
+          type: string
+        replayTimestamp:
+          type: string
+          format: date-time
+    ControlPlaneLocalStatus:
+      type: object
+      required:
+        - clusterReachable
+      properties:
+        clusterReachable:
+          type: boolean
+        leader:
+          type: boolean
+        lastHeartbeatAt:
+          type: string
+          format: date-time
+        lastDcsSeenAt:
+          type: string
+          format: date-time
+        publishError:
+          type: string
+    PostgresErrors:
+      type: object
+      properties:
+        availability:
+          type: string
+        state:
+          type: string
+    HistoryEntry:
+      type: object
+      required:
+        - operationId
+        - kind
+        - result
+        - finishedAt
+      properties:
+        operationId:
+          type: string
+        kind:
+          $ref: '#/components/schemas/OperationKind'
+        timeline:
+          type: integer
+          minimum: 0
+        walLsn:
+          type: string
+        fromMember:
+          type: string
+        toMember:
+          type: string
+        reason:
+          type: string
+        result:
+          type: string
+          enum:
+            - succeeded
+            - failed
+            - cancelled
+        finishedAt:
+          type: string
+          format: date-time
+    MaintenanceModeStatus:
+      type: object
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+        reason:
+          type: string
+        requestedBy:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+    MaintenanceDesiredState:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        defaultReason:
+          type: string
+    MaintenanceModeUpdateRequest:
+      type: object
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+        reason:
+          type: string
+        requestedBy:
+          type: string
+    DiagnosticsSummary:
+      type: object
+      required:
+        - clusterName
+        - generatedAt
+        - members
+      properties:
+        clusterName:
+          type: string
+        generatedAt:
+          type: string
+          format: date-time
+        controlPlaneLeader:
+          type: string
+        quorumReachable:
+          type: boolean
+        warnings:
+          type: array
+          items:
+            type: string
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemberDiagnosticSummary'
+    MemberDiagnosticSummary:
+      type: object
+      required:
+        - name
+        - role
+        - state
+      properties:
+        name:
+          type: string
+        role:
+          $ref: '#/components/schemas/MemberRole'
+        state:
+          $ref: '#/components/schemas/MemberState'
+        lagBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        lastSeenAt:
+          type: string
+          format: date-time
+        needsRejoin:
+          type: boolean
+    ClusterPhase:
+      $ref: './schemas-enums.yaml#/components/schemas/ClusterPhase'
+    MemberRole:
+      $ref: './schemas-enums.yaml#/components/schemas/MemberRole'
+    MemberState:
+      $ref: './schemas-enums.yaml#/components/schemas/MemberState'
+    OperationKind:
+      $ref: './schemas-enums.yaml#/components/schemas/OperationKind'
+    Operation:
+      $ref: './schemas-operations.yaml#/components/schemas/Operation'
+    ScheduledSwitchover:
+      $ref: './schemas-operations.yaml#/components/schemas/ScheduledSwitchover'

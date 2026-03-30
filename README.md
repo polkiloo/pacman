@@ -67,4 +67,6 @@ flowchart TB
 ## API Contract
 
 A draft OpenAPI contract for the control-plane API lives in [docs/openapi.yaml](docs/openapi.yaml).
-It is intentionally inspired by Patroni's operational REST patterns, but adapted to PACMAN's explicit cluster-centric model.
+The maintainable split source for that contract lives in [docs/openapi](docs/openapi), using `oapi-codegen`-compatible external references across the module files.
+It now includes both PACMAN-native `/api/v1/*` endpoints and Patroni-compatible top-level routes to support seamless migration.
+The review notes, authentication model, and compatibility policy for that contract live in [docs/api-contract.md](docs/api-contract.md).

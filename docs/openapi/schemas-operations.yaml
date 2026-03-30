@@ -1,0 +1,178 @@
+openapi: 3.1.0
+info:
+  title: PACMAN Operation Schemas
+  version: 0.1.0
+components:
+  schemas:
+    PatroniSwitchoverRequest:
+      type: object
+      required:
+        - leader
+      properties:
+        leader:
+          type: string
+        candidate:
+          type: string
+        scheduled_at:
+          type: string
+          format: date-time
+    PatroniFailoverRequest:
+      type: object
+      required:
+        - candidate
+      properties:
+        candidate:
+          type: string
+        leader:
+          type: string
+    PatroniRestartRequest:
+      type: object
+      properties:
+        restart_pending:
+          type: boolean
+        role:
+          $ref: '#/components/schemas/PatroniRole'
+        postgres_version:
+          type: integer
+        timeout:
+          type: integer
+          minimum: 0
+        schedule:
+          type: string
+          format: date-time
+    PatroniReinitializeRequest:
+      type: object
+      properties:
+        force:
+          type: boolean
+        from-leader:
+          type: boolean
+    SwitchoverRequest:
+      type: object
+      required:
+        - candidate
+      properties:
+        candidate:
+          type: string
+        scheduledAt:
+          type: string
+          format: date-time
+        reason:
+          type: string
+        requestedBy:
+          type: string
+    FailoverRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+        requestedBy:
+          type: string
+    OperationAccepted:
+      type: object
+      required:
+        - operation
+      properties:
+        message:
+          type: string
+        operation:
+          $ref: '#/components/schemas/Operation'
+    Operation:
+      type: object
+      required:
+        - id
+        - kind
+        - state
+        - requestedAt
+      properties:
+        id:
+          type: string
+        kind:
+          $ref: '#/components/schemas/OperationKind'
+        state:
+          $ref: '#/components/schemas/OperationState'
+        requestedBy:
+          type: string
+        requestedAt:
+          type: string
+          format: date-time
+        reason:
+          type: string
+        fromMember:
+          type: string
+        toMember:
+          type: string
+        scheduledAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        result:
+          type: string
+          enum:
+            - pending
+            - succeeded
+            - failed
+            - cancelled
+        message:
+          type: string
+    ScheduledSwitchover:
+      type: object
+      required:
+        - at
+        - from
+      properties:
+        at:
+          type: string
+          format: date-time
+        from:
+          type: string
+        to:
+          type: string
+    ClusterCondition:
+      type: object
+      required:
+        - type
+        - status
+        - lastTransitionTime
+      properties:
+        type:
+          type: string
+        status:
+          type: string
+          enum:
+            - 'True'
+            - 'False'
+            - Unknown
+        reason:
+          type: string
+        message:
+          type: string
+        lastTransitionTime:
+          type: string
+          format: date-time
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        retryable:
+          type: boolean
+        details:
+          type: object
+          additionalProperties: true
+    PatroniRole:
+      $ref: './schemas-enums.yaml#/components/schemas/PatroniRole'
+    OperationKind:
+      $ref: './schemas-enums.yaml#/components/schemas/OperationKind'
+    OperationState:
+      $ref: './schemas-enums.yaml#/components/schemas/OperationState'

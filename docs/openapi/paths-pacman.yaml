@@ -1,0 +1,407 @@
+openapi: 3.1.0
+info:
+  title: PACMAN Native API Paths
+  version: 0.1.0
+paths:
+  /api/v1/cluster:
+    get:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Cluster
+      summary: Cluster topology and observed state
+      operationId: getClusterStatus
+      responses:
+        '200':
+          description: Current cluster topology and control-plane view
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/cluster/spec:
+    get:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Cluster
+      summary: Desired cluster specification
+      operationId: getClusterSpec
+      responses:
+        '200':
+          description: Cluster source-of-truth specification
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterSpec'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/members:
+    get:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Members
+      summary: List cluster members
+      operationId: listMembers
+      responses:
+        '200':
+          description: Member list
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MemberStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/nodes/{nodeName}:
+    get:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Members
+      summary: Get detailed node-local status
+      operationId: getNodeStatus
+      parameters:
+        - name: nodeName
+          in: path
+          required: true
+          description: Stable PACMAN node identifier.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Detailed local node status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeStatus'
+        '404':
+          description: Node was not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/history:
+    get:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Cluster
+      summary: Cluster operation history
+      operationId: getHistory
+      responses:
+        '200':
+          description: Recorded failover, switchover, and rejoin operations
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HistoryEntry'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/maintenance:
+    get:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Maintenance
+      summary: Get cluster maintenance mode
+      operationId: getMaintenanceMode
+      responses:
+        '200':
+          description: Current maintenance-mode state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceModeStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Maintenance
+      summary: Update cluster maintenance mode
+      operationId: putMaintenanceMode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MaintenanceModeUpdateRequest'
+      responses:
+        '200':
+          description: Maintenance mode updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceModeStatus'
+        '400':
+          description: Invalid maintenance request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/diagnostics:
+    get:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Diagnostics
+      summary: Diagnostics summary
+      operationId: getDiagnostics
+      parameters:
+        - name: includeMembers
+          in: query
+          required: false
+          description: Include per-member diagnostic summaries.
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: Diagnostic summary of the current cluster view
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiagnosticsSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/operations/switchover:
+    post:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Operations
+      summary: Request a switchover
+      description: |
+        Requests a planned topology change. This endpoint is inspired by Patroni's `/switchover`,
+        but PACMAN models the result as an explicit operation object.
+
+        The current primary is inferred from observed cluster state. The caller
+        supplies the target candidate and optional schedule time; PACMAN still
+        applies readiness validation and cluster safety gates before accepting
+        the switchover intent.
+      operationId: postSwitchover
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SwitchoverRequest'
+      responses:
+        '200':
+          description: Switchover completed synchronously
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationAccepted'
+        '202':
+          description: Switchover accepted or scheduled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationAccepted'
+        '400':
+          description: Invalid switchover request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Another conflicting topology operation is already active
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '412':
+          description: Switchover preconditions are not satisfied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Cluster is not in a state where switchover can be attempted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Operations
+      summary: Cancel a scheduled switchover
+      operationId: deleteScheduledSwitchover
+      responses:
+        '200':
+          description: Scheduled switchover cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationAccepted'
+        '404':
+          description: No scheduled switchover exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Switchover is already running and can no longer be cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/operations/failover:
+    post:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Operations
+      summary: Request a manual failover
+      description: |
+        Requests a manual failover. This endpoint is inspired by Patroni's
+        `/failover`, but PACMAN keeps it separate from switchover to avoid ambiguous request bodies.
+
+        A manual failover does not bypass PACMAN safety rules. The control
+        plane still requires primary-failure confirmation, quorum when policy
+        requires it, eligible promotion candidates, lag and timeline checks,
+        and fencing when configured. Candidate selection remains a control-plane
+        decision based on the ranked eligible member set.
+      operationId: postFailover
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FailoverRequest'
+      responses:
+        '200':
+          description: Failover completed synchronously
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationAccepted'
+        '202':
+          description: Failover accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationAccepted'
+        '400':
+          description: Invalid failover request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Another conflicting topology operation is already active
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '412':
+          description: Failover preconditions are not satisfied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Cluster is not in a state where failover can be attempted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+components:
+  responses:
+    Unauthorized:
+      $ref: './components-meta.yaml#/components/responses/Unauthorized'
+    Forbidden:
+      $ref: './components-meta.yaml#/components/responses/Forbidden'
+  securitySchemes:
+    bearerAuth:
+      $ref: './components-meta.yaml#/components/securitySchemes/bearerAuth'
+    mutualTLS:
+      $ref: './components-meta.yaml#/components/securitySchemes/mutualTLS'
+  schemas:
+    ClusterStatus:
+      $ref: './schemas-cluster.yaml#/components/schemas/ClusterStatus'
+    ClusterSpec:
+      $ref: './schemas-cluster.yaml#/components/schemas/ClusterSpec'
+    MemberStatus:
+      $ref: './schemas-cluster.yaml#/components/schemas/MemberStatus'
+    NodeStatus:
+      $ref: './schemas-cluster.yaml#/components/schemas/NodeStatus'
+    HistoryEntry:
+      $ref: './schemas-cluster.yaml#/components/schemas/HistoryEntry'
+    MaintenanceModeStatus:
+      $ref: './schemas-cluster.yaml#/components/schemas/MaintenanceModeStatus'
+    MaintenanceModeUpdateRequest:
+      $ref: './schemas-cluster.yaml#/components/schemas/MaintenanceModeUpdateRequest'
+    DiagnosticsSummary:
+      $ref: './schemas-cluster.yaml#/components/schemas/DiagnosticsSummary'
+    SwitchoverRequest:
+      $ref: './schemas-operations.yaml#/components/schemas/SwitchoverRequest'
+    FailoverRequest:
+      $ref: './schemas-operations.yaml#/components/schemas/FailoverRequest'
+    OperationAccepted:
+      $ref: './schemas-operations.yaml#/components/schemas/OperationAccepted'
+    ErrorResponse:
+      $ref: './schemas-operations.yaml#/components/schemas/ErrorResponse'
