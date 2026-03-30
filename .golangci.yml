@@ -3,8 +3,17 @@ run:
 
 linters:
   enable:
+    - asasalint
+    - bidichk
+    - bodyclose
+    - copyloopvar
     - errcheck
+    - errorlint
+    - gofmt
+    - gosimple
     - govet
     - ineffassign
+    - misspell
     - staticcheck
+    - unconvert
     - unused

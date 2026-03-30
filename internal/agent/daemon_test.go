@@ -21,7 +21,7 @@ func TestNewDaemonRejectsNilLogger(t *testing.T) {
 	t.Parallel()
 
 	_, err := NewDaemon(validDataConfig(), nil)
-	if err != ErrLoggerRequired {
+	if !errors.Is(err, ErrLoggerRequired) {
 		t.Fatalf("expected nil logger error, got %v", err)
 	}
 }
@@ -39,7 +39,7 @@ func TestNewDaemonRejectsMissingPostgresConfigForDataNode(t *testing.T) {
 	}
 
 	_, err := NewDaemon(cfg, logging.New("pacmand", &bytes.Buffer{}))
-	if err != ErrPostgresConfigRequired {
+	if !errors.Is(err, ErrPostgresConfigRequired) {
 		t.Fatalf("expected postgres config error, got %v", err)
 	}
 }
@@ -660,7 +660,7 @@ func TestDaemonStartRejectsSecondStart(t *testing.T) {
 		t.Fatalf("start daemon: %v", err)
 	}
 
-	if err := daemon.Start(ctx); err != ErrDaemonAlreadyStarted {
+	if err := daemon.Start(ctx); !errors.Is(err, ErrDaemonAlreadyStarted) {
 		t.Fatalf("expected second start error, got %v", err)
 	}
 
@@ -705,10 +705,10 @@ func TestDaemonStartRejectsConcurrentSecondStart(t *testing.T) {
 	var alreadyStartedCount int
 	for range 2 {
 		err := <-errs
-		switch err {
-		case nil:
+		switch {
+		case err == nil:
 			startedCount++
-		case ErrDaemonAlreadyStarted:
+		case errors.Is(err, ErrDaemonAlreadyStarted):
 			alreadyStartedCount++
 		default:
 			t.Fatalf("unexpected start error: %v", err)
@@ -739,7 +739,7 @@ func TestDaemonStartReturnsContextError(t *testing.T) {
 	}
 
 	err = daemon.Start(ctx)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected canceled context, got %v", err)
 	}
 }

@@ -43,8 +43,6 @@ func TestMaintenanceDesiredStateEffectiveReason(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		testCase := testCase
-
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -88,8 +86,6 @@ func TestMaintenanceModeUpdateRequestEffectiveReason(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		testCase := testCase
-
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -148,8 +144,6 @@ func TestMaintenanceModeStatusValidate(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		testCase := testCase
-
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 

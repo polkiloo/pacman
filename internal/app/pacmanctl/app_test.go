@@ -3,6 +3,7 @@ package pacmanctl
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -109,7 +110,7 @@ func TestRunReturnsContextError(t *testing.T) {
 	})
 
 	err := app.Run(ctx, nil)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context cancellation, got %v", err)
 	}
 }

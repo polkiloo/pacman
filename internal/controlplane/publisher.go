@@ -139,6 +139,9 @@ func (store *MemoryStateStore) PublishNodeStatus(ctx context.Context, status age
 	published.Leader = store.leaderLease.LeaderNode == cloned.NodeName && store.leaderLease.isActiveAt(cloned.ObservedAt, store.leaseDuration)
 	published.LastDCSSeenAt = store.lastDCSSeenAt
 	cloned.ControlPlane = published
+	if previous, ok := store.nodeStatuses[cloned.NodeName]; ok {
+		cloned = mergeControlPlaneManagedNodeFlags(previous, cloned)
+	}
 	store.nodeStatuses[cloned.NodeName] = cloned
 	store.refreshSourceOfTruthLocked(cloned.ObservedAt.UTC())
 	store.mu.Unlock()
@@ -353,6 +356,24 @@ func mergeDesiredMemberPolicy(member cluster.MemberStatus, spec cluster.MemberSp
 	member.Tags = mergeMemberTags(member.Tags, spec.Tags)
 
 	return member
+}
+
+func mergeControlPlaneManagedNodeFlags(previous, current agentmodel.NodeStatus) agentmodel.NodeStatus {
+	merged := current.Clone()
+
+	if previous.NeedsRejoin && !merged.NeedsRejoin {
+		merged.NeedsRejoin = true
+	}
+
+	if previous.NeedsRejoin && previous.PendingRestart && !merged.PendingRestart {
+		merged.PendingRestart = true
+	}
+
+	if merged.PendingRestart {
+		merged.Postgres.Details.PendingRestart = true
+	}
+
+	return merged
 }
 
 func observedMemberHealthy(observation agentmodel.NodeStatus) bool {

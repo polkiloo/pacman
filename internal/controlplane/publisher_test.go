@@ -130,7 +130,7 @@ func TestMemoryStateStoreReturnsContextError(t *testing.T) {
 	cancel()
 
 	_, err := store.PublishNodeStatus(ctx, agentmodel.NodeStatus{NodeName: "alpha-1"})
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected canceled context, got %v", err)
 	}
 }
@@ -311,7 +311,7 @@ func TestMemoryStateStoreRegisterMemberReturnsContextError(t *testing.T) {
 		ControlAddress: "10.0.0.10:9090",
 		RegisteredAt:   time.Date(2026, time.March, 24, 9, 0, 0, 0, time.UTC),
 	})
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected canceled context, got %v", err)
 	}
 }
@@ -993,7 +993,7 @@ func TestMemoryStateStoreStoreClusterSpecRespectsCanceledContext(t *testing.T) {
 	cancel()
 
 	_, err := store.StoreClusterSpec(ctx, cluster.ClusterSpec{ClusterName: "alpha"})
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected canceled context, got %v", err)
 	}
 }

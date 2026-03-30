@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -42,7 +43,7 @@ func (daemon *Daemon) campaignLeader(ctx context.Context, nodeName string) {
 	}
 
 	_, _, err := elector.CampaignLeader(ctx, nodeName)
-	if err == nil || err == controlplane.ErrLeaderCandidateUnknown {
+	if err == nil || errors.Is(err, controlplane.ErrLeaderCandidateUnknown) {
 		return
 	}
 
