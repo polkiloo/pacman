@@ -130,4 +130,6 @@ flowchart LR
     class T store
 ```
 
+For the pluggable DCS (distributed configuration store) design, see [ARCHITECTURE_DCS.md](ARCHITECTURE_DCS.md).
+
 For the Kubernetes-native deployment model, see [ARCHITECTURE_K8S.md](ARCHITECTURE_K8S.md).
