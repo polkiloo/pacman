@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/oapi-codegen/oapi-codegen/HEAD/configuration-schema.json
+package: openapicontract
+generate:
+  models: true
+  client: true
+output-options:
+  skip-prune: true
+import-mapping:
+  ./paths-probes.yaml: "-"
+  ./paths-patroni.yaml: "-"
+  ./paths-pacman.yaml: "-"
+  ./components-meta.yaml: "-"
+  ./schemas-patroni.yaml: "-"
+  ./schemas-cluster.yaml: "-"
+  ./schemas-operations.yaml: "-"
+  ./schemas-enums.yaml: "-"

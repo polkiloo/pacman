@@ -25,13 +25,29 @@ LDFLAGS := -X github.com/polkiloo/pacman/internal/version.Version=$(VERSION) \
 	-X github.com/polkiloo/pacman/internal/version.Commit=$(COMMIT) \
 	-X github.com/polkiloo/pacman/internal/version.BuildDate=$(BUILD_DATE)
 
-.PHONY: fmt test test-integration docker-build-test-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl tidy clean
+.PHONY: fmt test test-integration docker-build-test-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl tidy clean openapi-codegen-check
 
 fmt:
 	$(GO) fmt ./...
 
 test:
 	$(GO) test ./...
+
+openapi-codegen-check:
+	@for spec in \
+		docs/openapi/components-meta.yaml \
+		docs/openapi/schemas-enums.yaml \
+		docs/openapi/schemas-patroni.yaml \
+		docs/openapi/schemas-operations.yaml \
+		docs/openapi/schemas-cluster.yaml \
+		docs/openapi/paths-probes.yaml \
+		docs/openapi/paths-patroni.yaml \
+		docs/openapi/paths-pacman.yaml; do \
+		tmp=$$(mktemp); \
+		trap 'rm -f "$$tmp"' EXIT; \
+		$(GO) tool oapi-codegen -config docs/openapi/oapi-codegen.yaml -o "$$tmp" "$$spec" || exit $$?; \
+		rm -f "$$tmp"; \
+	done
 
 docker-build-test-image:
 	docker build --progress=$(DOCKER_BUILD_PROGRESS) -f test/docker/pacman-runner.Dockerfile -t $(PACMAN_TEST_IMAGE) .

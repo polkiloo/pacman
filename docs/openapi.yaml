@@ -10,17 +10,23 @@ info:
     - cluster topology and history inspection,
     - manual switchover and failover operations.
 
-    PACMAN intentionally adapts those patterns to a more explicit cluster-centric model:
-    - lightweight probe endpoints stay top-level for load balancers and Kubernetes probes,
-    - cluster management resources live under `/api/v1`,
-    - topology changes are modeled as explicit operation requests,
-    - maintenance mode is a first-class resource instead of being hidden behind generic config writes.
+    For migration, PACMAN exposes both:
+    - Patroni-compatible top-level endpoints for probes, monitoring, and administrative flows,
+    - cluster-centric `/api/v1/*` endpoints for PACMAN-native clients.
+
+    This draft has been reviewed against the current PACMAN domain model and
+    Patroni REST semantics. The accompanying review, migration notes,
+    authentication model, and compatibility policy live in `docs/api-contract.md`.
 servers:
   - url: http://localhost:8080
     description: Local development control-plane endpoint
 tags:
   - name: Probes
     description: Lightweight node-local health and role probes
+  - name: Patroni Compatibility
+    description: Patroni-compatible top-level endpoints for seamless client migration
+  - name: Monitoring
+    description: Monitoring and metrics endpoints
   - name: Cluster
     description: Cluster topology, desired state, and history
   - name: Members
@@ -33,979 +39,191 @@ tags:
     description: Explicit topology-changing operations
 paths:
   /health:
-    get:
-      tags:
-        - Probes
-      summary: Node health probe
-      description: Returns `200` when PostgreSQL is up and the local PACMAN node can report current state.
-      operationId: getHealth
-      responses:
-        '200':
-          description: Node is healthy enough to serve local status
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/NodeHealthStatus'
-        '503':
-          description: PostgreSQL or the local PACMAN process is not healthy
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/NodeHealthStatus'
+    $ref: './openapi/paths-probes.yaml#/paths/~1health'
   /liveness:
-    get:
-      tags:
-        - Probes
-      summary: Process liveness probe
-      description: Returns `200` when the PACMAN heartbeat loop is progressing. Intended for `livenessProbe`.
-      operationId: getLiveness
-      responses:
-        '200':
-          description: Local heartbeat loop is healthy
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/NodeHealthStatus'
-        '503':
-          description: Local heartbeat loop is stale
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/NodeHealthStatus'
+    $ref: './openapi/paths-probes.yaml#/paths/~1liveness'
   /readiness:
-    get:
-      tags:
-        - Probes
-      summary: Readiness probe
-      description: Returns `200` when the node can participate in the PACMAN cluster and safely serve requests.
-      operationId: getReadiness
-      responses:
-        '200':
-          description: Node is ready
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/NodeHealthStatus'
-        '503':
-          description: Node is not ready
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/NodeHealthStatus'
+    $ref: './openapi/paths-probes.yaml#/paths/~1readiness'
   /primary:
-    get:
-      tags:
-        - Probes
-      summary: Primary role probe
-      description: Returns `200` only when the local node is the authoritative writable primary.
-      operationId: getPrimaryProbe
-      responses:
-        '200':
-          description: Node is the current primary
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/NodeHealthStatus'
-        '503':
-          description: Node is not the current primary
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/NodeHealthStatus'
+    $ref: './openapi/paths-probes.yaml#/paths/~1primary'
   /replica:
-    get:
-      tags:
-        - Probes
-      summary: Replica role probe
-      description: |
-        Returns `200` only when the local node is a healthy replica.
-        If `maxLagBytes` is provided, the probe also verifies the observed lag threshold.
-      operationId: getReplicaProbe
-      parameters:
-        - name: maxLagBytes
-          in: query
-          required: false
-          description: Maximum allowed replication lag in bytes.
-          schema:
-            type: integer
-            format: int64
-            minimum: 0
-      responses:
-        '200':
-          description: Node is a healthy replica
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/NodeHealthStatus'
-        '503':
-          description: Node is not a healthy replica or exceeds the requested lag threshold
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/NodeHealthStatus'
+    $ref: './openapi/paths-probes.yaml#/paths/~1replica'
+  /:
+    $ref: './openapi/paths-probes.yaml#/paths/~1'
+  /read-write:
+    $ref: './openapi/paths-probes.yaml#/paths/~1read-write'
+  /leader:
+    $ref: './openapi/paths-probes.yaml#/paths/~1leader'
+  /standby-leader:
+    $ref: './openapi/paths-probes.yaml#/paths/~1standby-leader'
+  /standby_leader:
+    $ref: './openapi/paths-probes.yaml#/paths/~1standby_leader'
+  /read-only:
+    $ref: './openapi/paths-probes.yaml#/paths/~1read-only'
+  /synchronous:
+    $ref: './openapi/paths-probes.yaml#/paths/~1synchronous'
+  /sync:
+    $ref: './openapi/paths-probes.yaml#/paths/~1sync'
+  /read-only-sync:
+    $ref: './openapi/paths-probes.yaml#/paths/~1read-only-sync'
+  /quorum:
+    $ref: './openapi/paths-probes.yaml#/paths/~1quorum'
+  /read-only-quorum:
+    $ref: './openapi/paths-probes.yaml#/paths/~1read-only-quorum'
+  /asynchronous:
+    $ref: './openapi/paths-probes.yaml#/paths/~1asynchronous'
+  /async:
+    $ref: './openapi/paths-probes.yaml#/paths/~1async'
+  /patroni:
+    $ref: './openapi/paths-patroni.yaml#/paths/~1patroni'
+  /metrics:
+    $ref: './openapi/paths-patroni.yaml#/paths/~1metrics'
+  /cluster:
+    $ref: './openapi/paths-patroni.yaml#/paths/~1cluster'
+  /history:
+    $ref: './openapi/paths-patroni.yaml#/paths/~1history'
+  /config:
+    $ref: './openapi/paths-patroni.yaml#/paths/~1config'
+  /switchover:
+    $ref: './openapi/paths-patroni.yaml#/paths/~1switchover'
+  /failover:
+    $ref: './openapi/paths-patroni.yaml#/paths/~1failover'
+  /restart:
+    $ref: './openapi/paths-patroni.yaml#/paths/~1restart'
+  /reload:
+    $ref: './openapi/paths-patroni.yaml#/paths/~1reload'
+  /reinitialize:
+    $ref: './openapi/paths-patroni.yaml#/paths/~1reinitialize'
   /api/v1/cluster:
-    get:
-      tags:
-        - Cluster
-      summary: Cluster topology and observed state
-      operationId: getClusterStatus
-      responses:
-        '200':
-          description: Current cluster topology and control-plane view
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ClusterStatus'
+    $ref: './openapi/paths-pacman.yaml#/paths/~1api~1v1~1cluster'
   /api/v1/cluster/spec:
-    get:
-      tags:
-        - Cluster
-      summary: Desired cluster specification
-      operationId: getClusterSpec
-      responses:
-        '200':
-          description: Cluster source-of-truth specification
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ClusterSpec'
+    $ref: './openapi/paths-pacman.yaml#/paths/~1api~1v1~1cluster~1spec'
   /api/v1/members:
-    get:
-      tags:
-        - Members
-      summary: List cluster members
-      operationId: listMembers
-      responses:
-        '200':
-          description: Member list
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                  - items
-                properties:
-                  items:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/MemberStatus'
+    $ref: './openapi/paths-pacman.yaml#/paths/~1api~1v1~1members'
   /api/v1/nodes/{nodeName}:
-    get:
-      tags:
-        - Members
-      summary: Get detailed node-local status
-      operationId: getNodeStatus
-      parameters:
-        - name: nodeName
-          in: path
-          required: true
-          description: Stable PACMAN node identifier.
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Detailed local node status
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/NodeStatus'
-        '404':
-          description: Node was not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+    $ref: './openapi/paths-pacman.yaml#/paths/~1api~1v1~1nodes~1{nodeName}'
   /api/v1/history:
-    get:
-      tags:
-        - Cluster
-      summary: Cluster operation history
-      operationId: getHistory
-      responses:
-        '200':
-          description: Recorded failover, switchover, and rejoin operations
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                  - items
-                properties:
-                  items:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/HistoryEntry'
+    $ref: './openapi/paths-pacman.yaml#/paths/~1api~1v1~1history'
   /api/v1/maintenance:
-    get:
-      tags:
-        - Maintenance
-      summary: Get cluster maintenance mode
-      operationId: getMaintenanceMode
-      responses:
-        '200':
-          description: Current maintenance-mode state
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MaintenanceModeStatus'
-    put:
-      tags:
-        - Maintenance
-      summary: Update cluster maintenance mode
-      operationId: putMaintenanceMode
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MaintenanceModeUpdateRequest'
-      responses:
-        '200':
-          description: Maintenance mode updated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MaintenanceModeStatus'
-        '400':
-          description: Invalid maintenance request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+    $ref: './openapi/paths-pacman.yaml#/paths/~1api~1v1~1maintenance'
   /api/v1/diagnostics:
-    get:
-      tags:
-        - Diagnostics
-      summary: Diagnostics summary
-      operationId: getDiagnostics
-      parameters:
-        - name: includeMembers
-          in: query
-          required: false
-          description: Include per-member diagnostic summaries.
-          schema:
-            type: boolean
-            default: true
-      responses:
-        '200':
-          description: Diagnostic summary of the current cluster view
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DiagnosticsSummary'
+    $ref: './openapi/paths-pacman.yaml#/paths/~1api~1v1~1diagnostics'
   /api/v1/operations/switchover:
-    post:
-      tags:
-        - Operations
-      summary: Request a switchover
-      description: |
-        Requests a planned topology change. This endpoint is inspired by Patroni's `/switchover`,
-        but PACMAN models the result as an explicit operation object.
-      operationId: postSwitchover
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SwitchoverRequest'
-      responses:
-        '200':
-          description: Switchover completed synchronously
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OperationAccepted'
-        '202':
-          description: Switchover accepted or scheduled
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OperationAccepted'
-        '400':
-          description: Invalid switchover request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '409':
-          description: Another conflicting topology operation is already active
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '412':
-          description: Switchover preconditions are not satisfied
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Cluster is not in a state where switchover can be attempted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-    delete:
-      tags:
-        - Operations
-      summary: Cancel a scheduled switchover
-      operationId: deleteScheduledSwitchover
-      responses:
-        '200':
-          description: Scheduled switchover cancelled
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OperationAccepted'
-        '404':
-          description: No scheduled switchover exists
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '409':
-          description: Switchover is already running and can no longer be cancelled
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+    $ref: './openapi/paths-pacman.yaml#/paths/~1api~1v1~1operations~1switchover'
   /api/v1/operations/failover:
-    post:
-      tags:
-        - Operations
-      summary: Request a manual failover
-      description: |
-        Requests a manual failover to a specific candidate. This endpoint is inspired by Patroni's
-        `/failover`, but PACMAN keeps it separate from switchover to avoid ambiguous request bodies.
-      operationId: postFailover
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/FailoverRequest'
-      responses:
-        '200':
-          description: Failover completed synchronously
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OperationAccepted'
-        '202':
-          description: Failover accepted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OperationAccepted'
-        '400':
-          description: Invalid failover request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '409':
-          description: Another conflicting topology operation is already active
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '412':
-          description: Failover preconditions are not satisfied
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          description: Cluster is not in a state where failover can be attempted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+    $ref: './openapi/paths-pacman.yaml#/paths/~1api~1v1~1operations~1failover'
 components:
+  parameters:
+    PatroniLagQuery:
+      $ref: './openapi/components-meta.yaml#/components/parameters/PatroniLagQuery'
+  responses:
+    Unauthorized:
+      $ref: './openapi/components-meta.yaml#/components/responses/Unauthorized'
+    Forbidden:
+      $ref: './openapi/components-meta.yaml#/components/responses/Forbidden'
+  securitySchemes:
+    bearerAuth:
+      $ref: './openapi/components-meta.yaml#/components/securitySchemes/bearerAuth'
+    mutualTLS:
+      $ref: './openapi/components-meta.yaml#/components/securitySchemes/mutualTLS'
   schemas:
     BuildInfo:
-      type: object
-      required:
-        - version
-        - commit
-        - buildDate
-      properties:
-        version:
-          type: string
-        commit:
-          type: string
-        buildDate:
-          type: string
-          format: date-time
+      $ref: './openapi/schemas-patroni.yaml#/components/schemas/BuildInfo'
     NodeHealthStatus:
-      type: object
-      required:
-        - nodeName
-        - role
-        - state
-        - postgresUp
-        - ready
-        - observedAt
-      properties:
-        nodeName:
-          type: string
-        role:
-          $ref: '#/components/schemas/MemberRole'
-        state:
-          $ref: '#/components/schemas/MemberState'
-        postgresUp:
-          type: boolean
-        ready:
-          type: boolean
-        leader:
-          type: boolean
-        lagBytes:
-          type: integer
-          format: int64
-          minimum: 0
-        timeline:
-          type: integer
-          minimum: 0
-        observedAt:
-          type: string
-          format: date-time
-        build:
-          $ref: '#/components/schemas/BuildInfo'
+      $ref: './openapi/schemas-patroni.yaml#/components/schemas/NodeHealthStatus'
+    PatroniNodeStatus:
+      $ref: './openapi/schemas-patroni.yaml#/components/schemas/PatroniNodeStatus'
+    PatroniXLogStatus:
+      $ref: './openapi/schemas-patroni.yaml#/components/schemas/PatroniXLogStatus'
+    PatroniReplicationConnection:
+      $ref: './openapi/schemas-patroni.yaml#/components/schemas/PatroniReplicationConnection'
+    PatroniIdentity:
+      $ref: './openapi/schemas-patroni.yaml#/components/schemas/PatroniIdentity'
+    PatroniClusterStatus:
+      $ref: './openapi/schemas-patroni.yaml#/components/schemas/PatroniClusterStatus'
+    PatroniClusterMember:
+      $ref: './openapi/schemas-patroni.yaml#/components/schemas/PatroniClusterMember'
+    PatroniScheduledSwitchover:
+      $ref: './openapi/schemas-patroni.yaml#/components/schemas/PatroniScheduledSwitchover'
+    PatroniHistory:
+      $ref: './openapi/schemas-patroni.yaml#/components/schemas/PatroniHistory'
+    PatroniHistoryLine:
+      $ref: './openapi/schemas-patroni.yaml#/components/schemas/PatroniHistoryLine'
+    PatroniDynamicConfig:
+      $ref: './openapi/schemas-patroni.yaml#/components/schemas/PatroniDynamicConfig'
+    PatroniPostgresqlConfig:
+      $ref: './openapi/schemas-patroni.yaml#/components/schemas/PatroniPostgresqlConfig'
     ClusterStatus:
-      type: object
-      required:
-        - clusterName
-        - phase
-        - currentEpoch
-        - maintenance
-        - members
-        - observedAt
-      properties:
-        clusterName:
-          type: string
-        phase:
-          $ref: '#/components/schemas/ClusterPhase'
-        currentPrimary:
-          type: string
-        currentEpoch:
-          type: integer
-          format: int64
-          minimum: 0
-        observedAt:
-          type: string
-          format: date-time
-        maintenance:
-          $ref: '#/components/schemas/MaintenanceModeStatus'
-        activeOperation:
-          $ref: '#/components/schemas/Operation'
-        scheduledSwitchover:
-          $ref: '#/components/schemas/ScheduledSwitchover'
-        conditions:
-          type: array
-          items:
-            $ref: '#/components/schemas/ClusterCondition'
-        members:
-          type: array
-          items:
-            $ref: '#/components/schemas/MemberStatus'
+      $ref: './openapi/schemas-cluster.yaml#/components/schemas/ClusterStatus'
     ClusterSpec:
-      type: object
-      required:
-        - clusterName
-        - generation
-      properties:
-        clusterName:
-          type: string
-        generation:
-          type: integer
-          format: int64
-          minimum: 0
-        maintenance:
-          $ref: '#/components/schemas/MaintenanceDesiredState'
-        failover:
-          $ref: '#/components/schemas/FailoverPolicy'
-        switchover:
-          $ref: '#/components/schemas/SwitchoverPolicy'
-        postgres:
-          $ref: '#/components/schemas/PostgresPolicy'
-        members:
-          type: array
-          items:
-            $ref: '#/components/schemas/MemberSpec'
+      $ref: './openapi/schemas-cluster.yaml#/components/schemas/ClusterSpec'
     MemberSpec:
-      type: object
-      required:
-        - name
-      properties:
-        name:
-          type: string
-        priority:
-          type: integer
-          minimum: 0
-        noFailover:
-          type: boolean
-        tags:
-          type: object
-          additionalProperties: true
+      $ref: './openapi/schemas-cluster.yaml#/components/schemas/MemberSpec'
     FailoverPolicy:
-      type: object
-      properties:
-        mode:
-          type: string
-          enum:
-            - automatic
-            - manual_only
-            - disabled
-        maximumLagBytes:
-          type: integer
-          format: int64
-          minimum: 0
-        checkTimeline:
-          type: boolean
-        requireQuorum:
-          type: boolean
-        fencingRequired:
-          type: boolean
+      $ref: './openapi/schemas-cluster.yaml#/components/schemas/FailoverPolicy'
     SwitchoverPolicy:
-      type: object
-      properties:
-        allowScheduled:
-          type: boolean
-        requireSpecificCandidateDuringMaintenance:
-          type: boolean
+      $ref: './openapi/schemas-cluster.yaml#/components/schemas/SwitchoverPolicy'
     PostgresPolicy:
-      type: object
-      properties:
-        synchronousMode:
-          type: string
-          enum:
-            - disabled
-            - quorum
-            - strict
-        usePgRewind:
-          type: boolean
-        parameters:
-          type: object
-          additionalProperties: true
+      $ref: './openapi/schemas-cluster.yaml#/components/schemas/PostgresPolicy'
     MemberStatus:
-      type: object
-      required:
-        - name
-        - role
-        - state
-        - healthy
-        - lastSeenAt
-      properties:
-        name:
-          type: string
-        apiUrl:
-          type: string
-          format: uri
-        host:
-          type: string
-        port:
-          type: integer
-          minimum: 1
-          maximum: 65535
-        role:
-          $ref: '#/components/schemas/MemberRole'
-        state:
-          $ref: '#/components/schemas/MemberState'
-        healthy:
-          type: boolean
-        leader:
-          type: boolean
-        timeline:
-          type: integer
-          minimum: 0
-        lagBytes:
-          type: integer
-          format: int64
-          minimum: 0
-        priority:
-          type: integer
-          minimum: 0
-        noFailover:
-          type: boolean
-        needsRejoin:
-          type: boolean
-        tags:
-          type: object
-          additionalProperties: true
-        lastSeenAt:
-          type: string
-          format: date-time
+      $ref: './openapi/schemas-cluster.yaml#/components/schemas/MemberStatus'
     NodeStatus:
-      type: object
-      required:
-        - nodeName
-        - role
-        - state
-        - postgres
-        - controlPlane
-        - observedAt
-      properties:
-        nodeName:
-          type: string
-        memberName:
-          type: string
-        role:
-          $ref: '#/components/schemas/MemberRole'
-        state:
-          $ref: '#/components/schemas/MemberState'
-        pendingRestart:
-          type: boolean
-        needsRejoin:
-          type: boolean
-        tags:
-          type: object
-          additionalProperties: true
-        postgres:
-          $ref: '#/components/schemas/PostgresLocalStatus'
-        controlPlane:
-          $ref: '#/components/schemas/ControlPlaneLocalStatus'
-        observedAt:
-          type: string
-          format: date-time
+      $ref: './openapi/schemas-cluster.yaml#/components/schemas/NodeStatus'
     PostgresLocalStatus:
-      type: object
-      required:
-        - up
-        - inRecovery
-      properties:
-        up:
-          type: boolean
-        inRecovery:
-          type: boolean
-        serverVersion:
-          type: integer
-        systemIdentifier:
-          type: string
-        timeline:
-          type: integer
-          minimum: 0
-        postmasterStartTime:
-          type: string
-          format: date-time
-        replicationLagBytes:
-          type: integer
-          format: int64
-          minimum: 0
-        wal:
-          $ref: '#/components/schemas/WalProgress'
+      $ref: './openapi/schemas-cluster.yaml#/components/schemas/PostgresLocalStatus'
+    PostgresDetails:
+      $ref: './openapi/schemas-cluster.yaml#/components/schemas/PostgresDetails'
     WalProgress:
-      type: object
-      properties:
-        writeLsn:
-          type: string
-        flushLsn:
-          type: string
-        receiveLsn:
-          type: string
-        replayLsn:
-          type: string
-        replayTimestamp:
-          type: string
-          format: date-time
+      $ref: './openapi/schemas-cluster.yaml#/components/schemas/WalProgress'
     ControlPlaneLocalStatus:
-      type: object
-      required:
-        - clusterReachable
-      properties:
-        clusterReachable:
-          type: boolean
-        leader:
-          type: boolean
-        lastHeartbeatAt:
-          type: string
-          format: date-time
-        lastDcsSeenAt:
-          type: string
-          format: date-time
+      $ref: './openapi/schemas-cluster.yaml#/components/schemas/ControlPlaneLocalStatus'
+    PostgresErrors:
+      $ref: './openapi/schemas-cluster.yaml#/components/schemas/PostgresErrors'
     HistoryEntry:
-      type: object
-      required:
-        - operationId
-        - kind
-        - result
-        - finishedAt
-      properties:
-        operationId:
-          type: string
-        kind:
-          $ref: '#/components/schemas/OperationKind'
-        timeline:
-          type: integer
-          minimum: 0
-        walLsn:
-          type: string
-        fromMember:
-          type: string
-        toMember:
-          type: string
-        reason:
-          type: string
-        result:
-          type: string
-          enum:
-            - succeeded
-            - failed
-            - cancelled
-        finishedAt:
-          type: string
-          format: date-time
+      $ref: './openapi/schemas-cluster.yaml#/components/schemas/HistoryEntry'
     MaintenanceModeStatus:
-      type: object
-      required:
-        - enabled
-      properties:
-        enabled:
-          type: boolean
-        reason:
-          type: string
-        requestedBy:
-          type: string
-        updatedAt:
-          type: string
-          format: date-time
+      $ref: './openapi/schemas-cluster.yaml#/components/schemas/MaintenanceModeStatus'
     MaintenanceDesiredState:
-      type: object
-      properties:
-        enabled:
-          type: boolean
-        defaultReason:
-          type: string
+      $ref: './openapi/schemas-cluster.yaml#/components/schemas/MaintenanceDesiredState'
     MaintenanceModeUpdateRequest:
-      type: object
-      required:
-        - enabled
-      properties:
-        enabled:
-          type: boolean
-        reason:
-          type: string
-        requestedBy:
-          type: string
+      $ref: './openapi/schemas-cluster.yaml#/components/schemas/MaintenanceModeUpdateRequest'
     DiagnosticsSummary:
-      type: object
-      required:
-        - clusterName
-        - generatedAt
-        - members
-      properties:
-        clusterName:
-          type: string
-        generatedAt:
-          type: string
-          format: date-time
-        controlPlaneLeader:
-          type: string
-        quorumReachable:
-          type: boolean
-        warnings:
-          type: array
-          items:
-            type: string
-        members:
-          type: array
-          items:
-            $ref: '#/components/schemas/MemberDiagnosticSummary'
+      $ref: './openapi/schemas-cluster.yaml#/components/schemas/DiagnosticsSummary'
     MemberDiagnosticSummary:
-      type: object
-      required:
-        - name
-        - role
-        - state
-      properties:
-        name:
-          type: string
-        role:
-          $ref: '#/components/schemas/MemberRole'
-        state:
-          $ref: '#/components/schemas/MemberState'
-        lagBytes:
-          type: integer
-          format: int64
-          minimum: 0
-        lastSeenAt:
-          type: string
-          format: date-time
-        needsRejoin:
-          type: boolean
+      $ref: './openapi/schemas-cluster.yaml#/components/schemas/MemberDiagnosticSummary'
+    PatroniSwitchoverRequest:
+      $ref: './openapi/schemas-operations.yaml#/components/schemas/PatroniSwitchoverRequest'
+    PatroniFailoverRequest:
+      $ref: './openapi/schemas-operations.yaml#/components/schemas/PatroniFailoverRequest'
+    PatroniRestartRequest:
+      $ref: './openapi/schemas-operations.yaml#/components/schemas/PatroniRestartRequest'
+    PatroniReinitializeRequest:
+      $ref: './openapi/schemas-operations.yaml#/components/schemas/PatroniReinitializeRequest'
     SwitchoverRequest:
-      type: object
-      required:
-        - leader
-      properties:
-        leader:
-          type: string
-        candidate:
-          type: string
-        scheduledAt:
-          type: string
-          format: date-time
-        reason:
-          type: string
-        requestedBy:
-          type: string
+      $ref: './openapi/schemas-operations.yaml#/components/schemas/SwitchoverRequest'
     FailoverRequest:
-      type: object
-      required:
-        - candidate
-      properties:
-        candidate:
-          type: string
-        allowDataLoss:
-          type: boolean
-        reason:
-          type: string
-        requestedBy:
-          type: string
+      $ref: './openapi/schemas-operations.yaml#/components/schemas/FailoverRequest'
     OperationAccepted:
-      type: object
-      required:
-        - operation
-      properties:
-        message:
-          type: string
-        operation:
-          $ref: '#/components/schemas/Operation'
+      $ref: './openapi/schemas-operations.yaml#/components/schemas/OperationAccepted'
     Operation:
-      type: object
-      required:
-        - id
-        - kind
-        - state
-        - requestedAt
-      properties:
-        id:
-          type: string
-        kind:
-          $ref: '#/components/schemas/OperationKind'
-        state:
-          $ref: '#/components/schemas/OperationState'
-        requestedBy:
-          type: string
-        requestedAt:
-          type: string
-          format: date-time
-        reason:
-          type: string
-        fromMember:
-          type: string
-        toMember:
-          type: string
-        scheduledAt:
-          type: string
-          format: date-time
-        startedAt:
-          type: string
-          format: date-time
-        completedAt:
-          type: string
-          format: date-time
-        result:
-          type: string
-          enum:
-            - pending
-            - succeeded
-            - failed
-            - cancelled
-        message:
-          type: string
+      $ref: './openapi/schemas-operations.yaml#/components/schemas/Operation'
     ScheduledSwitchover:
-      type: object
-      required:
-        - at
-        - from
-      properties:
-        at:
-          type: string
-          format: date-time
-        from:
-          type: string
-        to:
-          type: string
+      $ref: './openapi/schemas-operations.yaml#/components/schemas/ScheduledSwitchover'
     ClusterCondition:
-      type: object
-      required:
-        - type
-        - status
-        - lastTransitionTime
-      properties:
-        type:
-          type: string
-        status:
-          type: string
-          enum:
-            - 'True'
-            - 'False'
-            - Unknown
-        reason:
-          type: string
-        message:
-          type: string
-        lastTransitionTime:
-          type: string
-          format: date-time
+      $ref: './openapi/schemas-operations.yaml#/components/schemas/ClusterCondition'
     ErrorResponse:
-      type: object
-      required:
-        - error
-        - message
-      properties:
-        error:
-          type: string
-        message:
-          type: string
-        retryable:
-          type: boolean
-        details:
-          type: object
-          additionalProperties: true
+      $ref: './openapi/schemas-operations.yaml#/components/schemas/ErrorResponse'
     ClusterPhase:
-      type: string
-      enum:
-        - initializing
-        - healthy
-        - degraded
-        - failing_over
-        - switching_over
-        - maintenance
-        - recovering
-        - unknown
+      $ref: './openapi/schemas-enums.yaml#/components/schemas/ClusterPhase'
     MemberRole:
-      type: string
-      enum:
-        - primary
-        - replica
-        - witness
-        - standby_leader
-        - unknown
+      $ref: './openapi/schemas-enums.yaml#/components/schemas/MemberRole'
+    PatroniRole:
+      $ref: './openapi/schemas-enums.yaml#/components/schemas/PatroniRole'
+    PatroniMemberRole:
+      $ref: './openapi/schemas-enums.yaml#/components/schemas/PatroniMemberRole'
     MemberState:
-      type: string
-      enum:
-        - running
-        - streaming
-        - starting
-        - stopping
-        - failed
-        - unreachable
-        - needs_rejoin
-        - unknown
+      $ref: './openapi/schemas-enums.yaml#/components/schemas/MemberState'
     OperationKind:
-      type: string
-      enum:
-        - switchover
-        - failover
-        - rejoin
-        - maintenance_change
+      $ref: './openapi/schemas-enums.yaml#/components/schemas/OperationKind'
     OperationState:
-      type: string
-      enum:
-        - accepted
-        - scheduled
-        - running
-        - completed
-        - failed
-        - cancelled
+      $ref: './openapi/schemas-enums.yaml#/components/schemas/OperationState'

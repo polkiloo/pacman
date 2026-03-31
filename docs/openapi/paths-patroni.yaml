@@ -1,0 +1,471 @@
+openapi: 3.1.0
+info:
+  title: PACMAN Patroni Compatibility Paths
+  version: 0.1.0
+paths:
+  /patroni:
+    get:
+      security: []
+      tags:
+        - Monitoring
+        - Patroni Compatibility
+      summary: Patroni-compatible node monitoring document
+      description: |
+        Returns the Patroni-compatible node status document used during leader
+        elections and by external monitoring.
+      operationId: getPatroniStatus
+      x-patroni-compatible: true
+      responses:
+        '200':
+          description: Current Patroni-compatible node status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+  /metrics:
+    get:
+      security: []
+      tags:
+        - Monitoring
+        - Patroni Compatibility
+      summary: Patroni-compatible Prometheus metrics endpoint
+      description: Returns Prometheus text exposition format.
+      operationId: getPatroniMetrics
+      x-patroni-compatible: true
+      responses:
+        '200':
+          description: Prometheus metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+  /cluster:
+    get:
+      security: []
+      tags:
+        - Cluster
+        - Patroni Compatibility
+      summary: Patroni-compatible cluster topology document
+      description: Mirrors Patroni `GET /cluster`.
+      operationId: getPatroniCluster
+      x-patroni-compatible: true
+      responses:
+        '200':
+          description: Current Patroni-compatible cluster topology
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniClusterStatus'
+  /history:
+    get:
+      security: []
+      tags:
+        - Cluster
+        - Patroni Compatibility
+      summary: Patroni-compatible cluster history
+      description: Mirrors Patroni `GET /history`.
+      operationId: getPatroniHistory
+      x-patroni-compatible: true
+      responses:
+        '200':
+          description: Patroni-compatible cluster history lines
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniHistory'
+  /config:
+    get:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Patroni Compatibility
+      summary: Patroni-compatible dynamic configuration view
+      description: Mirrors Patroni `GET /config`.
+      operationId: getPatroniConfig
+      x-patroni-compatible: true
+      responses:
+        '200':
+          description: Current Patroni-compatible dynamic configuration view
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniDynamicConfig'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    patch:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Patroni Compatibility
+      summary: Patroni-compatible dynamic configuration patch
+      description: |
+        Mirrors Patroni `PATCH /config`. Patches the existing configuration and
+        treats `null` values as field removals where supported by the target schema.
+      operationId: patchPatroniConfig
+      x-patroni-compatible: true
+      x-patroni-null-removes-fields: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatroniDynamicConfig'
+      responses:
+        '200':
+          description: Patched dynamic configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniDynamicConfig'
+        '400':
+          description: Invalid configuration patch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Patroni Compatibility
+      summary: Patroni-compatible dynamic configuration rewrite
+      description: Mirrors Patroni `PUT /config` for unconditional full rewrites.
+      operationId: putPatroniConfig
+      x-patroni-compatible: true
+      x-patroni-full-rewrite: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatroniDynamicConfig'
+      responses:
+        '200':
+          description: Rewritten dynamic configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniDynamicConfig'
+        '400':
+          description: Invalid configuration document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /switchover:
+    post:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Operations
+        - Patroni Compatibility
+      summary: Patroni-compatible switchover request
+      description: |
+        Mirrors Patroni `POST /switchover`.
+        Accepts the Patroni request shape with required `leader` and optional
+        `candidate` and `scheduled_at`.
+      operationId: postPatroniSwitchover
+      x-patroni-compatible: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatroniSwitchoverRequest'
+      responses:
+        '200':
+          description: Switchover completed
+          content:
+            text/plain:
+              schema:
+                type: string
+        '202':
+          description: Switchover scheduled
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          description: Invalid switchover request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '412':
+          description: Switchover preconditions are not satisfied
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Cluster is not ready for switchover
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Operations
+        - Patroni Compatibility
+      summary: Patroni-compatible scheduled switchover cancellation
+      description: Mirrors Patroni `DELETE /switchover`.
+      operationId: deletePatroniSwitchover
+      x-patroni-compatible: true
+      responses:
+        '200':
+          description: Scheduled switchover cancelled
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: No scheduled switchover exists
+          content:
+            text/plain:
+              schema:
+                type: string
+        '409':
+          description: Switchover is already running and can no longer be cancelled
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /failover:
+    post:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Operations
+        - Patroni Compatibility
+      summary: Patroni-compatible failover request
+      description: |
+        Mirrors Patroni `POST /failover`.
+        Accepts Patroni's request shape, including optional `leader` which
+        triggers switchover semantics, but PACMAN still applies its own safety gates.
+      operationId: postPatroniFailover
+      x-patroni-compatible: true
+      x-pacman-safety-gates: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatroniFailoverRequest'
+      responses:
+        '200':
+          description: Failover completed
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          description: Invalid failover request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '412':
+          description: Failover preconditions are not satisfied
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Cluster is not ready for failover
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /restart:
+    post:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Operations
+        - Patroni Compatibility
+      summary: Patroni-compatible restart request
+      description: Mirrors Patroni `POST /restart`.
+      operationId: postPatroniRestart
+      x-patroni-compatible: true
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatroniRestartRequest'
+      responses:
+        '200':
+          description: Restart completed or accepted
+          content:
+            text/plain:
+              schema:
+                type: string
+        '202':
+          description: Restart scheduled
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          description: Invalid restart request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Operations
+        - Patroni Compatibility
+      summary: Patroni-compatible scheduled restart cancellation
+      description: Mirrors Patroni `DELETE /restart`.
+      operationId: deletePatroniRestart
+      x-patroni-compatible: true
+      responses:
+        '200':
+          description: Scheduled restart cancelled
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: No scheduled restart exists
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /reload:
+    post:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Operations
+        - Patroni Compatibility
+      summary: Patroni-compatible reload request
+      description: Mirrors Patroni `POST /reload`.
+      operationId: postPatroniReload
+      x-patroni-compatible: true
+      responses:
+        '200':
+          description: Reload requested
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /reinitialize:
+    post:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Operations
+        - Patroni Compatibility
+      summary: Patroni-compatible reinitialize request
+      description: Mirrors Patroni `POST /reinitialize`.
+      operationId: postPatroniReinitialize
+      x-patroni-compatible: true
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatroniReinitializeRequest'
+      responses:
+        '200':
+          description: Reinitialize requested
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          description: Invalid reinitialize request
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: Node is not in a state where reinitialize can be attempted
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+components:
+  responses:
+    Unauthorized:
+      $ref: './components-meta.yaml#/components/responses/Unauthorized'
+    Forbidden:
+      $ref: './components-meta.yaml#/components/responses/Forbidden'
+  securitySchemes:
+    bearerAuth:
+      $ref: './components-meta.yaml#/components/securitySchemes/bearerAuth'
+    mutualTLS:
+      $ref: './components-meta.yaml#/components/securitySchemes/mutualTLS'
+  schemas:
+    PatroniNodeStatus:
+      $ref: './schemas-patroni.yaml#/components/schemas/PatroniNodeStatus'
+    PatroniClusterStatus:
+      $ref: './schemas-patroni.yaml#/components/schemas/PatroniClusterStatus'
+    PatroniHistory:
+      $ref: './schemas-patroni.yaml#/components/schemas/PatroniHistory'
+    PatroniDynamicConfig:
+      $ref: './schemas-patroni.yaml#/components/schemas/PatroniDynamicConfig'
+    PatroniSwitchoverRequest:
+      $ref: './schemas-operations.yaml#/components/schemas/PatroniSwitchoverRequest'
+    PatroniFailoverRequest:
+      $ref: './schemas-operations.yaml#/components/schemas/PatroniFailoverRequest'
+    PatroniRestartRequest:
+      $ref: './schemas-operations.yaml#/components/schemas/PatroniRestartRequest'
+    PatroniReinitializeRequest:
+      $ref: './schemas-operations.yaml#/components/schemas/PatroniReinitializeRequest'
+    ErrorResponse:
+      $ref: './schemas-operations.yaml#/components/schemas/ErrorResponse'

@@ -1,0 +1,68 @@
+openapi: 3.1.0
+info:
+  title: PACMAN Enum Schemas
+  version: 0.1.0
+components:
+  schemas:
+    ClusterPhase:
+      type: string
+      enum:
+        - initializing
+        - healthy
+        - degraded
+        - failing_over
+        - switching_over
+        - maintenance
+        - recovering
+        - unknown
+    MemberRole:
+      type: string
+      enum:
+        - primary
+        - replica
+        - witness
+        - standby_leader
+        - unknown
+    PatroniRole:
+      type: string
+      enum:
+        - primary
+        - replica
+        - standby_leader
+        - unknown
+    PatroniMemberRole:
+      type: string
+      enum:
+        - leader
+        - replica
+        - standby_leader
+        - sync_standby
+        - quorum_standby
+        - unknown
+    MemberState:
+      type: string
+      enum:
+        - running
+        - streaming
+        - starting
+        - stopping
+        - failed
+        - unreachable
+        - needs_rejoin
+        - unknown
+    OperationKind:
+      type: string
+      enum:
+        - switchover
+        - failover
+        - rejoin
+        - maintenance_change
+    OperationState:
+      type: string
+      enum:
+        - accepted
+        - scheduled
+        - running
+        - completed
+        - failed
+        - cancelled

@@ -1,0 +1,45 @@
+openapi: 3.1.0
+info:
+  title: PACMAN Shared Components
+  version: 0.1.0
+components:
+  parameters:
+    PatroniLagQuery:
+      name: lag
+      in: query
+      required: false
+      description: |
+        Maximum allowed replication lag. Patroni-compatible endpoints accept
+        raw bytes or human-readable values such as `16kB`, `64MB`, or `1GB`.
+      schema:
+        type: string
+  responses:
+    Unauthorized:
+      description: Request is missing valid API authentication
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Authenticated principal is not allowed to perform this operation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: |
+        Administrator or automation bearer token for the external control-plane
+        API. Read endpoints require a read-capable principal; mutating
+        endpoints require an operator/admin-capable principal.
+    mutualTLS:
+      type: mutualTLS
+      description: |
+        Mutual TLS client certificate for trusted PACMAN members or tightly
+        controlled automation inside the cluster trust boundary.
+  schemas:
+    ErrorResponse:
+      $ref: './schemas-operations.yaml#/components/schemas/ErrorResponse'

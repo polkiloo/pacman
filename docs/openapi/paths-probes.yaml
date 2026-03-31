@@ -1,0 +1,492 @@
+openapi: 3.1.0
+info:
+  title: PACMAN Probe Paths
+  version: 0.1.0
+paths:
+  /health:
+    get:
+      security: []
+      tags:
+        - Probes
+        - Patroni Compatibility
+      summary: Patroni-compatible PostgreSQL health probe
+      description: |
+        Returns `200` only when PostgreSQL is up and running.
+        Mirrors Patroni `GET /health` semantics.
+      operationId: getHealth
+      x-patroni-compatible: true
+      x-patroni-head-options-supported: true
+      responses:
+        '200':
+          description: PostgreSQL is up and running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+        '503':
+          description: PostgreSQL is not healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+  /liveness:
+    get:
+      security: []
+      tags:
+        - Probes
+        - Patroni Compatibility
+      summary: Patroni-compatible process liveness probe
+      description: |
+        Returns `200` when the PACMAN heartbeat loop is properly progressing.
+        Returns `503` when the loop is stale relative to the configured control-plane TTL,
+        matching Patroni `GET /liveness` intent.
+      operationId: getLiveness
+      x-patroni-compatible: true
+      x-patroni-head-options-supported: true
+      responses:
+        '200':
+          description: Local heartbeat loop is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+        '503':
+          description: Local heartbeat loop is stale
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+  /readiness:
+    get:
+      security: []
+      tags:
+        - Probes
+        - Patroni Compatibility
+      summary: Patroni-compatible readiness probe
+      description: |
+        Returns `200` when the node is the leader or when PostgreSQL is up,
+        replicating, and not too far behind the leader.
+        Mirrors Patroni `GET /readiness?lag=<max-lag>&mode=apply|write` semantics.
+      operationId: getReadiness
+      x-patroni-compatible: true
+      x-patroni-head-options-supported: true
+      x-patroni-human-readable-lag: true
+      parameters:
+        - $ref: '#/components/parameters/PatroniLagQuery'
+        - name: mode
+          in: query
+          required: false
+          description: |
+            Whether WAL must be replayed (`apply`) or only received (`write`)
+            before the node is considered ready. Defaults to `apply`.
+          schema:
+            type: string
+            enum:
+              - apply
+              - write
+      responses:
+        '200':
+          description: Node is ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+        '503':
+          description: Node is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+  /primary:
+    get:
+      security: []
+      tags:
+        - Probes
+        - Patroni Compatibility
+      summary: Patroni-compatible primary probe
+      description: |
+        Returns `200` only when the node is the writable primary with the leader lock.
+        Mirrors Patroni `GET /primary`.
+      operationId: getPrimaryProbe
+      x-patroni-compatible: true
+      x-patroni-head-options-supported: true
+      x-patroni-ignores-tag-filters: true
+      responses:
+        '200':
+          description: Node is the current primary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+        '503':
+          description: Node is not the current primary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+  /replica:
+    get:
+      security: []
+      tags:
+        - Probes
+        - Patroni Compatibility
+      summary: Patroni-compatible replica probe
+      description: |
+        Returns `200` only when the local node is in `running` state, has role `replica`,
+        and is eligible for read traffic.
+        Supports Patroni-compatible lag, replication-state, and free-form tag-filter semantics.
+      operationId: getReplicaProbe
+      x-patroni-compatible: true
+      x-patroni-head-options-supported: true
+      x-patroni-human-readable-lag: true
+      x-patroni-free-form-tag-filters: true
+      parameters:
+        - $ref: '#/components/parameters/PatroniLagQuery'
+        - name: replication_state
+          in: query
+          required: false
+          description: |
+            Required replication state, for example `streaming`, to exclude
+            replicas still catching up from archive recovery.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Node is a healthy replica
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+        '503':
+          description: Node is not a healthy replica or exceeds the requested lag threshold
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+  /:
+    get:
+      security: []
+      tags:
+        - Patroni Compatibility
+      summary: Patroni-compatible root primary probe
+      description: |
+        Returns `200` only when the node is the writable primary with the leader lock.
+        Mirrors Patroni `GET /`.
+      operationId: getPatroniRootProbe
+      x-patroni-compatible: true
+      x-patroni-head-options-supported: true
+      x-patroni-ignores-tag-filters: true
+      responses:
+        '200':
+          description: Node is the current primary with leader lock
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+        '503':
+          description: Node is not the current primary with leader lock
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+  /read-write:
+    get:
+      security: []
+      tags:
+        - Patroni Compatibility
+      summary: Patroni-compatible read-write probe
+      description: Mirrors Patroni `GET /read-write`.
+      operationId: getPatroniReadWriteProbe
+      x-patroni-compatible: true
+      x-patroni-head-options-supported: true
+      x-patroni-ignores-tag-filters: true
+      responses:
+        '200':
+          description: Node is the current primary with leader lock
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+        '503':
+          description: Node is not the current primary with leader lock
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+  /leader:
+    get:
+      security: []
+      tags:
+        - Patroni Compatibility
+      summary: Patroni-compatible leader-lock probe
+      description: |
+        Returns `200` when the node holds the leader lock, regardless of whether
+        PostgreSQL is `primary` or `standby_leader`.
+      operationId: getPatroniLeaderProbe
+      x-patroni-compatible: true
+      x-patroni-head-options-supported: true
+      x-patroni-ignores-tag-filters: true
+      responses:
+        '200':
+          description: Node holds the leader lock
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+        '503':
+          description: Node does not hold the leader lock
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+  /standby-leader:
+    get:
+      security: []
+      tags:
+        - Patroni Compatibility
+      summary: Patroni-compatible standby leader probe
+      description: Mirrors Patroni `GET /standby-leader`.
+      operationId: getPatroniStandbyLeaderProbe
+      x-patroni-compatible: true
+      x-patroni-head-options-supported: true
+      x-patroni-ignores-tag-filters: true
+      responses:
+        '200':
+          description: Node is the standby leader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+        '503':
+          description: Node is not the standby leader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+  /standby_leader:
+    get:
+      security: []
+      tags:
+        - Patroni Compatibility
+      summary: Patroni-compatible standby leader probe alias
+      description: Mirrors Patroni `GET /standby_leader`.
+      operationId: getPatroniStandbyLeaderAliasProbe
+      x-patroni-compatible: true
+      x-patroni-head-options-supported: true
+      x-patroni-ignores-tag-filters: true
+      responses:
+        '200':
+          description: Node is the standby leader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+        '503':
+          description: Node is not the standby leader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+  /read-only:
+    get:
+      security: []
+      tags:
+        - Patroni Compatibility
+      summary: Patroni-compatible read-only probe
+      description: |
+        Returns `200` for healthy replicas and also includes the primary,
+        mirroring Patroni `GET /read-only`.
+      operationId: getPatroniReadOnlyProbe
+      x-patroni-compatible: true
+      x-patroni-head-options-supported: true
+      x-patroni-human-readable-lag: true
+      x-patroni-free-form-tag-filters: true
+      parameters:
+        - $ref: '#/components/parameters/PatroniLagQuery'
+      responses:
+        '200':
+          description: Node can serve read-only traffic
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+        '503':
+          description: Node should not serve read-only traffic
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+  /synchronous:
+    get:
+      security: []
+      tags:
+        - Patroni Compatibility
+      summary: Patroni-compatible synchronous standby probe
+      description: Mirrors Patroni `GET /synchronous`.
+      operationId: getPatroniSynchronousProbe
+      x-patroni-compatible: true
+      x-patroni-head-options-supported: true
+      responses:
+        '200':
+          description: Node is a synchronous standby
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+        '503':
+          description: Node is not a synchronous standby
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+  /sync:
+    get:
+      security: []
+      tags:
+        - Patroni Compatibility
+      summary: Patroni-compatible synchronous standby probe alias
+      description: Mirrors Patroni `GET /sync`.
+      operationId: getPatroniSyncProbe
+      x-patroni-compatible: true
+      x-patroni-head-options-supported: true
+      responses:
+        '200':
+          description: Node is a synchronous standby
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+        '503':
+          description: Node is not a synchronous standby
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+  /read-only-sync:
+    get:
+      security: []
+      tags:
+        - Patroni Compatibility
+      summary: Patroni-compatible read-only sync probe
+      description: Mirrors Patroni `GET /read-only-sync`.
+      operationId: getPatroniReadOnlySyncProbe
+      x-patroni-compatible: true
+      x-patroni-head-options-supported: true
+      responses:
+        '200':
+          description: Node can serve sync read-only traffic
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+        '503':
+          description: Node cannot serve sync read-only traffic
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+  /quorum:
+    get:
+      security: []
+      tags:
+        - Patroni Compatibility
+      summary: Patroni-compatible quorum standby probe
+      description: Mirrors Patroni `GET /quorum`.
+      operationId: getPatroniQuorumProbe
+      x-patroni-compatible: true
+      x-patroni-head-options-supported: true
+      responses:
+        '200':
+          description: Node is listed as a quorum standby
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+        '503':
+          description: Node is not listed as a quorum standby
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+  /read-only-quorum:
+    get:
+      security: []
+      tags:
+        - Patroni Compatibility
+      summary: Patroni-compatible read-only quorum probe
+      description: Mirrors Patroni `GET /read-only-quorum`.
+      operationId: getPatroniReadOnlyQuorumProbe
+      x-patroni-compatible: true
+      x-patroni-head-options-supported: true
+      responses:
+        '200':
+          description: Node can serve quorum read-only traffic
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+        '503':
+          description: Node cannot serve quorum read-only traffic
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+  /asynchronous:
+    get:
+      security: []
+      tags:
+        - Patroni Compatibility
+      summary: Patroni-compatible asynchronous standby probe
+      description: Mirrors Patroni `GET /asynchronous`.
+      operationId: getPatroniAsynchronousProbe
+      x-patroni-compatible: true
+      x-patroni-head-options-supported: true
+      x-patroni-human-readable-lag: true
+      parameters:
+        - $ref: '#/components/parameters/PatroniLagQuery'
+      responses:
+        '200':
+          description: Node is an asynchronous standby
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+        '503':
+          description: Node is not an asynchronous standby
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+  /async:
+    get:
+      security: []
+      tags:
+        - Patroni Compatibility
+      summary: Patroni-compatible asynchronous standby probe alias
+      description: Mirrors Patroni `GET /async`.
+      operationId: getPatroniAsyncProbe
+      x-patroni-compatible: true
+      x-patroni-head-options-supported: true
+      x-patroni-human-readable-lag: true
+      parameters:
+        - $ref: '#/components/parameters/PatroniLagQuery'
+      responses:
+        '200':
+          description: Node is an asynchronous standby
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+        '503':
+          description: Node is not an asynchronous standby
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatroniNodeStatus'
+components:
+  parameters:
+    PatroniLagQuery:
+      $ref: './components-meta.yaml#/components/parameters/PatroniLagQuery'
+  schemas:
+    PatroniNodeStatus:
+      $ref: './schemas-patroni.yaml#/components/schemas/PatroniNodeStatus'
