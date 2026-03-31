@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -226,6 +227,10 @@ func TestLoadDocumentErrorsAndHelpers(t *testing.T) {
 		t.Fatal("expected nil operation extension lookup to be false")
 	}
 
+	if nilOperation.ExtensionString("x-string") != "" {
+		t.Fatal("expected nil operation extension string lookup to be empty")
+	}
+
 	securedOperation := &Operation{
 		Security: []map[string][]string{
 			{"bearerAuth": {}},
@@ -239,6 +244,14 @@ func TestLoadDocumentErrorsAndHelpers(t *testing.T) {
 
 	if securedOperation.RequiresSecurityScheme("missing") {
 		t.Fatal("expected missing security requirement to be false")
+	}
+
+	if got := getOperation.ExtensionString("x-string"); got != "yes" {
+		t.Fatalf("unexpected string extension lookup: got %q want %q", got, "yes")
+	}
+
+	if got := getOperation.ExtensionString("x-enabled"); got != "" {
+		t.Fatalf("expected non-string extension string lookup to be empty, got %q", got)
 	}
 
 	var nilSchema *Schema
@@ -369,13 +382,43 @@ paths:
 	}
 }
 
-func TestRepositoryDocumentPatroniProbeCompatibility(t *testing.T) {
-	t.Parallel()
+func mustLoadRepositoryDocument(t *testing.T) Document {
+	t.Helper()
 
 	document, err := LoadRepositoryDocument()
 	if err != nil {
 		t.Fatalf("load repository openapi document: %v", err)
 	}
+
+	return document
+}
+
+func mustOperation(t *testing.T, document Document, path, method string) *Operation {
+	t.Helper()
+
+	operation, err := document.Operation(path, method)
+	if err != nil {
+		t.Fatalf("resolve %s %s operation: %v", method, path, err)
+	}
+
+	return operation
+}
+
+func mustSchema(t *testing.T, document Document, name string) *Schema {
+	t.Helper()
+
+	schema, err := document.Schema(name)
+	if err != nil {
+		t.Fatalf("resolve %s schema: %v", name, err)
+	}
+
+	return schema
+}
+
+func TestRepositoryDocumentPatroniProbeCompatibility(t *testing.T) {
+	t.Parallel()
+
+	document := mustLoadRepositoryDocument(t)
 
 	testCases := []struct {
 		path               string
@@ -454,13 +497,10 @@ func TestRepositoryDocumentPatroniProbeCompatibility(t *testing.T) {
 	}
 }
 
-func TestRepositoryDocumentPatroniMonitoringAndAdminCompatibility(t *testing.T) {
+func TestRepositoryDocumentPatroniMonitoringCompatibility(t *testing.T) {
 	t.Parallel()
 
-	document, err := LoadRepositoryDocument()
-	if err != nil {
-		t.Fatalf("load repository openapi document: %v", err)
-	}
+	document := mustLoadRepositoryDocument(t)
 
 	monitoringCases := []struct {
 		path        string
@@ -474,10 +514,7 @@ func TestRepositoryDocumentPatroniMonitoringAndAdminCompatibility(t *testing.T) 
 	}
 
 	for _, testCase := range monitoringCases {
-		operation, err := document.Operation(testCase.path, "get")
-		if err != nil {
-			t.Fatalf("resolve %s get operation: %v", testCase.path, err)
-		}
+		operation := mustOperation(t, document, testCase.path, "get")
 
 		if !operation.ExtensionBool("x-patroni-compatible") {
 			t.Fatalf("%s is missing Patroni compatibility flag", testCase.path)
@@ -501,6 +538,12 @@ func TestRepositoryDocumentPatroniMonitoringAndAdminCompatibility(t *testing.T) 
 			t.Fatalf("%s unexpected schema ref: got %q want %q", testCase.path, mediaType.Schema.Ref, testCase.schemaRef)
 		}
 	}
+}
+
+func TestRepositoryDocumentPatroniAdminAndNativeRoutesRequireSecurity(t *testing.T) {
+	t.Parallel()
+
+	document := mustLoadRepositoryDocument(t)
 
 	securedPaths := []struct {
 		path   string
@@ -522,38 +565,38 @@ func TestRepositoryDocumentPatroniMonitoringAndAdminCompatibility(t *testing.T) 
 	}
 
 	for _, testCase := range securedPaths {
-		operation, err := document.Operation(testCase.path, testCase.method)
-		if err != nil {
-			t.Fatalf("resolve %s %s operation: %v", testCase.method, testCase.path, err)
-		}
+		operation := mustOperation(t, document, testCase.path, testCase.method)
 
 		if !operation.RequiresSecurityScheme("bearerAuth") || !operation.RequiresSecurityScheme("mutualTLS") {
 			t.Fatalf("%s %s should require bearer and mutualTLS", testCase.method, testCase.path)
 		}
 	}
+}
 
-	configPatch, err := document.Operation("/config", "patch")
-	if err != nil {
-		t.Fatalf("resolve /config patch: %v", err)
-	}
+func TestRepositoryDocumentPatroniConfigCompatibilityExtensions(t *testing.T) {
+	t.Parallel()
+
+	document := mustLoadRepositoryDocument(t)
+
+	configPatch := mustOperation(t, document, "/config", "patch")
 
 	if !configPatch.ExtensionBool("x-patroni-null-removes-fields") {
 		t.Fatal("/config patch is missing null-removes-fields compatibility flag")
 	}
 
-	configPut, err := document.Operation("/config", "put")
-	if err != nil {
-		t.Fatalf("resolve /config put: %v", err)
-	}
+	configPut := mustOperation(t, document, "/config", "put")
 
 	if !configPut.ExtensionBool("x-patroni-full-rewrite") {
 		t.Fatal("/config put is missing full-rewrite compatibility flag")
 	}
+}
 
-	switchover, err := document.Operation("/switchover", "post")
-	if err != nil {
-		t.Fatalf("resolve /switchover post: %v", err)
-	}
+func TestRepositoryDocumentPatroniSwitchoverCompatibility(t *testing.T) {
+	t.Parallel()
+
+	document := mustLoadRepositoryDocument(t)
+
+	switchover := mustOperation(t, document, "/switchover", "post")
 
 	switchoverSchema, err := document.ResolveRequestSchema(switchover, "application/json")
 	if err != nil {
@@ -577,11 +620,14 @@ func TestRepositoryDocumentPatroniMonitoringAndAdminCompatibility(t *testing.T) 
 			t.Fatalf("/switchover post is missing %s response", code)
 		}
 	}
+}
 
-	failover, err := document.Operation("/failover", "post")
-	if err != nil {
-		t.Fatalf("resolve /failover post: %v", err)
-	}
+func TestRepositoryDocumentPatroniFailoverCompatibility(t *testing.T) {
+	t.Parallel()
+
+	document := mustLoadRepositoryDocument(t)
+
+	failover := mustOperation(t, document, "/failover", "post")
 
 	if !failover.ExtensionBool("x-pacman-safety-gates") {
 		t.Fatal("/failover post is missing PACMAN safety-gates marker")
@@ -605,11 +651,14 @@ func TestRepositoryDocumentPatroniMonitoringAndAdminCompatibility(t *testing.T) 
 			t.Fatalf("/failover post is missing %s response", code)
 		}
 	}
+}
 
-	restart, err := document.Operation("/restart", "post")
-	if err != nil {
-		t.Fatalf("resolve /restart post: %v", err)
-	}
+func TestRepositoryDocumentPatroniRestartCompatibility(t *testing.T) {
+	t.Parallel()
+
+	document := mustLoadRepositoryDocument(t)
+
+	restart := mustOperation(t, document, "/restart", "post")
 
 	restartSchema, err := document.ResolveRequestSchema(restart, "application/json")
 	if err != nil {
@@ -621,11 +670,14 @@ func TestRepositoryDocumentPatroniMonitoringAndAdminCompatibility(t *testing.T) 
 			t.Fatalf("restart schema is missing %s", property)
 		}
 	}
+}
 
-	reinitialize, err := document.Operation("/reinitialize", "post")
-	if err != nil {
-		t.Fatalf("resolve /reinitialize post: %v", err)
-	}
+func TestRepositoryDocumentPatroniReinitializeCompatibility(t *testing.T) {
+	t.Parallel()
+
+	document := mustLoadRepositoryDocument(t)
+
+	reinitialize := mustOperation(t, document, "/reinitialize", "post")
 
 	reinitializeSchema, err := document.ResolveRequestSchema(reinitialize, "application/json")
 	if err != nil {
@@ -637,29 +689,78 @@ func TestRepositoryDocumentPatroniMonitoringAndAdminCompatibility(t *testing.T) 
 			t.Fatalf("reinitialize schema is missing %s", property)
 		}
 	}
+}
 
-	reload, err := document.Operation("/reload", "post")
-	if err != nil {
-		t.Fatalf("resolve /reload post: %v", err)
-	}
+func TestRepositoryDocumentPatroniReloadCompatibility(t *testing.T) {
+	t.Parallel()
+
+	document := mustLoadRepositoryDocument(t)
+
+	reload := mustOperation(t, document, "/reload", "post")
 
 	if reload.RequestBody != nil {
 		t.Fatalf("expected /reload post to have no request body, got %+v", reload.RequestBody)
 	}
 }
 
-func TestRepositoryDocumentPatroniSchemas(t *testing.T) {
+func TestRepositoryDocumentPatroniNativeOperationMappings(t *testing.T) {
 	t.Parallel()
 
-	document, err := LoadRepositoryDocument()
-	if err != nil {
-		t.Fatalf("load repository openapi document: %v", err)
+	document := mustLoadRepositoryDocument(t)
+
+	expectedNativeOperations := map[string]string{
+		"/patroni get":       "GET /api/v1/nodes/{nodeName}",
+		"/cluster get":       "GET /api/v1/cluster",
+		"/history get":       "GET /api/v1/history",
+		"/config get":        "GET /api/v1/cluster/spec",
+		"/switchover post":   "POST /api/v1/operations/switchover",
+		"/switchover delete": "DELETE /api/v1/operations/switchover",
+		"/failover post":     "POST /api/v1/operations/failover",
 	}
 
-	nodeStatus, err := document.Schema("PatroniNodeStatus")
-	if err != nil {
-		t.Fatalf("resolve PatroniNodeStatus schema: %v", err)
+	for key, expected := range expectedNativeOperations {
+		fields := strings.Fields(key)
+		operation := mustOperation(t, document, fields[0], fields[1])
+
+		if got := operation.ExtensionString("x-pacman-native-operation"); got != expected {
+			t.Fatalf("%s unexpected native operation mapping: got %q want %q", key, got, expected)
+		}
 	}
+}
+
+func TestRepositoryDocumentPatronictlCompatibilityTags(t *testing.T) {
+	t.Parallel()
+
+	document := mustLoadRepositoryDocument(t)
+
+	expectedPatronictlRoutes := []string{
+		"/patroni get",
+		"/config patch",
+		"/switchover post",
+		"/switchover delete",
+		"/failover post",
+		"/restart post",
+		"/restart delete",
+		"/reload post",
+		"/reinitialize post",
+	}
+
+	for _, key := range expectedPatronictlRoutes {
+		fields := strings.Fields(key)
+		operation := mustOperation(t, document, fields[0], fields[1])
+
+		if !operation.ExtensionBool("x-patronictl-compatible") {
+			t.Fatalf("%s should be tagged as patronictl-compatible", key)
+		}
+	}
+}
+
+func TestRepositoryDocumentPatroniNodeStatusSchema(t *testing.T) {
+	t.Parallel()
+
+	document := mustLoadRepositoryDocument(t)
+
+	nodeStatus := mustSchema(t, document, "PatroniNodeStatus")
 
 	for _, required := range []string{"state", "role", "patroni"} {
 		if !nodeStatus.Requires(required) {
@@ -672,44 +773,56 @@ func TestRepositoryDocumentPatroniSchemas(t *testing.T) {
 			t.Fatalf("PatroniNodeStatus is missing %s", property)
 		}
 	}
+}
 
-	dynamicConfig, err := document.Schema("PatroniDynamicConfig")
-	if err != nil {
-		t.Fatalf("resolve PatroniDynamicConfig schema: %v", err)
-	}
+func TestRepositoryDocumentPatroniDynamicConfigSchema(t *testing.T) {
+	t.Parallel()
+
+	document := mustLoadRepositoryDocument(t)
+
+	dynamicConfig := mustSchema(t, document, "PatroniDynamicConfig")
 
 	for _, property := range []string{"ttl", "loop_wait", "retry_timeout", "maximum_lag_on_failover", "postgresql"} {
 		if _, ok := dynamicConfig.Property(property); !ok {
 			t.Fatalf("PatroniDynamicConfig is missing %s", property)
 		}
 	}
+}
 
-	history, err := document.Schema("PatroniHistoryLine")
-	if err != nil {
-		t.Fatalf("resolve PatroniHistoryLine schema: %v", err)
-	}
+func TestRepositoryDocumentPatroniHistorySchema(t *testing.T) {
+	t.Parallel()
+
+	document := mustLoadRepositoryDocument(t)
+
+	history := mustSchema(t, document, "PatroniHistoryLine")
 
 	if len(history.PrefixItems) != 4 {
 		t.Fatalf("expected PatroniHistoryLine to contain four tuple items, got %d", len(history.PrefixItems))
 	}
+}
 
-	patroniRole, err := document.Schema("PatroniRole")
-	if err != nil {
-		t.Fatalf("resolve PatroniRole schema: %v", err)
-	}
+func TestRepositoryDocumentPatroniRoleSchemas(t *testing.T) {
+	t.Parallel()
+
+	document := mustLoadRepositoryDocument(t)
+
+	patroniRole := mustSchema(t, document, "PatroniRole")
 
 	if len(patroniRole.Enum) == 0 {
 		t.Fatal("expected PatroniRole enum values")
 	}
 
-	memberRole, err := document.Schema("PatroniMemberRole")
-	if err != nil {
-		t.Fatalf("resolve PatroniMemberRole schema: %v", err)
-	}
+	memberRole := mustSchema(t, document, "PatroniMemberRole")
 
 	if len(memberRole.Enum) == 0 {
 		t.Fatal("expected PatroniMemberRole enum values")
 	}
+}
+
+func TestRepositoryDocumentPatroniSharedComponents(t *testing.T) {
+	t.Parallel()
+
+	document := mustLoadRepositoryDocument(t)
 
 	if _, ok := document.Components.SecuritySchemes["bearerAuth"]; !ok {
 		t.Fatal("expected bearerAuth security scheme")

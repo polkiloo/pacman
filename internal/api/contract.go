@@ -280,6 +280,25 @@ func (operation *Operation) ExtensionBool(name string) bool {
 	return ok && enabled
 }
 
+// ExtensionString reads a string-valued vendor extension.
+func (operation *Operation) ExtensionString(name string) string {
+	if operation == nil {
+		return ""
+	}
+
+	value, ok := operation.Extensions[name]
+	if !ok {
+		return ""
+	}
+
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
+
+	return text
+}
+
 // Requires reports whether the schema marks the named property as required.
 func (schema *Schema) Requires(name string) bool {
 	if schema == nil {
