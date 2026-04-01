@@ -251,10 +251,10 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] expose `GET /health`
 - [x] expose `GET /liveness`
 - [x] expose `GET /readiness`
-- [ ] expose `GET /primary`
-- [ ] expose `GET /replica`
-- [ ] expose `GET /api/v1/cluster`
-- [ ] expose `GET /api/v1/cluster/spec`
+- [x] expose `GET /primary`
+- [x] expose `GET /replica`
+- [x] expose `GET /api/v1/cluster`
+- [x] expose `GET /api/v1/cluster/spec`
 - [ ] expose `GET /api/v1/nodes/{nodeName}`
 - [ ] expose `GET /api/v1/members`
 - [ ] expose `GET /api/v1/history`

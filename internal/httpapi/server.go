@@ -20,6 +20,7 @@ import (
 type NodeStatusReader interface {
 	NodeStatus(nodeName string) (agentmodel.NodeStatus, bool)
 	ClusterSpec() (cluster.ClusterSpec, bool)
+	ClusterStatus() (cluster.ClusterStatus, bool)
 	MaintenanceStatus() cluster.MaintenanceModeStatus
 }
 
@@ -74,9 +75,29 @@ func New(nodeName string, store NodeStatusReader, logger *slog.Logger, cfg Confi
 }
 
 func (srv *Server) registerRoutes() {
-	srv.app.Get("/health", srv.handleHealth)
-	srv.app.Get("/liveness", srv.handleLiveness)
-	srv.app.Get("/readiness", srv.handleReadiness)
+	srv.addProbeRoute("/health", srv.handleHealth)
+	srv.addProbeRoute("/liveness", srv.handleLiveness)
+	srv.addProbeRoute("/readiness", srv.handleReadiness)
+	srv.addProbeRoute("/primary", srv.handlePrimary)
+	srv.addProbeRoute("/replica", srv.handleReplica)
+
+	v1 := srv.app.Group("/api/v1")
+	v1.Get("/cluster", srv.handleClusterStatus)
+	v1.Get("/cluster/spec", srv.handleClusterSpec)
+}
+
+// addProbeRoute registers a probe handler for GET, HEAD, and OPTIONS on the
+// given path. HEAD shares the GET handler; fasthttp suppresses the body
+// automatically. OPTIONS returns an Allow header listing all supported methods.
+func (srv *Server) addProbeRoute(path string, handler fiber.Handler) {
+	srv.app.Get(path, handler)
+	srv.app.Head(path, handler)
+	srv.app.Options(path, handleProbeOptions)
+}
+
+func handleProbeOptions(c *fiber.Ctx) error {
+	c.Set(fiber.HeaderAllow, "GET, HEAD, OPTIONS")
+	return c.SendStatus(fiber.StatusOK)
 }
 
 // Start binds addr, serves requests in the background, and shuts down when ctx
