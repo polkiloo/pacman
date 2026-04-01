@@ -181,9 +181,7 @@ type memberSpecJSON struct {
 func (srv *Server) handleClusterStatus(c *fiber.Ctx) error {
 	status, ok := srv.store.ClusterStatus()
 	if !ok {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-			"error": "cluster status unavailable",
-		})
+		return writeAPIError(c, fiber.StatusServiceUnavailable, "cluster_status_unavailable", "cluster status unavailable")
 	}
 
 	return c.JSON(buildClusterStatusResponse(status))
@@ -193,9 +191,7 @@ func (srv *Server) handleClusterStatus(c *fiber.Ctx) error {
 func (srv *Server) handleClusterSpec(c *fiber.Ctx) error {
 	spec, ok := srv.store.ClusterSpec()
 	if !ok {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-			"error": "cluster spec unavailable",
-		})
+		return writeAPIError(c, fiber.StatusServiceUnavailable, "cluster_spec_unavailable", "cluster spec unavailable")
 	}
 
 	return c.JSON(buildClusterSpecResponse(spec))
@@ -205,10 +201,7 @@ func (srv *Server) handleClusterSpec(c *fiber.Ctx) error {
 func (srv *Server) handleMembers(c *fiber.Ctx) error {
 	status, ok := srv.store.ClusterStatus()
 	if !ok {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(errorResponseJSON{
-			Error:   "cluster_status_unavailable",
-			Message: "cluster status unavailable",
-		})
+		return writeAPIError(c, fiber.StatusServiceUnavailable, "cluster_status_unavailable", "cluster status unavailable")
 	}
 
 	return c.JSON(membersResponse{
@@ -221,10 +214,7 @@ func (srv *Server) handleNodeStatus(c *fiber.Ctx) error {
 	nodeName := c.Params("nodeName")
 	node, ok := srv.store.NodeStatus(nodeName)
 	if !ok {
-		return c.Status(fiber.StatusNotFound).JSON(errorResponseJSON{
-			Error:   "node_not_found",
-			Message: fmt.Sprintf("node %q was not found", nodeName),
-		})
+		return writeAPIError(c, fiber.StatusNotFound, "node_not_found", fmt.Sprintf("node %q was not found", nodeName))
 	}
 
 	return c.JSON(buildNodeStatusResponse(node))

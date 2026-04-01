@@ -20,9 +20,12 @@ import (
 // NodeStatusReader provides local node state from the control-plane store.
 type NodeStatusReader interface {
 	NodeStatus(nodeName string) (agentmodel.NodeStatus, bool)
+	NodeStatuses() []agentmodel.NodeStatus
 	ClusterSpec() (cluster.ClusterSpec, bool)
 	ClusterStatus() (cluster.ClusterStatus, bool)
 	MaintenanceStatus() cluster.MaintenanceModeStatus
+	UpdateMaintenanceMode(context.Context, cluster.MaintenanceModeUpdateRequest) (cluster.MaintenanceModeStatus, error)
+	History() []cluster.HistoryEntry
 }
 
 // Config carries optional Server parameters.
@@ -30,6 +33,9 @@ type Config struct {
 	// LivenessWindow is the maximum allowed age of the last heartbeat before
 	// GET /liveness returns 503. Defaults to 30 seconds.
 	LivenessWindow time.Duration
+	// Authorizer optionally enforces authenticated access for administrative
+	// control-plane endpoints. When nil, authentication is disabled.
+	Authorizer Authorizer
 }
 
 var errServerAlreadyStarted = errors.New("http api server is already started")
@@ -41,6 +47,7 @@ type Server struct {
 	store          NodeStatusReader
 	logger         *slog.Logger
 	livenessWindow time.Duration
+	authorizer     Authorizer
 	requestSeq     atomic.Uint64
 
 	mu       sync.Mutex
@@ -62,6 +69,7 @@ func New(nodeName string, store NodeStatusReader, logger *slog.Logger, cfg Confi
 		store:          store,
 		logger:         logger,
 		livenessWindow: lw,
+		authorizer:     cfg.Authorizer,
 	}
 
 	srv.app = fiber.New(fiber.Config{
@@ -85,11 +93,17 @@ func (srv *Server) registerRoutes() {
 	srv.addProbeRoute("/primary", srv.handlePrimary)
 	srv.addProbeRoute("/replica", srv.handleReplica)
 
-	v1 := srv.app.Group("/api/v1")
-	v1.Get("/cluster", srv.handleClusterStatus)
-	v1.Get("/cluster/spec", srv.handleClusterSpec)
-	v1.Get("/members", srv.handleMembers)
-	v1.Get("/nodes/:nodeName", srv.handleNodeStatus)
+	v1 := srv.app.Group("/api/v1", srv.apiCommonMiddleware())
+	v1.Get("/cluster", srv.authMiddleware(AccessScopeClusterRead), srv.handleClusterStatus)
+	v1.Get("/cluster/spec", srv.authMiddleware(AccessScopeClusterRead), srv.handleClusterSpec)
+	v1.Get("/members", srv.authMiddleware(AccessScopeClusterRead), srv.handleMembers)
+	v1.Get("/nodes/:nodeName", srv.authMiddleware(AccessScopeClusterRead), srv.handleNodeStatus)
+	v1.Get("/history", srv.authMiddleware(AccessScopeClusterRead), srv.handleHistory)
+	v1.Get("/maintenance", srv.authMiddleware(AccessScopeClusterRead), srv.handleMaintenanceStatus)
+	v1.Put("/maintenance", srv.authMiddleware(AccessScopeClusterWrite), srv.requireJSONContentTypeMiddleware(), srv.handleMaintenanceUpdate)
+	v1.Get("/diagnostics", srv.authMiddleware(AccessScopeClusterRead), srv.handleDiagnostics)
+
+	srv.app.Use("/api/v1", srv.apiNotFoundMiddleware())
 }
 
 // addProbeRoute registers a probe handler for GET, HEAD, and OPTIONS on the

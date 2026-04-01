@@ -256,11 +256,11 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] expose `GET /api/v1/cluster/spec`
 - [x] expose `GET /api/v1/nodes/{nodeName}`
 - [x] expose `GET /api/v1/members`
-- [ ] add HTTP middleware for request IDs, auth hooks, and common API concerns
-- [ ] expose `GET /api/v1/history`
-- [ ] expose `GET /api/v1/maintenance`
-- [ ] expose `PUT /api/v1/maintenance`
-- [ ] expose `GET /api/v1/diagnostics`
+- [x] add HTTP middleware for request IDs, auth hooks, and common API concerns
+- [x] expose `GET /api/v1/history`
+- [x] expose `GET /api/v1/maintenance`
+- [x] expose `PUT /api/v1/maintenance`
+- [x] expose `GET /api/v1/diagnostics`
 - [ ] expose `POST /api/v1/operations/switchover`
 - [ ] expose `DELETE /api/v1/operations/switchover`
 - [ ] expose `POST /api/v1/operations/failover`
@@ -296,6 +296,7 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 ## 15. Structured Logging (`slog`)
 
 - [ ] expand `pacmand` runtime `slog` coverage and field consistency
+- [ ] expand `pacmanctl` runtime `slog` coverage and field consistency
 - [ ] add `slog`-backed HTTP access logging
 - [ ] add structured event logs for cluster lifecycle and state transitions
 - [ ] add request, node, member, and operation correlation fields across API and control-plane logs

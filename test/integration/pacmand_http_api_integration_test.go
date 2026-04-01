@@ -3,21 +3,12 @@
 package integration_test
 
 import (
-	"database/sql"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
 	"time"
-
-	_ "github.com/lib/pq"
-	testcontainers "github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
-
-	"github.com/polkiloo/pacman/test/testenv"
 )
 
 func TestPacmandHTTPAPIServesHealth(t *testing.T) {
@@ -25,103 +16,36 @@ func TestPacmandHTTPAPIServesHealth(t *testing.T) {
 		t.Skip("skipping Docker-backed integration test in short mode")
 	}
 
-	env := testenv.New(t)
-	name := sanitizeIntegrationName(t.Name())
-	postgres := env.StartPostgres(t, name, name+"-postgres")
+	daemon := startSingleNodeDaemon(t, "alpha-http")
+	waitForProbeStatus(t, daemon.Client, daemon.Base+"/health", http.StatusOK, 15*time.Second)
 
-	configBody := fmt.Sprintf(`
-apiVersion: pacman.io/v1alpha1
-kind: NodeConfig
-node:
-  name: alpha-http
-  role: data
-  apiAddress: 0.0.0.0:8080
-postgres:
-  dataDir: /var/lib/postgresql/data
-  listenAddress: %s
-  port: 5432
-bootstrap:
-  clusterName: alpha
-  initialPrimary: alpha-http
-  seedAddresses:
-    - 0.0.0.0:9090
-  expectedMembers:
-    - alpha-http
-`, postgres.Alias())
+	resp, err := daemon.Client.Get(daemon.Base + "/health")
+	if err != nil {
+		t.Fatalf("GET /health: %v", err)
+	}
+	defer resp.Body.Close()
 
-	service := env.StartService(t, testenv.ServiceConfig{
-		Name:         name + "-http-api",
-		Image:        pacmanTestImage(),
-		Aliases:      []string{name + "-http-api"},
-		Env:          postgresConnectionEnv(postgres),
-		Files:        []testcontainers.ContainerFile{writeDaemonConfigFile(t, configBody)},
-		ExposedPorts: []string{"8080/tcp"},
-		Cmd: []string{
-			"/bin/sh",
-			"-lc",
-			fmt.Sprintf("pacmand -config %s", daemonConfigPath),
-		},
-		WaitStrategy: wait.ForListeningPort("8080/tcp").WithStartupTimeout(30 * time.Second),
-	})
-
-	endpoint := "http://" + service.Address(t, "8080") + "/health"
-	client := &http.Client{Timeout: 2 * time.Second}
-
-	var (
-		lastStatus int
-		lastBody   string
-	)
-
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		response, err := client.Get(endpoint)
-		if err != nil {
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-
-		bodyBytes, readErr := io.ReadAll(response.Body)
-		response.Body.Close()
-		if readErr != nil {
-			t.Fatalf("read health response: %v", readErr)
-		}
-
-		lastStatus = response.StatusCode
-		lastBody = string(bodyBytes)
-
-		if response.StatusCode == http.StatusOK {
-			var payload struct {
-				State   string `json:"state"`
-				Role    string `json:"role"`
-				Patroni struct {
-					Name  string `json:"name"`
-					Scope string `json:"scope"`
-				} `json:"patroni"`
-			}
-
-			if err := json.Unmarshal(bodyBytes, &payload); err != nil {
-				t.Fatalf("decode health payload: %v", err)
-			}
-
-			if payload.State != "running" {
-				t.Fatalf("unexpected health state: got %q", payload.State)
-			}
-
-			if payload.Role != "primary" {
-				t.Fatalf("unexpected health role: got %q", payload.Role)
-			}
-
-			if payload.Patroni.Name != "alpha-http" {
-				t.Fatalf("unexpected patroni name: got %q", payload.Patroni.Name)
-			}
-
-			return
-		}
-
-		time.Sleep(200 * time.Millisecond)
+	var payload struct {
+		State   string `json:"state"`
+		Role    string `json:"role"`
+		Patroni struct {
+			Name  string `json:"name"`
+			Scope string `json:"scope"`
+		} `json:"patroni"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode /health payload: %v", err)
 	}
 
-	t.Fatalf("health endpoint did not become ready before deadline: status=%d body=%q", lastStatus, lastBody)
+	if payload.State != "running" {
+		t.Errorf("/health state: got %q, want %q", payload.State, "running")
+	}
+	if payload.Role != "primary" {
+		t.Errorf("/health role: got %q, want %q", payload.Role, "primary")
+	}
+	if payload.Patroni.Name != "alpha-http" {
+		t.Errorf("/health patroni.name: got %q, want %q", payload.Patroni.Name, "alpha-http")
+	}
 }
 
 // TestPacmandPrimaryAndReplicaProbes verifies that the PACMAN daemon exposes
@@ -132,51 +56,10 @@ func TestPacmandPrimaryAndReplicaProbes(t *testing.T) {
 		t.Skip("skipping Docker-backed integration test in short mode")
 	}
 
-	env := testenv.New(t)
-	name := sanitizeIntegrationName(t.Name())
-	postgres := env.StartPostgres(t, name, name+"-postgres")
+	daemon := startSingleNodeDaemon(t, "alpha-primary")
 	document := loadContractDocument(t)
 
-	configBody := fmt.Sprintf(`
-apiVersion: pacman.io/v1alpha1
-kind: NodeConfig
-node:
-  name: alpha-primary
-  role: data
-  apiAddress: 0.0.0.0:8080
-postgres:
-  dataDir: /var/lib/postgresql/data
-  listenAddress: %s
-  port: 5432
-bootstrap:
-  clusterName: alpha
-  initialPrimary: alpha-primary
-  seedAddresses:
-    - 0.0.0.0:9090
-  expectedMembers:
-    - alpha-primary
-`, postgres.Alias())
-
-	service := env.StartService(t, testenv.ServiceConfig{
-		Name:         name + "-primary-replica",
-		Image:        pacmanTestImage(),
-		Aliases:      []string{name + "-primary-replica"},
-		Env:          postgresConnectionEnv(postgres),
-		Files:        []testcontainers.ContainerFile{writeDaemonConfigFile(t, configBody)},
-		ExposedPorts: []string{"8080/tcp"},
-		Cmd: []string{
-			"/bin/sh",
-			"-lc",
-			fmt.Sprintf("pacmand -config %s", daemonConfigPath),
-		},
-		WaitStrategy: wait.ForListeningPort("8080/tcp").WithStartupTimeout(30 * time.Second),
-	})
-
-	base := "http://" + service.Address(t, "8080")
-	client := &http.Client{Timeout: 2 * time.Second}
-
-	// Wait until postgres is up so the node role is established.
-	waitForProbeStatus(t, client, base+"/health", http.StatusOK, 15*time.Second)
+	waitForProbeStatus(t, daemon.Client, daemon.Base+"/health", http.StatusOK, 15*time.Second)
 
 	probes := []struct {
 		path           string
@@ -189,23 +72,21 @@ bootstrap:
 		{path: "/primary", method: http.MethodGet, wantStatus: http.StatusOK, contractPath: "/primary", contractMethod: "get"},
 		// /replica → 503 because this node is the primary, not a replica
 		{path: "/replica", method: http.MethodGet, wantStatus: http.StatusServiceUnavailable, contractPath: "/replica", contractMethod: "get"},
-		// HEAD /primary → 200, no body
+		// HEAD mirrors GET status codes; fasthttp suppresses the body automatically
 		{path: "/primary", method: http.MethodHead, wantStatus: http.StatusOK},
-		// HEAD /replica → 503 (primary is not a replica)
 		{path: "/replica", method: http.MethodHead, wantStatus: http.StatusServiceUnavailable},
-		// OPTIONS /primary → 200 with Allow header
+		// OPTIONS returns 200 with an Allow header for all probe routes
 		{path: "/primary", method: http.MethodOptions, wantStatus: http.StatusOK},
-		// OPTIONS /replica → 200 with Allow header
 		{path: "/replica", method: http.MethodOptions, wantStatus: http.StatusOK},
 	}
 
 	for _, probe := range probes {
-		req, err := http.NewRequest(probe.method, base+probe.path, nil)
+		req, err := http.NewRequest(probe.method, daemon.Base+probe.path, nil)
 		if err != nil {
 			t.Fatalf("build request %s %s: %v", probe.method, probe.path, err)
 		}
 
-		resp, err := client.Do(req)
+		resp, err := daemon.Client.Do(req)
 		if err != nil {
 			t.Fatalf("perform %s %s: %v", probe.method, probe.path, err)
 		}
@@ -221,7 +102,6 @@ bootstrap:
 				probe.method, probe.path, resp.StatusCode, probe.wantStatus, body)
 		}
 
-		// Validate OPTIONS Allow header contains the required methods.
 		if probe.method == http.MethodOptions {
 			allow := resp.Header.Get("Allow")
 			for _, m := range []string{"GET", "HEAD", "OPTIONS"} {
@@ -231,27 +111,17 @@ bootstrap:
 			}
 		}
 
-		// Validate GET response shapes against the OpenAPI contract.
 		if probe.method == http.MethodGet && probe.contractPath != "" {
 			requireResponseMatchesContract(t, document, probe.contractPath, probe.contractMethod, resp, body)
 		}
 	}
 
-	// Verify the primary probe response has the correct Patroni-compatible fields.
-	req, err := http.NewRequest(http.MethodGet, base+"/primary", nil)
-	if err != nil {
-		t.Fatalf("build primary GET request: %v", err)
-	}
+	// Verify the primary probe response has the expected Patroni-compatible fields.
+	primaryResp := performHTTPRequest(t, http.MethodGet, daemon.Base+"/primary", nil, nil)
+	primaryBody, _ := io.ReadAll(primaryResp.Body)
+	primaryResp.Body.Close()
 
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("GET /primary: %v", err)
-	}
-
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-
-	var payload struct {
+	var primaryPayload struct {
 		State   string `json:"state"`
 		Role    string `json:"role"`
 		Patroni struct {
@@ -259,21 +129,17 @@ bootstrap:
 			Scope string `json:"scope"`
 		} `json:"patroni"`
 	}
-
-	if err := json.Unmarshal(body, &payload); err != nil {
+	if err := json.Unmarshal(primaryBody, &primaryPayload); err != nil {
 		t.Fatalf("decode /primary payload: %v", err)
 	}
-
-	if payload.State != "running" {
-		t.Errorf("/primary state: got %q, want %q", payload.State, "running")
+	if primaryPayload.State != "running" {
+		t.Errorf("/primary state: got %q, want %q", primaryPayload.State, "running")
 	}
-
-	if payload.Role != "primary" {
-		t.Errorf("/primary role: got %q, want %q", payload.Role, "primary")
+	if primaryPayload.Role != "primary" {
+		t.Errorf("/primary role: got %q, want %q", primaryPayload.Role, "primary")
 	}
-
-	if payload.Patroni.Name != "alpha-primary" {
-		t.Errorf("/primary patroni.name: got %q, want %q", payload.Patroni.Name, "alpha-primary")
+	if primaryPayload.Patroni.Name != "alpha-primary" {
+		t.Errorf("/primary patroni.name: got %q, want %q", primaryPayload.Patroni.Name, "alpha-primary")
 	}
 }
 
@@ -282,65 +148,24 @@ func TestPacmandNativeNodeAndMembersAPIWithRealPostgresOperation(t *testing.T) {
 		t.Skip("skipping Docker-backed integration test in short mode")
 	}
 
-	env := testenv.New(t)
-	name := "native-api-real-pg"
-	postgres := env.StartPostgres(t, name, "native-api-real-pg-postgres")
+	daemon := startSingleNodeDaemon(t, "alpha-api")
 	document := loadContractDocument(t)
 
-	configBody := fmt.Sprintf(`
-apiVersion: pacman.io/v1alpha1
-kind: NodeConfig
-node:
-  name: alpha-api
-  role: data
-  apiAddress: 0.0.0.0:8080
-postgres:
-  dataDir: /var/lib/postgresql/data
-  listenAddress: %s
-  port: 5432
-bootstrap:
-  clusterName: alpha
-  initialPrimary: alpha-api
-  seedAddresses:
-    - 0.0.0.0:9090
-  expectedMembers:
-    - alpha-api
-`, postgres.Alias())
+	waitForProbeStatus(t, daemon.Client, daemon.Base+"/health", http.StatusOK, 15*time.Second)
+	waitForProbeStatus(t, daemon.Client, daemon.Base+"/primary", http.StatusOK, 15*time.Second)
+	waitForProbeStatus(t, daemon.Client, daemon.Base+"/api/v1/members", http.StatusOK, 15*time.Second)
 
-	service := env.StartService(t, testenv.ServiceConfig{
-		Name:         name + "-native-api",
-		Image:        pacmanTestImage(),
-		Aliases:      []string{name + "-native-api"},
-		Env:          postgresConnectionEnv(postgres),
-		Files:        []testcontainers.ContainerFile{writeDaemonConfigFile(t, configBody)},
-		ExposedPorts: []string{"8080/tcp"},
-		Cmd: []string{
-			"/bin/sh",
-			"-lc",
-			fmt.Sprintf("pacmand -config %s", daemonConfigPath),
-		},
-		WaitStrategy: wait.ForListeningPort("8080/tcp").WithStartupTimeout(30 * time.Second),
-	})
-
-	base := "http://" + service.Address(t, "8080")
-	client := &http.Client{Timeout: 2 * time.Second}
-
-	waitForProbeStatus(t, client, base+"/health", http.StatusOK, 15*time.Second)
-	waitForProbeStatus(t, client, base+"/primary", http.StatusOK, 15*time.Second)
-	waitForProbeStatus(t, client, base+"/api/v1/members", http.StatusOK, 15*time.Second)
-
-	db := openIntegrationPostgres(t, postgres)
+	db := openFixtureDB(t, daemon.Postgres)
 	defer db.Close()
 
-	execIntegrationSQL(t, db, `
-create table if not exists api_smoke (
-	id integer primary key,
-	note text not null
-)`)
-	execIntegrationSQL(t, db, `
-insert into api_smoke (id, note)
-values (1, 'patroni-compatible')
-on conflict (id) do update set note = excluded.note`)
+	for _, stmt := range []string{
+		`create table if not exists api_smoke (id integer primary key, note text not null)`,
+		`insert into api_smoke (id, note) values (1, 'patroni-compatible') on conflict (id) do update set note = excluded.note`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("exec sql: %v", err)
+		}
+	}
 
 	var rows int
 	if err := db.QueryRow(`select count(*) from api_smoke where note = 'patroni-compatible'`).Scan(&rows); err != nil {
@@ -350,16 +175,17 @@ on conflict (id) do update set note = excluded.note`)
 		t.Fatalf("unexpected postgres row count: got %d, want 1", rows)
 	}
 
-	primaryResponse := performHTTPRequest(t, http.MethodGet, base+"/primary", nil, nil)
-	primaryBody, err := io.ReadAll(primaryResponse.Body)
-	primaryResponse.Body.Close()
+	// Validate /primary shape and Patroni-compatible response fields.
+	primaryResp := performHTTPRequest(t, http.MethodGet, daemon.Base+"/primary", nil, nil)
+	primaryBody, err := io.ReadAll(primaryResp.Body)
+	primaryResp.Body.Close()
 	if err != nil {
 		t.Fatalf("read /primary response: %v", err)
 	}
-	if primaryResponse.StatusCode != http.StatusOK {
-		t.Fatalf("unexpected /primary status: got %d want %d", primaryResponse.StatusCode, http.StatusOK)
+	if primaryResp.StatusCode != http.StatusOK {
+		t.Fatalf("/primary: got status %d, want %d", primaryResp.StatusCode, http.StatusOK)
 	}
-	requireResponseMatchesContract(t, document, "/primary", "get", primaryResponse, primaryBody)
+	requireResponseMatchesContract(t, document, "/primary", "get", primaryResp, primaryBody)
 
 	var primaryPayload struct {
 		State   string `json:"state"`
@@ -373,19 +199,20 @@ on conflict (id) do update set note = excluded.note`)
 		t.Fatalf("decode /primary payload: %v", err)
 	}
 	if primaryPayload.Role != "primary" || primaryPayload.State != "running" {
-		t.Fatalf("unexpected /primary payload: %+v", primaryPayload)
+		t.Fatalf("/primary unexpected payload: %+v", primaryPayload)
 	}
 
-	nodeResponse := performHTTPRequest(t, http.MethodGet, base+"/api/v1/nodes/alpha-api", nil, nil)
-	nodeBody, err := io.ReadAll(nodeResponse.Body)
-	nodeResponse.Body.Close()
+	// Validate /api/v1/nodes/{nodeName} returns full node status with postgres details.
+	nodeResp := performHTTPRequest(t, http.MethodGet, daemon.Base+"/api/v1/nodes/alpha-api", nil, nil)
+	nodeBody, err := io.ReadAll(nodeResp.Body)
+	nodeResp.Body.Close()
 	if err != nil {
 		t.Fatalf("read /api/v1/nodes response: %v", err)
 	}
-	if nodeResponse.StatusCode != http.StatusOK {
-		t.Fatalf("unexpected /api/v1/nodes status: got %d want %d", nodeResponse.StatusCode, http.StatusOK)
+	if nodeResp.StatusCode != http.StatusOK {
+		t.Fatalf("/api/v1/nodes/alpha-api: got status %d, want %d", nodeResp.StatusCode, http.StatusOK)
 	}
-	requireResponseMatchesContract(t, document, "/api/v1/nodes/{nodeName}", "get", nodeResponse, nodeBody)
+	requireResponseMatchesContract(t, document, "/api/v1/nodes/{nodeName}", "get", nodeResp, nodeBody)
 
 	var nodePayload struct {
 		NodeName string `json:"nodeName"`
@@ -404,25 +231,26 @@ on conflict (id) do update set note = excluded.note`)
 		t.Fatalf("decode /api/v1/nodes payload: %v", err)
 	}
 	if nodePayload.NodeName != "alpha-api" || nodePayload.Role != "primary" {
-		t.Fatalf("unexpected node payload: %+v", nodePayload)
+		t.Fatalf("/api/v1/nodes/alpha-api unexpected payload: %+v", nodePayload)
 	}
 	if !nodePayload.Postgres.Managed || !nodePayload.Postgres.Up {
-		t.Fatalf("unexpected postgres payload: %+v", nodePayload.Postgres)
+		t.Fatalf("/api/v1/nodes/alpha-api unexpected postgres payload: %+v", nodePayload.Postgres)
 	}
 	if nodePayload.Postgres.Details.ServerVersion == 0 || nodePayload.Postgres.Details.SystemIdentifier == "" {
 		t.Fatalf("expected postgres details from real postgres observation, got %+v", nodePayload.Postgres.Details)
 	}
 
-	membersResponse := performHTTPRequest(t, http.MethodGet, base+"/api/v1/members", nil, nil)
-	membersBody, err := io.ReadAll(membersResponse.Body)
-	membersResponse.Body.Close()
+	// Validate /api/v1/members returns the single registered member.
+	membersResp := performHTTPRequest(t, http.MethodGet, daemon.Base+"/api/v1/members", nil, nil)
+	membersBody, err := io.ReadAll(membersResp.Body)
+	membersResp.Body.Close()
 	if err != nil {
 		t.Fatalf("read /api/v1/members response: %v", err)
 	}
-	if membersResponse.StatusCode != http.StatusOK {
-		t.Fatalf("unexpected /api/v1/members status: got %d want %d", membersResponse.StatusCode, http.StatusOK)
+	if membersResp.StatusCode != http.StatusOK {
+		t.Fatalf("/api/v1/members: got status %d, want %d", membersResp.StatusCode, http.StatusOK)
 	}
-	requireResponseMatchesContract(t, document, "/api/v1/members", "get", membersResponse, membersBody)
+	requireResponseMatchesContract(t, document, "/api/v1/members", "get", membersResp, membersBody)
 
 	var membersPayload struct {
 		Items []struct {
@@ -436,96 +264,178 @@ on conflict (id) do update set note = excluded.note`)
 		t.Fatalf("decode /api/v1/members payload: %v", err)
 	}
 	if len(membersPayload.Items) != 1 {
-		t.Fatalf("unexpected member count: got %d want 1", len(membersPayload.Items))
+		t.Fatalf("/api/v1/members: got %d items, want 1", len(membersPayload.Items))
 	}
-	if membersPayload.Items[0].Name != "alpha-api" || membersPayload.Items[0].Role != "primary" || !membersPayload.Items[0].Healthy {
-		t.Fatalf("unexpected member payload: %+v", membersPayload.Items[0])
-	}
-}
-
-// waitForProbeStatus polls the given URL until it returns wantStatus or the
-// deadline is exceeded.
-func waitForProbeStatus(t *testing.T, client *http.Client, url string, wantStatus int, timeout time.Duration) {
-	t.Helper()
-
-	deadline := time.Now().Add(timeout)
-	var (
-		lastStatus int
-		lastErr    error
-	)
-
-	for time.Now().Before(deadline) {
-		resp, err := client.Get(url)
-		if err != nil {
-			lastErr = err
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-		lastStatus = resp.StatusCode
-
-		if resp.StatusCode == wantStatus {
-			return
-		}
-
-		time.Sleep(200 * time.Millisecond)
-	}
-
-	if lastErr != nil {
-		t.Fatalf("probe %s did not return %d within %s: last error: %v", url, wantStatus, timeout, lastErr)
-	}
-
-	t.Fatalf("probe %s did not return %d within %s: last status %d", url, wantStatus, timeout, lastStatus)
-}
-
-func pacmanTestImage() string {
-	image := strings.TrimSpace(os.Getenv("PACMAN_TEST_IMAGE"))
-	if image == "" {
-		return "pacman-test:local"
-	}
-
-	return image
-}
-
-func postgresConnectionEnv(postgres *testenv.Postgres) map[string]string {
-	return map[string]string{
-		"PGDATABASE": postgres.Database(),
-		"PGUSER":     postgres.Username(),
-		"PGPASSWORD": postgres.Password(),
+	member := membersPayload.Items[0]
+	if member.Name != "alpha-api" || member.Role != "primary" || !member.Healthy {
+		t.Fatalf("/api/v1/members unexpected member payload: %+v", member)
 	}
 }
 
-func openIntegrationPostgres(t *testing.T, postgres *testenv.Postgres) *sql.DB {
-	t.Helper()
+func TestPacmandHistoryMaintenanceAndDiagnosticsAPI(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Docker-backed integration test in short mode")
+	}
 
-	dsn := fmt.Sprintf(
-		"host=%s port=%d dbname=%s user=%s password=%s sslmode=disable",
-		postgres.Host(t),
-		postgres.Port(t),
-		postgres.Database(),
-		postgres.Username(),
-		postgres.Password(),
-	)
+	daemon := startSingleNodeDaemon(t, "alpha-admin")
+	document := loadContractDocument(t)
 
-	db, err := sql.Open("postgres", dsn)
+	waitForProbeStatus(t, daemon.Client, daemon.Base+"/health", http.StatusOK, 15*time.Second)
+	waitForProbeStatus(t, daemon.Client, daemon.Base+"/api/v1/members", http.StatusOK, 15*time.Second)
+
+	// History must be empty at startup.
+	historyResp := performHTTPRequest(t, http.MethodGet, daemon.Base+"/api/v1/history", nil, nil)
+	historyBody, err := io.ReadAll(historyResp.Body)
+	historyResp.Body.Close()
 	if err != nil {
-		t.Fatalf("open postgres connection: %v", err)
+		t.Fatalf("read /api/v1/history response: %v", err)
+	}
+	if historyResp.StatusCode != http.StatusOK {
+		t.Fatalf("/api/v1/history: got status %d, want %d", historyResp.StatusCode, http.StatusOK)
+	}
+	requireResponseMatchesContract(t, document, "/api/v1/history", "get", historyResp, historyBody)
+
+	var initialHistory struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(historyBody, &initialHistory); err != nil {
+		t.Fatalf("decode initial history: %v", err)
+	}
+	if len(initialHistory.Items) != 0 {
+		t.Fatalf("expected empty initial history, got %+v", initialHistory.Items)
 	}
 
-	if err := db.Ping(); err != nil {
-		db.Close()
-		t.Fatalf("ping postgres: %v", err)
+	// Maintenance must be disabled at startup.
+	maintenanceResp := performHTTPRequest(t, http.MethodGet, daemon.Base+"/api/v1/maintenance", nil, nil)
+	maintenanceBody, err := io.ReadAll(maintenanceResp.Body)
+	maintenanceResp.Body.Close()
+	if err != nil {
+		t.Fatalf("read /api/v1/maintenance response: %v", err)
+	}
+	if maintenanceResp.StatusCode != http.StatusOK {
+		t.Fatalf("/api/v1/maintenance GET: got status %d, want %d", maintenanceResp.StatusCode, http.StatusOK)
+	}
+	requireResponseMatchesContract(t, document, "/api/v1/maintenance", "get", maintenanceResp, maintenanceBody)
+
+	var maintenancePayload struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(maintenanceBody, &maintenancePayload); err != nil {
+		t.Fatalf("decode maintenance payload: %v", err)
+	}
+	if maintenancePayload.Enabled {
+		t.Fatal("expected maintenance mode to start disabled")
 	}
 
-	return db
-}
+	// Enable maintenance mode and verify the response.
+	maintenanceRequest := []byte(`{"enabled":true,"reason":"integration maintenance","requestedBy":"integration"}`)
+	requireRequestMatchesContract(t, document, "/api/v1/maintenance", "put", "application/json", maintenanceRequest)
 
-func execIntegrationSQL(t *testing.T, db *sql.DB, query string) {
-	t.Helper()
+	putResp := performHTTPRequest(t, http.MethodPut, daemon.Base+"/api/v1/maintenance", maintenanceRequest, map[string]string{
+		"Content-Type": "application/json",
+	})
+	putBody, err := io.ReadAll(putResp.Body)
+	putResp.Body.Close()
+	if err != nil {
+		t.Fatalf("read PUT /api/v1/maintenance response: %v", err)
+	}
+	if putResp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT /api/v1/maintenance: got status %d, want %d (body: %s)", putResp.StatusCode, http.StatusOK, putBody)
+	}
+	requireResponseMatchesContract(t, document, "/api/v1/maintenance", "put", putResp, putBody)
 
-	if _, err := db.Exec(query); err != nil {
-		t.Fatalf("exec integration sql %q: %v", query, err)
+	var updatedMaintenance struct {
+		Enabled     bool   `json:"enabled"`
+		Reason      string `json:"reason"`
+		RequestedBy string `json:"requestedBy"`
+	}
+	if err := json.Unmarshal(putBody, &updatedMaintenance); err != nil {
+		t.Fatalf("decode maintenance update payload: %v", err)
+	}
+	if !updatedMaintenance.Enabled || updatedMaintenance.Reason != "integration maintenance" || updatedMaintenance.RequestedBy != "integration" {
+		t.Fatalf("PUT /api/v1/maintenance unexpected payload: %+v", updatedMaintenance)
+	}
+
+	// History must contain the maintenance change event.
+	historyAfterResp := performHTTPRequest(t, http.MethodGet, daemon.Base+"/api/v1/history", nil, nil)
+	historyAfterBody, err := io.ReadAll(historyAfterResp.Body)
+	historyAfterResp.Body.Close()
+	if err != nil {
+		t.Fatalf("read /api/v1/history after maintenance response: %v", err)
+	}
+	if historyAfterResp.StatusCode != http.StatusOK {
+		t.Fatalf("/api/v1/history after maintenance: got status %d, want %d", historyAfterResp.StatusCode, http.StatusOK)
+	}
+	requireResponseMatchesContract(t, document, "/api/v1/history", "get", historyAfterResp, historyAfterBody)
+
+	var historyAfter struct {
+		Items []struct {
+			Kind   string `json:"kind"`
+			Result string `json:"result"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(historyAfterBody, &historyAfter); err != nil {
+		t.Fatalf("decode history-after payload: %v", err)
+	}
+	if len(historyAfter.Items) != 1 {
+		t.Fatalf("expected one history entry after maintenance change, got %+v", historyAfter.Items)
+	}
+	if historyAfter.Items[0].Kind != "maintenance_change" || historyAfter.Items[0].Result != "succeeded" {
+		t.Fatalf("unexpected history entry: %+v", historyAfter.Items[0])
+	}
+
+	// Diagnostics must report cluster name, member list, and warnings when maintenance is on.
+	diagnosticsResp := performHTTPRequest(t, http.MethodGet, daemon.Base+"/api/v1/diagnostics", nil, nil)
+	diagnosticsBody, err := io.ReadAll(diagnosticsResp.Body)
+	diagnosticsResp.Body.Close()
+	if err != nil {
+		t.Fatalf("read /api/v1/diagnostics response: %v", err)
+	}
+	if diagnosticsResp.StatusCode != http.StatusOK {
+		t.Fatalf("/api/v1/diagnostics: got status %d, want %d", diagnosticsResp.StatusCode, http.StatusOK)
+	}
+	requireResponseMatchesContract(t, document, "/api/v1/diagnostics", "get", diagnosticsResp, diagnosticsBody)
+
+	var diagnosticsPayload struct {
+		ClusterName string   `json:"clusterName"`
+		Warnings    []string `json:"warnings"`
+		Members     []struct {
+			Name string `json:"name"`
+			Role string `json:"role"`
+		} `json:"members"`
+	}
+	if err := json.Unmarshal(diagnosticsBody, &diagnosticsPayload); err != nil {
+		t.Fatalf("decode diagnostics payload: %v", err)
+	}
+	if diagnosticsPayload.ClusterName != "alpha" {
+		t.Fatalf("/api/v1/diagnostics clusterName: got %q, want %q", diagnosticsPayload.ClusterName, "alpha")
+	}
+	if len(diagnosticsPayload.Members) != 1 || diagnosticsPayload.Members[0].Name != "alpha-admin" {
+		t.Fatalf("/api/v1/diagnostics unexpected members: %+v", diagnosticsPayload.Members)
+	}
+	if len(diagnosticsPayload.Warnings) == 0 {
+		t.Fatal("expected diagnostics warnings after enabling maintenance")
+	}
+
+	// ?includeMembers=false must return an empty members list.
+	compactResp := performHTTPRequest(t, http.MethodGet, daemon.Base+"/api/v1/diagnostics?includeMembers=false", nil, nil)
+	compactBody, err := io.ReadAll(compactResp.Body)
+	compactResp.Body.Close()
+	if err != nil {
+		t.Fatalf("read compact /api/v1/diagnostics response: %v", err)
+	}
+	if compactResp.StatusCode != http.StatusOK {
+		t.Fatalf("/api/v1/diagnostics?includeMembers=false: got status %d, want %d", compactResp.StatusCode, http.StatusOK)
+	}
+	requireResponseMatchesContract(t, document, "/api/v1/diagnostics", "get", compactResp, compactBody)
+
+	var compactPayload struct {
+		Members []map[string]any `json:"members"`
+	}
+	if err := json.Unmarshal(compactBody, &compactPayload); err != nil {
+		t.Fatalf("decode compact diagnostics payload: %v", err)
+	}
+	if len(compactPayload.Members) != 0 {
+		t.Fatalf("expected empty compact diagnostics members, got %+v", compactPayload.Members)
 	}
 }

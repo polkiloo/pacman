@@ -560,6 +560,13 @@ func TestRepositoryDocumentPatroniAdminAndNativeRoutesRequireSecurity(t *testing
 		{path: "/reload", method: "post"},
 		{path: "/reinitialize", method: "post"},
 		{path: "/api/v1/cluster", method: "get"},
+		{path: "/api/v1/cluster/spec", method: "get"},
+		{path: "/api/v1/members", method: "get"},
+		{path: "/api/v1/nodes/{nodeName}", method: "get"},
+		{path: "/api/v1/history", method: "get"},
+		{path: "/api/v1/maintenance", method: "get"},
+		{path: "/api/v1/maintenance", method: "put"},
+		{path: "/api/v1/diagnostics", method: "get"},
 		{path: "/api/v1/operations/switchover", method: "post"},
 		{path: "/api/v1/operations/failover", method: "post"},
 	}

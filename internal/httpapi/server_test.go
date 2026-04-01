@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v2"
+
 	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
 	"github.com/polkiloo/pacman/internal/cluster"
 )
@@ -167,6 +169,234 @@ func TestAccessLogMiddlewareLogsRequest(t *testing.T) {
 		if !strings.Contains(logs, want) {
 			t.Fatalf("expected access log to contain %q, got %q", want, logs)
 		}
+	}
+}
+
+func TestAPICommonMiddlewareSetsNoStoreHeaders(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	response := performRequest(t, New("alpha-1", testNodeStatusStore{
+		clusterStatus: cluster.ClusterStatus{
+			ClusterName:  "alpha",
+			Phase:        cluster.ClusterPhaseHealthy,
+			CurrentEpoch: 1,
+			ObservedAt:   now,
+			Members:      []cluster.MemberStatus{},
+		},
+		hasClusterStatus: true,
+	}, discardLogger(), Config{}), "/api/v1/cluster")
+	defer response.Body.Close()
+
+	if got := response.Header.Get(fiber.HeaderCacheControl); got != "no-store" {
+		t.Fatalf("cache-control: got %q, want %q", got, "no-store")
+	}
+
+	if got := response.Header.Get(fiber.HeaderPragma); got != "no-cache" {
+		t.Fatalf("pragma: got %q, want %q", got, "no-cache")
+	}
+
+	if got := response.Header.Get(headerXContentTypeOption); got != "nosniff" {
+		t.Fatalf("x-content-type-options: got %q, want %q", got, "nosniff")
+	}
+}
+
+func TestAuthMiddlewareRejectsUnauthorizedAPIRoute(t *testing.T) {
+	t.Parallel()
+
+	authorizer := &testAuthorizer{
+		err: Unauthorized("missing bearer token"),
+	}
+
+	response := performRequest(t, New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{
+		Authorizer: authorizer,
+	}), "/api/v1/cluster")
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusUnauthorized)
+	}
+
+	if got := response.Header.Get(fiber.HeaderWWWAuthenticate); got != "Bearer" {
+		t.Fatalf("www-authenticate: got %q, want %q", got, "Bearer")
+	}
+
+	if len(authorizer.scopes) != 1 || authorizer.scopes[0] != AccessScopeClusterRead {
+		t.Fatalf("unexpected auth scopes: got %+v", authorizer.scopes)
+	}
+
+	var body errorResponseJSON
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+
+	if body.Error != "unauthorized" {
+		t.Fatalf("error: got %q, want %q", body.Error, "unauthorized")
+	}
+
+	if body.Message != "missing bearer token" {
+		t.Fatalf("message: got %q, want %q", body.Message, "missing bearer token")
+	}
+}
+
+func TestAuthMiddlewareRejectsForbiddenWriteRoute(t *testing.T) {
+	t.Parallel()
+
+	authorizer := &testAuthorizer{
+		err: Forbidden("operator role required"),
+	}
+
+	response := performRequestBodyWithHeaders(
+		t,
+		New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{Authorizer: authorizer}),
+		http.MethodPut,
+		"/api/v1/maintenance",
+		[]byte(`{"enabled":true}`),
+		map[string]string{"Content-Type": "application/json"},
+	)
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusForbidden)
+	}
+
+	if len(authorizer.scopes) != 1 || authorizer.scopes[0] != AccessScopeClusterWrite {
+		t.Fatalf("unexpected auth scopes: got %+v", authorizer.scopes)
+	}
+
+	var body errorResponseJSON
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+
+	if body.Error != "forbidden" {
+		t.Fatalf("error: got %q, want %q", body.Error, "forbidden")
+	}
+
+	if body.Message != "operator role required" {
+		t.Fatalf("message: got %q, want %q", body.Message, "operator role required")
+	}
+}
+
+func TestAuthMiddlewareStoresPrincipalInRequestContext(t *testing.T) {
+	t.Parallel()
+
+	authorizer := &testAuthorizer{
+		principal: &Principal{
+			Subject:   "ops@example",
+			Mechanism: "bearer",
+		},
+	}
+
+	srv := &Server{
+		nodeName:   "alpha-1",
+		authorizer: authorizer,
+	}
+
+	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app.Use(srv.requestIDMiddleware())
+	app.Use(srv.apiCommonMiddleware())
+	app.Use(srv.authMiddleware(AccessScopeClusterRead))
+	app.Get("/api/v1/test-principal", func(c *fiber.Ctx) error {
+		principal, ok := CurrentPrincipal(c)
+		if !ok {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "principal_missing",
+			})
+		}
+
+		return c.JSON(fiber.Map{
+			"subject":    principal.Subject,
+			"mechanism":  principal.Mechanism,
+			"request_id": RequestID(c),
+		})
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/test-principal", nil)
+	response, err := app.Test(request, int(time.Second.Milliseconds()))
+	if err != nil {
+		t.Fatalf("perform GET %q: %v", "/api/v1/test-principal", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	if len(authorizer.scopes) != 1 || authorizer.scopes[0] != AccessScopeClusterRead {
+		t.Fatalf("unexpected auth scopes: got %+v", authorizer.scopes)
+	}
+
+	var body struct {
+		Subject   string `json:"subject"`
+		Mechanism string `json:"mechanism"`
+		RequestID string `json:"request_id"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+
+	if body.Subject != "ops@example" {
+		t.Fatalf("subject: got %q, want %q", body.Subject, "ops@example")
+	}
+
+	if body.Mechanism != "bearer" {
+		t.Fatalf("mechanism: got %q, want %q", body.Mechanism, "bearer")
+	}
+
+	if strings.TrimSpace(body.RequestID) == "" {
+		t.Fatal("expected request ID to be available in handler context")
+	}
+}
+
+func TestWriteAPIRoutesRequireJSONContentType(t *testing.T) {
+	t.Parallel()
+
+	response := performRequestBodyWithHeaders(
+		t,
+		New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{}),
+		http.MethodPut,
+		"/api/v1/maintenance",
+		[]byte(`{"enabled":true}`),
+		map[string]string{"Content-Type": "text/plain"},
+	)
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusUnsupportedMediaType {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusUnsupportedMediaType)
+	}
+
+	var body errorResponseJSON
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+
+	if body.Error != "unsupported_media_type" {
+		t.Fatalf("error: got %q, want %q", body.Error, "unsupported_media_type")
+	}
+}
+
+func TestAPINotFoundReturnsJSONError(t *testing.T) {
+	t.Parallel()
+
+	response := performRequest(t, New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{}), "/api/v1/missing")
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusNotFound)
+	}
+
+	var body errorResponseJSON
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+
+	if body.Error != "not_found" {
+		t.Fatalf("error: got %q, want %q", body.Error, "not_found")
+	}
+
+	if body.Message != `path "/api/v1/missing" was not found` {
+		t.Fatalf("message: got %q", body.Message)
 	}
 }
 
@@ -892,9 +1122,12 @@ func TestGetClusterStatusIncludesActiveOperation(t *testing.T) {
 		clusterStatus:    status,
 		hasClusterStatus: true,
 	}, discardLogger(), Config{}), "/api/v1/cluster")
+	defer response.Body.Close()
 
 	var body clusterStatusResponse
-	decodeJSONResponse(t, response, &body)
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
 
 	if body.ActiveOperation == nil {
 		t.Fatal("expected activeOperation, got nil")
@@ -945,9 +1178,12 @@ func TestGetClusterStatusIncludesOperationScheduledAt(t *testing.T) {
 		clusterStatus:    status,
 		hasClusterStatus: true,
 	}, discardLogger(), Config{}), "/api/v1/cluster")
+	defer response.Body.Close()
 
 	var body clusterStatusResponse
-	decodeJSONResponse(t, response, &body)
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
 
 	if body.ActiveOperation == nil {
 		t.Fatal("expected activeOperation, got nil")
@@ -987,9 +1223,12 @@ func TestGetClusterStatusOperationScheduledAtOmittedWhenZero(t *testing.T) {
 		clusterStatus:    status,
 		hasClusterStatus: true,
 	}, discardLogger(), Config{}), "/api/v1/cluster")
+	defer response.Body.Close()
 
 	var body clusterStatusResponse
-	decodeJSONResponse(t, response, &body)
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
 
 	if body.ActiveOperation == nil {
 		t.Fatal("expected activeOperation, got nil")
@@ -1033,9 +1272,12 @@ func TestGetClusterStatusIncludesScheduledSwitchover(t *testing.T) {
 		clusterStatus:    status,
 		hasClusterStatus: true,
 	}, discardLogger(), Config{}), "/api/v1/cluster")
+	defer response.Body.Close()
 
 	var body clusterStatusResponse
-	decodeJSONResponse(t, response, &body)
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
 
 	if body.ScheduledSwitchover == nil {
 		t.Fatal("expected scheduledSwitchover, got nil")
@@ -1074,9 +1316,12 @@ func TestGetClusterStatusMaintenanceUpdatedAtEmittedWhenSet(t *testing.T) {
 		clusterStatus:    status,
 		hasClusterStatus: true,
 	}, discardLogger(), Config{}), "/api/v1/cluster")
+	defer response.Body.Close()
 
 	var body clusterStatusResponse
-	decodeJSONResponse(t, response, &body)
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
 
 	if !body.Maintenance.Enabled {
 		t.Error("maintenance.enabled: got false, want true")
@@ -1112,9 +1357,12 @@ func TestGetClusterStatusMaintenanceUpdatedAtOmittedWhenZero(t *testing.T) {
 		clusterStatus:    status,
 		hasClusterStatus: true,
 	}, discardLogger(), Config{}), "/api/v1/cluster")
+	defer response.Body.Close()
 
 	var body clusterStatusResponse
-	decodeJSONResponse(t, response, &body)
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
 
 	if body.Maintenance.UpdatedAt != nil {
 		t.Errorf("maintenance.updatedAt: got %v, want nil", body.Maintenance.UpdatedAt)
@@ -1154,9 +1402,12 @@ func TestGetClusterStatusMemberFullFields(t *testing.T) {
 		clusterStatus:    status,
 		hasClusterStatus: true,
 	}, discardLogger(), Config{}), "/api/v1/cluster")
+	defer response.Body.Close()
 
 	var body clusterStatusResponse
-	decodeJSONResponse(t, response, &body)
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
 
 	if len(body.Members) != 1 {
 		t.Fatalf("members: got %d, want 1", len(body.Members))
@@ -1220,6 +1471,7 @@ func TestGetClusterSpecReturnsOKWithSpec(t *testing.T) {
 		clusterSpec: spec,
 		hasSpec:     true,
 	}, discardLogger(), Config{}), "/api/v1/cluster/spec")
+	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusOK)
@@ -1306,9 +1558,13 @@ func TestGetClusterSpecWithMemberTags(t *testing.T) {
 		clusterSpec: spec,
 		hasSpec:     true,
 	}, discardLogger(), Config{}), "/api/v1/cluster/spec")
+	defer response.Body.Close()
+	defer response.Body.Close()
 
 	var body clusterSpecResponse
-	decodeJSONResponse(t, response, &body)
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
 
 	if len(body.Members) != 1 {
 		t.Fatalf("members: got %d, want 1", len(body.Members))
@@ -1335,9 +1591,12 @@ func TestGetClusterSpecMaintenance(t *testing.T) {
 		clusterSpec: spec,
 		hasSpec:     true,
 	}, discardLogger(), Config{}), "/api/v1/cluster/spec")
+	defer response.Body.Close()
 
 	var body clusterSpecResponse
-	decodeJSONResponse(t, response, &body)
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
 
 	if !body.Maintenance.Enabled {
 		t.Error("maintenance.enabled: got false, want true")
@@ -1363,9 +1622,12 @@ func TestGetClusterSpecSwitchoverRequireSpecificCandidate(t *testing.T) {
 		clusterSpec: spec,
 		hasSpec:     true,
 	}, discardLogger(), Config{}), "/api/v1/cluster/spec")
+	defer response.Body.Close()
 
 	var body clusterSpecResponse
-	decodeJSONResponse(t, response, &body)
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
 
 	if !body.Switchover.RequireSpecificCandidateDuringMaintenance {
 		t.Error("switchover.requireSpecificCandidateDuringMaintenance: got false, want true")
@@ -1387,9 +1649,12 @@ func TestGetClusterSpecFencingRequired(t *testing.T) {
 		clusterSpec: spec,
 		hasSpec:     true,
 	}, discardLogger(), Config{}), "/api/v1/cluster/spec")
+	defer response.Body.Close()
 
 	var body clusterSpecResponse
-	decodeJSONResponse(t, response, &body)
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
 
 	if !body.Failover.FencingRequired {
 		t.Error("failover.fencingRequired: got false, want true")
@@ -1665,6 +1930,345 @@ func TestGetMembersReturns503WhenClusterStatusUnavailable(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/v1/history
+// ---------------------------------------------------------------------------
+
+func TestGetHistoryReturnsEntries(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.April, 2, 12, 0, 0, 0, time.UTC)
+	response := performRequest(t, New("alpha-1", testNodeStatusStore{
+		history: []cluster.HistoryEntry{
+			{
+				OperationID: "maintenance-1",
+				Kind:        cluster.OperationKindMaintenanceChange,
+				Timeline:    7,
+				WALLSN:      "0/7000100",
+				FromMember:  "alpha-1",
+				Reason:      "weekly backup",
+				Result:      cluster.OperationResultSucceeded,
+				FinishedAt:  now,
+			},
+		},
+	}, discardLogger(), Config{}), "/api/v1/history")
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	var body historyResponse
+	decodeJSONResponse(t, response, &body)
+
+	if len(body.Items) != 1 {
+		t.Fatalf("items: got %d, want 1", len(body.Items))
+	}
+
+	if body.Items[0].OperationID != "maintenance-1" {
+		t.Errorf("operationId: got %q", body.Items[0].OperationID)
+	}
+
+	if body.Items[0].Kind != "maintenance_change" {
+		t.Errorf("kind: got %q", body.Items[0].Kind)
+	}
+
+	if body.Items[0].WALLSN != "0/7000100" {
+		t.Errorf("walLsn: got %q", body.Items[0].WALLSN)
+	}
+}
+
+func TestGetHistoryReturnsEmptyListWhenNoEntries(t *testing.T) {
+	t.Parallel()
+
+	response := performRequest(t, New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{}), "/api/v1/history")
+	defer response.Body.Close()
+
+	var body historyResponse
+	decodeJSONResponse(t, response, &body)
+
+	if len(body.Items) != 0 {
+		t.Fatalf("items: got %d, want 0", len(body.Items))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GET/PUT /api/v1/maintenance
+// ---------------------------------------------------------------------------
+
+func TestGetMaintenanceReturnsCurrentStatus(t *testing.T) {
+	t.Parallel()
+
+	updatedAt := time.Date(2026, time.April, 2, 12, 5, 0, 0, time.UTC)
+	response := performRequest(t, New("alpha-1", testNodeStatusStore{
+		maintenance: cluster.MaintenanceModeStatus{
+			Enabled:     true,
+			Reason:      "weekly backup",
+			RequestedBy: "ops",
+			UpdatedAt:   updatedAt,
+		},
+	}, discardLogger(), Config{}), "/api/v1/maintenance")
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	var body maintenanceModeStatusJSON
+	decodeJSONResponse(t, response, &body)
+
+	if !body.Enabled {
+		t.Fatal("enabled: got false, want true")
+	}
+
+	if body.Reason != "weekly backup" {
+		t.Errorf("reason: got %q", body.Reason)
+	}
+
+	if body.UpdatedAt == nil || !body.UpdatedAt.Equal(updatedAt) {
+		t.Errorf("updatedAt: got %v, want %v", body.UpdatedAt, updatedAt)
+	}
+}
+
+func TestPutMaintenanceReturnsUpdatedStatus(t *testing.T) {
+	t.Parallel()
+
+	updatedAt := time.Date(2026, time.April, 2, 12, 10, 0, 0, time.UTC)
+	updated := cluster.MaintenanceModeStatus{
+		Enabled:     true,
+		Reason:      "weekly backup",
+		RequestedBy: "ops",
+		UpdatedAt:   updatedAt,
+	}
+
+	response := performRequestBodyWithHeaders(
+		t,
+		New("alpha-1", testNodeStatusStore{
+			maintenanceUpdate: &updated,
+		}, discardLogger(), Config{}),
+		http.MethodPut,
+		"/api/v1/maintenance",
+		[]byte(`{"enabled":true,"reason":"weekly backup","requestedBy":"ops"}`),
+		map[string]string{"Content-Type": "application/json"},
+	)
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	var body maintenanceModeStatusJSON
+	decodeJSONResponse(t, response, &body)
+
+	if !body.Enabled || body.Reason != "weekly backup" || body.RequestedBy != "ops" {
+		t.Fatalf("unexpected maintenance response: %+v", body)
+	}
+
+	if body.UpdatedAt == nil || !body.UpdatedAt.Equal(updatedAt) {
+		t.Errorf("updatedAt: got %v, want %v", body.UpdatedAt, updatedAt)
+	}
+}
+
+func TestPutMaintenanceReturns400OnInvalidJSON(t *testing.T) {
+	t.Parallel()
+
+	response := performRequestBodyWithHeaders(
+		t,
+		New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{}),
+		http.MethodPut,
+		"/api/v1/maintenance",
+		[]byte(`{"enabled":`),
+		map[string]string{"Content-Type": "application/json"},
+	)
+
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusBadRequest)
+	}
+
+	var body errorResponseJSON
+	decodeJSONResponse(t, response, &body)
+
+	if body.Error != "invalid_maintenance_request" {
+		t.Errorf("error: got %q", body.Error)
+	}
+}
+
+func TestPutMaintenanceReturns400OnUpdateError(t *testing.T) {
+	t.Parallel()
+
+	response := performRequestBodyWithHeaders(
+		t,
+		New("alpha-1", testNodeStatusStore{
+			maintenanceErr: errors.New("cluster spec required"),
+		}, discardLogger(), Config{}),
+		http.MethodPut,
+		"/api/v1/maintenance",
+		[]byte(`{"enabled":true}`),
+		map[string]string{"Content-Type": "application/json"},
+	)
+
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusBadRequest)
+	}
+
+	var body errorResponseJSON
+	decodeJSONResponse(t, response, &body)
+
+	if body.Message != "cluster spec required" {
+		t.Errorf("message: got %q", body.Message)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/diagnostics
+// ---------------------------------------------------------------------------
+
+func TestGetDiagnosticsReturnsSummaryWithMembersAndWarnings(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.April, 2, 13, 0, 0, 0, time.UTC)
+	response := performRequest(t, New("alpha-1", testNodeStatusStore{
+		clusterSpec: cluster.ClusterSpec{
+			ClusterName: "alpha",
+			Members: []cluster.MemberSpec{
+				{Name: "alpha-1"},
+				{Name: "alpha-2"},
+			},
+		},
+		hasSpec: true,
+		clusterStatus: cluster.ClusterStatus{
+			ClusterName:    "alpha",
+			Phase:          cluster.ClusterPhaseDegraded,
+			CurrentPrimary: "",
+			Maintenance: cluster.MaintenanceModeStatus{
+				Enabled: true,
+			},
+			ActiveOperation: &cluster.Operation{
+				ID:          "op-1",
+				Kind:        cluster.OperationKindFailover,
+				State:       cluster.OperationStateRunning,
+				RequestedAt: now,
+				Result:      cluster.OperationResultPending,
+			},
+			Members: []cluster.MemberStatus{
+				{
+					Name:       "alpha-1",
+					Role:       cluster.MemberRolePrimary,
+					State:      cluster.MemberStateRunning,
+					Healthy:    true,
+					LastSeenAt: now,
+				},
+				{
+					Name:        "alpha-2",
+					Role:        cluster.MemberRoleReplica,
+					State:       cluster.MemberStateNeedsRejoin,
+					Healthy:     false,
+					LagBytes:    256,
+					NeedsRejoin: true,
+					LastSeenAt:  now,
+				},
+			},
+			ObservedAt: now,
+		},
+		hasClusterStatus: true,
+		nodeStatuses: []agentmodel.NodeStatus{
+			{
+				NodeName: "alpha-1",
+				ControlPlane: agentmodel.ControlPlaneStatus{
+					Leader: true,
+				},
+			},
+		},
+	}, discardLogger(), Config{}), "/api/v1/diagnostics")
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	var body diagnosticsSummaryJSON
+	decodeJSONResponse(t, response, &body)
+
+	if body.ClusterName != "alpha" {
+		t.Errorf("clusterName: got %q", body.ClusterName)
+	}
+
+	if body.ControlPlaneLeader != "alpha-1" {
+		t.Errorf("controlPlaneLeader: got %q", body.ControlPlaneLeader)
+	}
+
+	if body.QuorumReachable == nil || *body.QuorumReachable {
+		t.Fatalf("quorumReachable: got %v, want false", body.QuorumReachable)
+	}
+
+	if len(body.Members) != 2 {
+		t.Fatalf("members: got %d, want 2", len(body.Members))
+	}
+
+	for _, want := range []string{
+		"cluster phase is degraded",
+		"maintenance mode is enabled",
+		"active operation failover is running",
+		"no writable primary observed",
+		"member alpha-2 is unhealthy",
+		"member alpha-2 requires rejoin",
+		"quorum is not reachable",
+	} {
+		if !containsString(body.Warnings, want) {
+			t.Fatalf("expected warning %q in %+v", want, body.Warnings)
+		}
+	}
+}
+
+func TestGetDiagnosticsSupportsIncludeMembersFalse(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.April, 2, 13, 30, 0, 0, time.UTC)
+	response := performRequestMethod(t, New("alpha-1", testNodeStatusStore{
+		clusterSpec: cluster.ClusterSpec{ClusterName: "alpha"},
+		hasSpec:     true,
+		clusterStatus: cluster.ClusterStatus{
+			ClusterName: "alpha",
+			Phase:       cluster.ClusterPhaseHealthy,
+			Members: []cluster.MemberStatus{
+				{
+					Name:       "alpha-1",
+					Role:       cluster.MemberRolePrimary,
+					State:      cluster.MemberStateRunning,
+					Healthy:    true,
+					LastSeenAt: now,
+				},
+			},
+			ObservedAt: now,
+		},
+		hasClusterStatus: true,
+	}, discardLogger(), Config{}), http.MethodGet, "/api/v1/diagnostics?includeMembers=false")
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	var body diagnosticsSummaryJSON
+	decodeJSONResponse(t, response, &body)
+
+	if len(body.Members) != 0 {
+		t.Fatalf("members: got %d, want 0", len(body.Members))
+	}
+}
+
+func TestGetDiagnosticsReturns503WhenUnavailable(t *testing.T) {
+	t.Parallel()
+
+	response := performRequest(t, New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{}), "/api/v1/diagnostics")
+
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusServiceUnavailable)
+	}
+
+	var body errorResponseJSON
+	decodeJSONResponse(t, response, &body)
+
+	if body.Error != "diagnostics_unavailable" {
+		t.Errorf("error: got %q", body.Error)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // buildNodeStatus — full field coverage
 // ---------------------------------------------------------------------------
 
@@ -1680,6 +2284,7 @@ func TestBuildNodeStatusEmitsPostmasterStartTime(t *testing.T) {
 		nodeStatus: node,
 		hasNode:    true,
 	}, discardLogger(), Config{}), "/health")
+	defer response.Body.Close()
 
 	var body patroniNodeStatus
 	decodeJSONResponse(t, response, &body)
@@ -1705,6 +2310,7 @@ func TestBuildNodeStatusEmitsDCSLastSeen(t *testing.T) {
 		nodeStatus: node,
 		hasNode:    true,
 	}, discardLogger(), Config{}), "/health")
+	defer response.Body.Close()
 
 	var body patroniNodeStatus
 	decodeJSONResponse(t, response, &body)
@@ -1722,6 +2328,7 @@ func TestBuildNodeStatusEmitsPauseWhenMaintenanceEnabled(t *testing.T) {
 		hasNode:     true,
 		maintenance: cluster.MaintenanceModeStatus{Enabled: true},
 	}, discardLogger(), Config{}), "/health")
+	defer response.Body.Close()
 
 	var body patroniNodeStatus
 	decodeJSONResponse(t, response, &body)
@@ -1742,6 +2349,7 @@ func TestBuildNodeStatusWithNoClusterSpec(t *testing.T) {
 		hasNode:    true,
 		// hasSpec deliberately false
 	}, discardLogger(), Config{}), "/primary")
+	defer response.Body.Close()
 
 	var body patroniNodeStatus
 	decodeJSONResponse(t, response, &body)
@@ -1755,6 +2363,7 @@ func TestBuildNodeStatusWhenNodeAbsentReturnsStoppedUnknown(t *testing.T) {
 	t.Parallel()
 
 	response := performRequest(t, New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{}), "/health")
+	defer response.Body.Close()
 
 	var body patroniNodeStatus
 	decodeJSONResponse(t, response, &body)
@@ -1785,6 +2394,7 @@ func TestBuildNodeStatusEmitsXLogFields(t *testing.T) {
 		nodeStatus: node,
 		hasNode:    true,
 	}, discardLogger(), Config{}), "/health")
+	defer response.Body.Close()
 
 	var body patroniNodeStatus
 	decodeJSONResponse(t, response, &body)
@@ -1820,6 +2430,7 @@ func TestBuildNodeStatusXLogNilWhenWALEmpty(t *testing.T) {
 		nodeStatus: node,
 		hasNode:    true,
 	}, discardLogger(), Config{}), "/health")
+	defer response.Body.Close()
 
 	var body patroniNodeStatus
 	decodeJSONResponse(t, response, &body)
@@ -2095,21 +2706,51 @@ func TestReplicaStateOK(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type testNodeStatusStore struct {
-	nodeStatus       agentmodel.NodeStatus
-	hasNode          bool
-	clusterSpec      cluster.ClusterSpec
-	hasSpec          bool
-	clusterStatus    cluster.ClusterStatus
-	hasClusterStatus bool
-	maintenance      cluster.MaintenanceModeStatus
+	nodeStatus        agentmodel.NodeStatus
+	nodeStatuses      []agentmodel.NodeStatus
+	hasNode           bool
+	clusterSpec       cluster.ClusterSpec
+	hasSpec           bool
+	clusterStatus     cluster.ClusterStatus
+	hasClusterStatus  bool
+	maintenance       cluster.MaintenanceModeStatus
+	maintenanceUpdate *cluster.MaintenanceModeStatus
+	maintenanceErr    error
+	history           []cluster.HistoryEntry
 }
 
 func (store testNodeStatusStore) NodeStatus(nodeName string) (agentmodel.NodeStatus, bool) {
+	if len(store.nodeStatuses) > 0 {
+		for _, nodeStatus := range store.nodeStatuses {
+			if nodeStatus.NodeName == nodeName {
+				return nodeStatus.Clone(), true
+			}
+		}
+
+		return agentmodel.NodeStatus{}, false
+	}
+
 	if !store.hasNode || nodeName != store.nodeStatus.NodeName {
 		return agentmodel.NodeStatus{}, false
 	}
 
 	return store.nodeStatus.Clone(), true
+}
+
+func (store testNodeStatusStore) NodeStatuses() []agentmodel.NodeStatus {
+	if len(store.nodeStatuses) > 0 {
+		items := make([]agentmodel.NodeStatus, len(store.nodeStatuses))
+		for i, nodeStatus := range store.nodeStatuses {
+			items[i] = nodeStatus.Clone()
+		}
+		return items
+	}
+
+	if store.hasNode {
+		return []agentmodel.NodeStatus{store.nodeStatus.Clone()}
+	}
+
+	return nil
 }
 
 func (store testNodeStatusStore) ClusterSpec() (cluster.ClusterSpec, bool) {
@@ -2132,6 +2773,47 @@ func (store testNodeStatusStore) MaintenanceStatus() cluster.MaintenanceModeStat
 	return store.maintenance
 }
 
+func (store testNodeStatusStore) UpdateMaintenanceMode(ctx context.Context, request cluster.MaintenanceModeUpdateRequest) (cluster.MaintenanceModeStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return cluster.MaintenanceModeStatus{}, err
+	}
+
+	if store.maintenanceErr != nil {
+		return cluster.MaintenanceModeStatus{}, store.maintenanceErr
+	}
+
+	if store.maintenanceUpdate != nil {
+		return *store.maintenanceUpdate, nil
+	}
+
+	return cluster.MaintenanceModeStatus{
+		Enabled:     request.Enabled,
+		Reason:      request.Reason,
+		RequestedBy: request.RequestedBy,
+	}, nil
+}
+
+func (store testNodeStatusStore) History() []cluster.HistoryEntry {
+	if store.history == nil {
+		return nil
+	}
+
+	items := make([]cluster.HistoryEntry, len(store.history))
+	copy(items, store.history)
+	return items
+}
+
+type testAuthorizer struct {
+	principal *Principal
+	err       error
+	scopes    []AccessScope
+}
+
+func (auth *testAuthorizer) Authorize(_ *fiber.Ctx, scope AccessScope) (*Principal, error) {
+	auth.scopes = append(auth.scopes, scope)
+	return auth.principal, auth.err
+}
+
 func performRequest(t *testing.T, srv *Server, path string) *http.Response {
 	t.Helper()
 	return performRequestMethod(t, srv, http.MethodGet, path)
@@ -2141,6 +2823,22 @@ func performRequestMethod(t *testing.T, srv *Server, method, path string) *http.
 	t.Helper()
 
 	return performRequestWithHeaders(t, srv, method, path, nil)
+}
+
+func performRequestBodyWithHeaders(t *testing.T, srv *Server, method, path string, body []byte, headers map[string]string) *http.Response {
+	t.Helper()
+
+	request := httptest.NewRequest(method, path, bytes.NewReader(body))
+	for key, value := range headers {
+		request.Header.Set(key, value)
+	}
+
+	response, err := srv.app.Test(request, int(time.Second.Milliseconds()))
+	if err != nil {
+		t.Fatalf("perform %s %q: %v", method, path, err)
+	}
+
+	return response
 }
 
 func performRequestWithHeaders(t *testing.T, srv *Server, method, path string, headers map[string]string) *http.Response {
@@ -2186,6 +2884,16 @@ func reserveLoopbackAddress(t *testing.T) string {
 
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func containsString(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+
+	return false
 }
 
 func containsWord(s, word string) bool {
