@@ -32,6 +32,10 @@ Key review decisions:
   `/switchover`, `/failover`, `/restart`, `/reload`, and `/reinitialize`.
 - `POST /api/v1/operations/switchover` remains the PACMAN-native switchover API.
 - `POST /api/v1/operations/failover` remains the PACMAN-native failover API.
+- Patroni-compatible routes that intentionally share a PACMAN-native core workflow
+  are tagged in the OpenAPI contract with `x-pacman-native-operation`.
+- Patroni-compatible routes that are expected to be callable by `patronictl`
+  against a PACMAN node are tagged with `x-patronictl-compatible`.
 - Patroni-compatible `POST /switchover` uses the Patroni request shape with
   required `leader` plus optional `candidate` and `scheduled_at`.
 - Patroni-compatible `POST /failover` uses the Patroni request shape with required

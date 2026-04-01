@@ -15,6 +15,8 @@ paths:
         elections and by external monitoring.
       operationId: getPatroniStatus
       x-patroni-compatible: true
+      x-patronictl-compatible: true
+      x-pacman-native-operation: GET /api/v1/nodes/{nodeName}
       responses:
         '200':
           description: Current Patroni-compatible node status
@@ -49,6 +51,7 @@ paths:
       description: Mirrors Patroni `GET /cluster`.
       operationId: getPatroniCluster
       x-patroni-compatible: true
+      x-pacman-native-operation: GET /api/v1/cluster
       responses:
         '200':
           description: Current Patroni-compatible cluster topology
@@ -66,6 +69,7 @@ paths:
       description: Mirrors Patroni `GET /history`.
       operationId: getPatroniHistory
       x-patroni-compatible: true
+      x-pacman-native-operation: GET /api/v1/history
       responses:
         '200':
           description: Patroni-compatible cluster history lines
@@ -84,6 +88,7 @@ paths:
       description: Mirrors Patroni `GET /config`.
       operationId: getPatroniConfig
       x-patroni-compatible: true
+      x-pacman-native-operation: GET /api/v1/cluster/spec
       responses:
         '200':
           description: Current Patroni-compatible dynamic configuration view
@@ -107,6 +112,7 @@ paths:
         treats `null` values as field removals where supported by the target schema.
       operationId: patchPatroniConfig
       x-patroni-compatible: true
+      x-patronictl-compatible: true
       x-patroni-null-removes-fields: true
       requestBody:
         required: true
@@ -180,6 +186,8 @@ paths:
         `candidate` and `scheduled_at`.
       operationId: postPatroniSwitchover
       x-patroni-compatible: true
+      x-patronictl-compatible: true
+      x-pacman-native-operation: POST /api/v1/operations/switchover
       requestBody:
         required: true
         content:
@@ -232,6 +240,8 @@ paths:
       description: Mirrors Patroni `DELETE /switchover`.
       operationId: deletePatroniSwitchover
       x-patroni-compatible: true
+      x-patronictl-compatible: true
+      x-pacman-native-operation: DELETE /api/v1/operations/switchover
       responses:
         '200':
           description: Scheduled switchover cancelled
@@ -270,7 +280,9 @@ paths:
         triggers switchover semantics, but PACMAN still applies its own safety gates.
       operationId: postPatroniFailover
       x-patroni-compatible: true
+      x-patronictl-compatible: true
       x-pacman-safety-gates: true
+      x-pacman-native-operation: POST /api/v1/operations/failover
       requestBody:
         required: true
         content:
@@ -318,6 +330,7 @@ paths:
       description: Mirrors Patroni `POST /restart`.
       operationId: postPatroniRestart
       x-patroni-compatible: true
+      x-patronictl-compatible: true
       requestBody:
         required: false
         content:
@@ -358,6 +371,7 @@ paths:
       description: Mirrors Patroni `DELETE /restart`.
       operationId: deletePatroniRestart
       x-patroni-compatible: true
+      x-patronictl-compatible: true
       responses:
         '200':
           description: Scheduled restart cancelled
@@ -387,6 +401,7 @@ paths:
       description: Mirrors Patroni `POST /reload`.
       operationId: postPatroniReload
       x-patroni-compatible: true
+      x-patronictl-compatible: true
       responses:
         '200':
           description: Reload requested
@@ -410,6 +425,7 @@ paths:
       description: Mirrors Patroni `POST /reinitialize`.
       operationId: postPatroniReinitialize
       x-patroni-compatible: true
+      x-patronictl-compatible: true
       requestBody:
         required: false
         content:

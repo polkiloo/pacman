@@ -160,7 +160,85 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ---
 
-## 11. API
+## 11. Pluggable DCS Layer
+
+See [ARCHITECTURE_DCS.md](ARCHITECTURE_DCS.md) for full design.
+
+### DCS Interface and Abstraction
+- [ ] define `DCS` interface in `internal/dcs/dcs.go` (Get, Set, CompareAndSet, Delete, List, Campaign, Leader, Resign, Touch, Alive, Watch, Initialize, Close)
+- [ ] define `KeyValue`, `LeaderLease`, `WatchEvent`, `SetOption` types
+- [ ] define DCS error types (`ErrKeyNotFound`, `ErrRevisionMismatch`, etc.)
+- [ ] define DCS configuration model (`backend`, `clusterName`, `ttl`, backend-specific blocks)
+- [ ] add DCS config section to `internal/config/config.go` and validation
+- [ ] define key space layout (`/pacman/<cluster>/config`, `members/`, `status/`, `operation`, `history/`, `maintenance`, `epoch`)
+
+### DCS Conformance Test Suite
+- [ ] create `internal/dcs/dcstest/` shared conformance test suite
+- [ ] add Get/Set/Delete conformance tests
+- [ ] add CompareAndSet conflict and success conformance tests
+- [ ] add List prefix conformance tests
+- [ ] add Campaign/Leader/Resign conformance tests
+- [ ] add Touch/Alive TTL conformance tests
+- [ ] add Watch event delivery conformance tests
+
+### Memory Backend (testing)
+- [ ] implement `internal/dcs/memory/memory.go` — in-memory `DCS` for unit tests
+- [ ] pass all conformance tests
+
+### ControlPlane Refactoring
+- [ ] refactor `ControlPlane` to accept `dcs.DCS` instead of being `MemoryStateStore`
+- [ ] implement `NodeStatePublisher` via `DCS.Set("status/<node>", ..., WithTTL)`
+- [ ] implement `MemberRegistrar` via `DCS.Set("members/<node>", ...)`
+- [ ] implement `MemberDiscovery` via `DCS.List("members/")` + `DCS.List("status/")`
+- [ ] implement `LeaderElector` via `DCS.Campaign()` / `DCS.Leader()`
+- [ ] implement `DesiredStateStore` via `DCS.Get("config")` / `DCS.CompareAndSet("config", ...)`
+- [ ] implement `ObservedStateStore` via in-process aggregation from DCS data
+- [ ] implement `Reconciler` via DCS reads + in-process aggregation
+- [ ] implement `MaintenanceStore` via `DCS.CompareAndSet("maintenance", ...)`
+- [ ] implement `OperationJournal` via `DCS.Get("operation")` + `DCS.List("history/")`
+- [ ] implement local read cache with watch-driven invalidation
+- [ ] verify all existing controlplane tests pass with memory DCS backend
+
+### Embedded Raft Backend (`hashicorp/raft`)
+
+Framework: **`github.com/hashicorp/raft`** + **`github.com/hashicorp/raft-boltdb/v2`**
+- Full-stack Raft: log replication, leader election, snapshots, transport, membership changes
+- Battle-tested in HashiCorp Vault (Integrated Storage), Consul, Nomad
+- MPL 2.0 license, actively maintained, 2,289+ importers
+- Alternatives considered and deferred: `etcd-io/raft` (too much custom code), `lni/dragonboat` (less production validation)
+
+- [ ] add `hashicorp/raft` and `raft-boltdb/v2` dependencies
+- [ ] implement `internal/dcs/raft/fsm.go` — Raft FSM with flat key-value state
+- [ ] implement `internal/dcs/raft/transport.go` — TCP transport with TLS support
+- [ ] implement `internal/dcs/raft/snapshot.go` — snapshot handling
+- [ ] implement `internal/dcs/raft/raft.go` — `DCS` interface backed by Raft consensus
+- [ ] implement `internal/dcs/raft/config.go` — Raft-specific configuration
+- [ ] implement TTL expiration via background goroutine with Raft-applied deletes
+- [ ] implement leader read path (`raft.VerifyLeader()` for linearizable reads)
+- [ ] wire Raft bootstrap into `pacmand` startup when `dcs.backend: raft`
+- [ ] pass all conformance tests
+- [ ] add 3-node Raft integration tests with testcontainers
+
+### etcd Backend
+- [ ] add `go.etcd.io/etcd/client/v3` dependency
+- [ ] implement `internal/dcs/etcd/etcd.go` — `DCS` backed by etcd v3
+- [ ] implement CompareAndSet via etcd transactions
+- [ ] implement leader election via `concurrency.Election`
+- [ ] implement session/TTL via etcd leases
+- [ ] implement Watch via etcd Watch
+- [ ] pass all conformance tests
+- [ ] add testcontainers-based etcd integration tests
+
+### Post-MVP Backends (deferred)
+
+Additional backends can be added after MVP by implementing the same `DCS` interface:
+- ZooKeeper — znode versions for CAS, ephemeral znodes for TTL
+- Consul — `ModifyIndex` for CAS, sessions for TTL, blocking queries for watch
+- Kubernetes — ConfigMap + `resourceVersion` for CAS, Lease for leader election
+
+---
+
+## 12. API
 
 ### Contract
 - [x] draft OpenAPI spec for control-plane API
@@ -190,7 +268,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ---
 
-## 12. CLI (`pacmanctl`)
+## 13. CLI (`pacmanctl`)
 
 - [ ] implement `cluster status`
 - [ ] implement `members list`
@@ -205,7 +283,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ---
 
-## 13. Security
+## 14. Security
 
 - [ ] add TLS for external endpoints
 - [ ] add mTLS between cluster members
@@ -216,7 +294,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ---
 
-## 14. Observability
+## 15. Observability
 
 - [ ] add Prometheus metrics
 - [ ] add health endpoints
@@ -227,7 +305,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ---
 
-## 15. Packaging and Operations
+## 16. Packaging and Operations
 
 - [ ] add systemd unit files
 - [ ] add example configs
@@ -239,7 +317,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ---
 
-## 16. Testing
+## 17. Testing
 
 ### Testcontainers Environment
 - [x] add Docker test image for `pacmand` and `pacmanctl` with PostgreSQL 17 client tools
@@ -300,7 +378,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [ ] add distributed-topology and MPP coverage inspired by Patroni `tests/test_citus.py` and `tests/test_mpp.py`
 ---
 
-## 17. Kubernetes-Native MVP
+## 18. Kubernetes-Native MVP
 
 This track captures the Kubernetes-native operator model described in [ARCHITECTURE_K8S.md](ARCHITECTURE_K8S.md).
 

@@ -63,40 +63,73 @@ Responsibilities:
 ## Architecture Diagram
 
 ```mermaid
-flowchart TB
+flowchart LR
+    classDef user fill:#FEF3C7,stroke:#D97706,stroke-width:2px,color:#4A2F00
+    classDef daemon fill:#DCFCE7,stroke:#15803D,stroke-width:2px,color:#123524
+    classDef witness fill:#FFE4E6,stroke:#BE123C,stroke-width:2px,color:#4C0519
+    classDef database fill:#DBEAFE,stroke:#2563EB,stroke-width:2px,color:#172554
+    classDef control fill:#ECFEFF,stroke:#0F766E,stroke-width:2px,color:#073B3A
+    classDef store fill:#EDE9FE,stroke:#7C3AED,stroke-width:2px,color:#2E1065
+
+    subgraph Entry["Client Entry Points"]
+        direction TB
+        CTL[[pacmanctl]]
+        PTL[[patronictl]]
+        API[[Node HTTP API<br/>PACMAN + Patroni-compatible]]
+        CTL --> API
+        PTL --> API
+    end
+
     subgraph Cluster["PACMAN Cluster"]
+        direction LR
+
         subgraph NodeA["Node A"]
-            A["pacmand<br/>agent + control-plane member"]
-            APG["PostgreSQL"]
-            A --> APG
+            direction TB
+            A[[pacmand<br/>agent + control-plane member]]
+            APG[(PostgreSQL<br/>primary)]
+            A -->|observe + act| APG
         end
 
         subgraph NodeB["Node B"]
-            B["pacmand<br/>agent + control-plane member"]
-            BPG["PostgreSQL"]
-            B --> BPG
+            direction TB
+            B[[pacmand<br/>agent + control-plane member]]
+            BPG[(PostgreSQL<br/>standby)]
+            B -->|observe + act| BPG
         end
 
         subgraph NodeC["Node C / Witness"]
-            C["pacmand<br/>witness + control-plane member"]
+            direction TB
+            C{{pacmand<br/>witness + voter}}
         end
-
-        A <--> B
-        B <--> C
-        A <--> C
-
-        subgraph Truth["Cluster Source of Truth"]
-            T["Logical replicated state store<br/><br/>Contains:<br/>- cluster spec<br/>- current primary<br/>- current epoch<br/>- member roles<br/>- failover policy<br/>- maintenance mode<br/>- operation history"]
-        end
-
-        A -. quorum replication .-> T
-        B -. quorum replication .-> T
-        C -. quorum replication .-> T
     end
 
-    CLI["pacmanctl / API"] --> A
-    CLI --> B
-    CLI --> C
+    subgraph Plane["Distributed Control Plane"]
+        direction TB
+        L{{Leader election<br/>quorum checks<br/>topology orchestration}}
+        T[(Replicated cluster state<br/><br/>cluster spec<br/>leader lease + epoch<br/>health + member roles<br/>failover, switchover, rejoin<br/>maintenance mode + history)]
+        L --> T
+    end
+
+    API --> A
+    API --> B
+    API --> C
+
+    A <-->|participates in control plane| L
+    B <-->|participates in control plane| L
+    C <-->|participates in control plane| L
+
+    A -. publish heartbeats .-> T
+    B -. publish heartbeats .-> T
+    C -. publish votes .-> T
+
+    class CTL,PTL,API user
+    class A,B daemon
+    class C witness
+    class APG,BPG database
+    class L control
+    class T store
 ```
+
+For the pluggable DCS (distributed configuration store) design, see [ARCHITECTURE_DCS.md](ARCHITECTURE_DCS.md).
 
 For the Kubernetes-native deployment model, see [ARCHITECTURE_K8S.md](ARCHITECTURE_K8S.md).
