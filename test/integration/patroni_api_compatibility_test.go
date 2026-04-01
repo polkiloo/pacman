@@ -31,23 +31,36 @@ func TestPatroniProbeCompatibilityWithContainerFixture(t *testing.T) {
 		method string
 		status int
 	}{
+		// primary probes
+		{name: "primary probe", base: serviceBaseURL(t, primary), path: "/primary", method: http.MethodGet, status: http.StatusOK},
 		{name: "primary health", base: serviceBaseURL(t, primary), path: "/health", method: http.MethodGet, status: http.StatusOK},
 		{name: "primary root", base: serviceBaseURL(t, primary), path: "/", method: http.MethodGet, status: http.StatusOK},
 		{name: "primary read write", base: serviceBaseURL(t, primary), path: "/read-write", method: http.MethodGet, status: http.StatusOK},
 		{name: "primary leader", base: serviceBaseURL(t, primary), path: "/leader", method: http.MethodGet, status: http.StatusOK},
 		{name: "primary replica rejected", base: serviceBaseURL(t, primary), path: "/replica", method: http.MethodGet, status: http.StatusServiceUnavailable},
 		{name: "primary read only accepts tags", base: serviceBaseURL(t, primary), path: "/read-only?clonefrom=true", method: http.MethodGet, status: http.StatusOK},
+		// sync replica probes
 		{name: "sync replica ready", base: serviceBaseURL(t, syncReplica), path: "/readiness?lag=16MB&mode=apply", method: http.MethodGet, status: http.StatusOK},
 		{name: "sync replica probe", base: serviceBaseURL(t, syncReplica), path: "/replica?lag=16MB&replication_state=streaming&clonefrom=true", method: http.MethodGet, status: http.StatusOK},
 		{name: "sync replica tag mismatch", base: serviceBaseURL(t, syncReplica), path: "/replica?clonefrom=false", method: http.MethodGet, status: http.StatusServiceUnavailable},
 		{name: "sync replica synchronous", base: serviceBaseURL(t, syncReplica), path: "/sync", method: http.MethodGet, status: http.StatusOK},
 		{name: "sync replica quorum", base: serviceBaseURL(t, syncReplica), path: "/quorum", method: http.MethodGet, status: http.StatusOK},
+		// async replica probes
+		{name: "async replica probe no filter", base: serviceBaseURL(t, asyncReplica), path: "/replica", method: http.MethodGet, status: http.StatusOK},
+		{name: "async replica probe tag match", base: serviceBaseURL(t, asyncReplica), path: "/replica?clonefrom=false", method: http.MethodGet, status: http.StatusOK},
+		{name: "async replica probe tag mismatch", base: serviceBaseURL(t, asyncReplica), path: "/replica?clonefrom=true", method: http.MethodGet, status: http.StatusServiceUnavailable},
+		{name: "async replica lag ok", base: serviceBaseURL(t, asyncReplica), path: "/replica?lag=2MB", method: http.MethodGet, status: http.StatusOK},
+		{name: "async replica lag exceeded", base: serviceBaseURL(t, asyncReplica), path: "/replica?lag=512kB", method: http.MethodGet, status: http.StatusServiceUnavailable},
 		{name: "async replica async", base: serviceBaseURL(t, asyncReplica), path: "/async?lag=2MB", method: http.MethodGet, status: http.StatusOK},
 		{name: "async replica lag rejected", base: serviceBaseURL(t, asyncReplica), path: "/async?lag=1", method: http.MethodGet, status: http.StatusServiceUnavailable},
+		// standby leader probes
 		{name: "standby leader", base: serviceBaseURL(t, standbyLeader), path: "/standby-leader", method: http.MethodGet, status: http.StatusOK},
 		{name: "standby leader alias", base: serviceBaseURL(t, standbyLeader), path: "/standby_leader", method: http.MethodGet, status: http.StatusOK},
 		{name: "standby leader leader", base: serviceBaseURL(t, standbyLeader), path: "/leader", method: http.MethodGet, status: http.StatusOK},
+		// HEAD probes
 		{name: "head primary", base: serviceBaseURL(t, primary), path: "/primary", method: http.MethodHead, status: http.StatusOK},
+		{name: "head primary on replica rejected", base: serviceBaseURL(t, syncReplica), path: "/primary", method: http.MethodHead, status: http.StatusServiceUnavailable},
+		{name: "head replica ok", base: serviceBaseURL(t, syncReplica), path: "/replica", method: http.MethodHead, status: http.StatusOK},
 		{name: "head replica rejected", base: serviceBaseURL(t, primary), path: "/replica", method: http.MethodHead, status: http.StatusServiceUnavailable},
 	}
 
@@ -76,6 +89,7 @@ func TestPatroniProbeCompatibilityWithContainerFixture(t *testing.T) {
 		path string
 	}{
 		{base: serviceBaseURL(t, primary), path: "/health"},
+		{base: serviceBaseURL(t, primary), path: "/primary"},
 		{base: serviceBaseURL(t, primary), path: "/leader"},
 		{base: serviceBaseURL(t, syncReplica), path: "/replica"},
 	}

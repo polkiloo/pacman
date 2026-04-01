@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -236,6 +237,102 @@ func parseLSN(s string) int64 {
 	}
 
 	return (high << 32) | low
+}
+
+// handlePrimary returns 200 only when the local node is the writable primary
+// with the leader lock. Mirrors Patroni GET /primary semantics.
+func (srv *Server) handlePrimary(c *fiber.Ctx) error {
+	status := srv.buildNodeStatus()
+	node, ok := srv.store.NodeStatus(srv.nodeName)
+
+	ready := ok && node.Role == cluster.MemberRolePrimary && node.Postgres.Up
+
+	code := fiber.StatusOK
+	if !ready {
+		code = fiber.StatusServiceUnavailable
+	}
+
+	return c.Status(code).JSON(status)
+}
+
+// handleReplica returns 200 only when the local node is a healthy replica.
+// Supports Patroni-compatible ?lag=<human-readable>, ?replication_state=<state>,
+// and free-form tag-filter query parameters.
+func (srv *Server) handleReplica(c *fiber.Ctx) error {
+	status := srv.buildNodeStatus()
+	node, ok := srv.store.NodeStatus(srv.nodeName)
+
+	ready := ok &&
+		node.Postgres.Up &&
+		node.Role == cluster.MemberRoleReplica &&
+		replicaLagOK(node.Postgres.Details.ReplicationLagBytes, c.Query("lag")) &&
+		replicaStateOK(c.Query("replication_state")) &&
+		tagFiltersMatch(node.Tags, replicaTagFilters(c.Queries()))
+
+	code := fiber.StatusOK
+	if !ready {
+		code = fiber.StatusServiceUnavailable
+	}
+
+	return c.Status(code).JSON(status)
+}
+
+func replicaLagOK(lagBytes int64, lagParam string) bool {
+	maxLag := parseLagBytes(lagParam)
+	return maxLag == 0 || lagBytes <= maxLag
+}
+
+func replicaStateOK(replicationState string) bool {
+	return replicationState == "" || replicationState == "streaming"
+}
+
+// replicaTagFilters extracts tag filter key-value pairs from Fiber query params,
+// excluding the reserved probe parameters (lag, replication_state, mode).
+func replicaTagFilters(queries map[string]string) map[string]string {
+	reserved := map[string]bool{
+		"lag":               true,
+		"replication_state": true,
+		"mode":              true,
+	}
+
+	filters := make(map[string]string, len(queries))
+	for key, value := range queries {
+		if !reserved[key] {
+			filters[key] = value
+		}
+	}
+
+	return filters
+}
+
+// tagFiltersMatch reports whether node tags satisfy all provided filters.
+// Comparison is case-insensitive. Boolean tags are matched as "true"/"false".
+// Missing tags are treated as empty string.
+func tagFiltersMatch(tags map[string]any, filters map[string]string) bool {
+	for key, expected := range filters {
+		if !strings.EqualFold(tagValueString(tags[key]), expected) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func tagValueString(v any) string {
+	if v == nil {
+		return ""
+	}
+
+	switch typed := v.(type) {
+	case bool:
+		if typed {
+			return "true"
+		}
+
+		return "false"
+	default:
+		return strings.ToLower(fmt.Sprintf("%v", typed))
+	}
 }
 
 // lagSuffixes lists human-readable byte suffixes in longest-first order so
