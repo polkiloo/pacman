@@ -79,7 +79,6 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [ ] implement background worker registration via `shared_preload_libraries`
 - [ ] define GUC-based configuration bridge from PostgreSQL settings to PACMAN node-runtime config
 - [ ] wire extension startup, shutdown, and restart handling to the shared PACMAN local-agent lifecycle
-- [ ] define logging, error propagation, and failure-isolation rules for the embedded worker
 - [ ] add dedicated build target for the PostgreSQL extension artifact separate from `pacmand`
 - [ ] add packaging/install flow for extension binaries, control files, and SQL assets
 - [ ] add `testcontainers-go` fixture/image variant with the extension installed and preloaded
@@ -247,24 +246,25 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] define stable API versioning and compatibility policy
 
 ### Implementation
-- [ ] implement API router with Fiber
-- [ ] expose `GET /health`
-- [ ] expose `GET /liveness`
-- [ ] expose `GET /readiness`
-- [ ] expose `GET /primary`
-- [ ] expose `GET /replica`
-- [ ] expose `GET /api/v1/cluster`
-- [ ] expose `GET /api/v1/cluster/spec`
-- [ ] expose `GET /api/v1/nodes/{nodeName}`
-- [ ] expose `GET /api/v1/members`
-- [ ] expose `GET /api/v1/history`
-- [ ] expose `GET /api/v1/maintenance`
-- [ ] expose `PUT /api/v1/maintenance`
-- [ ] expose `GET /api/v1/diagnostics`
-- [ ] expose `POST /api/v1/operations/switchover`
-- [ ] expose `DELETE /api/v1/operations/switchover`
-- [ ] expose `POST /api/v1/operations/failover`
-- [ ] serve published OpenAPI document from the API process
+- [x] implement API router with Fiber
+- [x] expose `GET /health`
+- [x] expose `GET /liveness`
+- [x] expose `GET /readiness`
+- [x] expose `GET /primary`
+- [x] expose `GET /replica`
+- [x] expose `GET /api/v1/cluster`
+- [x] expose `GET /api/v1/cluster/spec`
+- [x] expose `GET /api/v1/nodes/{nodeName}`
+- [x] expose `GET /api/v1/members`
+- [x] add HTTP middleware for request IDs, auth hooks, and common API concerns
+- [x] expose `GET /api/v1/history`
+- [x] expose `GET /api/v1/maintenance`
+- [x] expose `PUT /api/v1/maintenance`
+- [x] expose `GET /api/v1/diagnostics`
+- [x] expose `POST /api/v1/operations/switchover`
+- [x] expose `DELETE /api/v1/operations/switchover`
+- [x] expose `POST /api/v1/operations/failover`
+- [x] serve published OpenAPI document from the API process
 
 ---
 
@@ -289,23 +289,34 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [ ] add mTLS between cluster members
 - [ ] implement certificate loading
 - [ ] define admin authorization model
-- [ ] add audit logging for topology changes
 - [ ] secure sensitive config handling
 
 ---
 
-## 15. Observability
+## 15. Structured Logging (`slog`)
 
-- [ ] add Prometheus metrics
-- [ ] add health endpoints
-- [ ] add structured event log
-- [ ] add diagnostics dump
-- [ ] add trace points for failover / switchover / rejoin
-- [ ] add useful debug logging for reconciliation
+- [ ] expand `pacmand` runtime `slog` coverage and field consistency
+- [ ] expand `pacmanctl` runtime `slog` coverage and field consistency
+- [ ] add `slog`-backed HTTP access logging
+- [ ] add structured event logs for cluster lifecycle and state transitions
+- [ ] add request, node, member, and operation correlation fields across API and control-plane logs
+- [ ] add audit logging for topology changes and maintenance mode changes
+- [ ] add reconciliation debug logging with safe verbosity controls
+- [ ] define embedded-worker logging, error propagation, and failure-isolation rules
+- [ ] add secret redaction rules and logging-focused test coverage inspired by Patroni `tests/test_log.py` and `tests/test_utils.py`
 
 ---
 
-## 16. Packaging and Operations
+## 16. Observability
+
+- [ ] add Prometheus metrics
+- [ ] add health endpoints
+- [ ] add diagnostics dump
+- [ ] add trace points for failover / switchover / rejoin
+
+---
+
+## 17. Packaging and Operations
 
 - [ ] add systemd unit files
 - [ ] add example configs
@@ -317,7 +328,7 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 
 ---
 
-## 17. Testing
+## 18. Testing
 
 ### Testcontainers Environment
 - [x] add Docker test image for `pacmand` and `pacmanctl` with PostgreSQL 17 client tools
@@ -374,8 +385,20 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [ ] add backup, restore, and cloud-integration coverage inspired by Patroni `tests/test_aws.py`, `tests/test_barman.py`, and `tests/test_wale_restore.py`
 - [ ] add DCS backend contract coverage for Consul, etcd, etcd3, Exhibitor, Kubernetes, Raft, and ZooKeeper inspired by Patroni `tests/test_consul.py`, `tests/test_etcd.py`, `tests/test_etcd3.py`, `tests/test_exhibitor.py`, `tests/test_kubernetes.py`, `tests/test_raft.py`, `tests/test_raft_controller.py`, and `tests/test_zookeeper.py`
 - [ ] add watchdog and fencing coverage inspired by Patroni `tests/test_watchdog.py`
-- [ ] add logging and utility helper coverage inspired by Patroni `tests/test_log.py` and `tests/test_utils.py`
 - [ ] add distributed-topology and MPP coverage inspired by Patroni `tests/test_citus.py` and `tests/test_mpp.py`
+
+### Jepsen Fault-Injection Campaigns
+Inspired by [Wolfsrudel/database-postgres-ha-patroni-testing-jepsen](https://github.com/Wolfsrudel/database-postgres-ha-patroni-testing-jepsen), which uses Jepsen + Clojure/Leiningen with a Vagrant / k3s lab and a Patroni cluster target.
+- [ ] evaluate whether to adapt the Jepsen harness shape directly or build a PACMAN-specific harness with the same workload / nemesis model
+- [ ] add a Patroni baseline target so PACMAN Jepsen runs can be calibrated against a known HA implementation before PACMAN-specific assertions are trusted
+- [ ] define a PACMAN Jepsen target topology, including 3 data nodes and optional witness coverage where PACMAN semantics differ from Patroni
+- [ ] define Jepsen workload coverage for append/register-style histories, single-key stress, read committed checks, and serializable checks
+- [ ] define Jepsen nemesis coverage for `none`, `packet`, `kill`, combined `packet,kill`, and slow-network / repeated-failure campaigns inspired by the Patroni repo
+- [ ] add a repeat-run soak profile for non-deterministic failures, including multi-run 30-minute campaigns and archived failure seeds / histories
+- [ ] document local Jepsen lab prerequisites and bootstrap flow, including `JDK`, `Leiningen`, VM/Kubernetes substrate, node inventory generation, and artifact review
+- [ ] decide where Jepsen runs execute in automation, preferring separate long-running CI/CD stages or scheduled jobs instead of the fast default PR pipeline
+- [ ] add separate CI/CD jobs for Jepsen smoke validation on demand and extended nightly / scheduled Jepsen campaigns
+- [ ] publish Jepsen HTML/history artifacts and concise failure summaries from CI/CD for operator review and regression tracking
 ---
 
 ## 18. Kubernetes-Native MVP
@@ -462,6 +485,7 @@ This track captures the Kubernetes-native operator model described in [ARCHITECT
 - [ ] implement maintenance mode
 - [ ] implement reliability improvements
 - [ ] stabilize end-to-end tests
+- [ ] establish separate Jepsen fault-injection validation outside the fast PR pipeline
 
 ## Milestone 6 — Kubernetes Operator MVP
 - [ ] implement `PostgresCluster` CRD and status model
@@ -531,5 +555,6 @@ Close the MVP only after validating that PACMAN can reliably demonstrate the fol
 - [ ] validate explicit rejoin of a former primary
 - [ ] validate basic operator-facing CLI and API
 - [ ] validate repeatable integration and end-to-end test coverage
+- [ ] validate scheduled or on-demand Jepsen fault-injection coverage in separate CI/CD stages
 - [ ] validate operator-managed Kubernetes deployment with `StatefulSet` and role-based Services
 - [ ] validate repeatable Kubernetes failover test coverage in `kind`

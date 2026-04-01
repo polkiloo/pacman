@@ -178,6 +178,169 @@ func TestMemoryStateStoreCreateSwitchoverIntentCreatesPlannedTransition(t *testi
 	})
 }
 
+func TestMemoryStateStoreCancelSwitchoverCancelsPendingIntent(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.March, 29, 12, 45, 0, 0, time.UTC)
+	scheduledAt := now.Add(20 * time.Minute)
+	store := seededFailoverStore(t, cluster.ClusterSpec{
+		ClusterName: "alpha",
+		Switchover: cluster.SwitchoverPolicy{
+			AllowScheduled: true,
+		},
+		Members: []cluster.MemberSpec{
+			{Name: "alpha-1"},
+			{Name: "alpha-2"},
+		},
+	}, []agentmodel.NodeStatus{
+		readyPrimaryStatus("alpha-1", now, 18),
+		readyStandbyStatus("alpha-2", now.Add(time.Second), 18, 0),
+	})
+	store.now = func() time.Time { return now }
+
+	intent, err := store.CreateSwitchoverIntent(context.Background(), SwitchoverRequest{
+		RequestedBy: "operator",
+		Reason:      "maintenance",
+		Candidate:   "alpha-2",
+		ScheduledAt: scheduledAt,
+	})
+	if err != nil {
+		t.Fatalf("create switchover intent: %v", err)
+	}
+
+	cancelledAt := now.Add(5 * time.Minute)
+	store.now = func() time.Time { return cancelledAt }
+
+	cancelled, err := store.CancelSwitchover(context.Background())
+	if err != nil {
+		t.Fatalf("cancel switchover: %v", err)
+	}
+
+	if cancelled.ID != intent.Operation.ID {
+		t.Fatalf("cancelled switchover id: got %q, want %q", cancelled.ID, intent.Operation.ID)
+	}
+
+	if cancelled.State != cluster.OperationStateCancelled || cancelled.Result != cluster.OperationResultCancelled {
+		t.Fatalf("unexpected cancelled switchover operation: %+v", cancelled)
+	}
+
+	if !cancelled.CompletedAt.Equal(cancelledAt) {
+		t.Fatalf("cancelled switchover completedAt: got %v, want %v", cancelled.CompletedAt, cancelledAt)
+	}
+
+	if cancelled.Message != "scheduled switchover cancelled" {
+		t.Fatalf("cancelled switchover message: got %q", cancelled.Message)
+	}
+
+	if _, ok := store.ActiveOperation(); ok {
+		t.Fatal("expected cancelled switchover to clear active operation")
+	}
+
+	status, ok := store.ClusterStatus()
+	if !ok {
+		t.Fatal("expected cluster status after switchover cancellation")
+	}
+
+	if status.ScheduledSwitchover != nil {
+		t.Fatalf("expected scheduled switchover projection to be cleared, got %+v", status.ScheduledSwitchover)
+	}
+
+	history := store.History()
+	if len(history) != 1 {
+		t.Fatalf("expected one history entry after switchover cancellation, got %+v", history)
+	}
+
+	if history[0].OperationID != intent.Operation.ID || history[0].Result != cluster.OperationResultCancelled {
+		t.Fatalf("unexpected switchover cancellation history: %+v", history[0])
+	}
+}
+
+func TestMemoryStateStoreCancelSwitchoverRejectsMissingOrRunningIntent(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.March, 29, 13, 10, 0, 0, time.UTC)
+
+	testCases := []struct {
+		name    string
+		prepare func(t *testing.T, store *MemoryStateStore)
+		wantErr error
+	}{
+		{
+			name: "no switchover exists",
+			prepare: func(t *testing.T, store *MemoryStateStore) {
+				t.Helper()
+			},
+			wantErr: ErrScheduledSwitchoverNotFound,
+		},
+		{
+			name: "running switchover cannot be cancelled",
+			prepare: func(t *testing.T, store *MemoryStateStore) {
+				t.Helper()
+
+				if _, err := store.JournalOperation(context.Background(), cluster.Operation{
+					ID:          "sw-1",
+					Kind:        cluster.OperationKindSwitchover,
+					State:       cluster.OperationStateRunning,
+					RequestedBy: "operator",
+					RequestedAt: now,
+					FromMember:  "alpha-1",
+					ToMember:    "alpha-2",
+					StartedAt:   now,
+					Result:      cluster.OperationResultPending,
+				}); err != nil {
+					t.Fatalf("journal running switchover: %v", err)
+				}
+			},
+			wantErr: ErrSwitchoverAlreadyRunning,
+		},
+		{
+			name: "non-switchover active operation does not count",
+			prepare: func(t *testing.T, store *MemoryStateStore) {
+				t.Helper()
+
+				if _, err := store.JournalOperation(context.Background(), cluster.Operation{
+					ID:          "fo-1",
+					Kind:        cluster.OperationKindFailover,
+					State:       cluster.OperationStateAccepted,
+					RequestedBy: "operator",
+					RequestedAt: now,
+					FromMember:  "alpha-1",
+					ToMember:    "alpha-2",
+					Result:      cluster.OperationResultPending,
+				}); err != nil {
+					t.Fatalf("journal failover: %v", err)
+				}
+			},
+			wantErr: ErrScheduledSwitchoverNotFound,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			store := seededFailoverStore(t, cluster.ClusterSpec{
+				ClusterName: "alpha",
+				Members: []cluster.MemberSpec{
+					{Name: "alpha-1"},
+					{Name: "alpha-2"},
+				},
+			}, []agentmodel.NodeStatus{
+				readyPrimaryStatus("alpha-1", now, 18),
+				readyStandbyStatus("alpha-2", now.Add(time.Second), 18, 0),
+			})
+			store.now = func() time.Time { return now }
+
+			testCase.prepare(t, store)
+
+			_, err := store.CancelSwitchover(context.Background())
+			if !errors.Is(err, testCase.wantErr) {
+				t.Fatalf("unexpected switchover cancel error: got %v want %v", err, testCase.wantErr)
+			}
+		})
+	}
+}
+
 func TestMemoryStateStoreValidateSwitchoverRejectsBlockedRequests(t *testing.T) {
 	t.Parallel()
 

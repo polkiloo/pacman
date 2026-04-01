@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func TestLoadDocumentErrorsAndHelpers(t *testing.T) {
@@ -382,6 +383,64 @@ paths:
 	}
 }
 
+func TestResolveDocumentFSResolvesExternalRefs(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		"openapi.yaml": {
+			Data: []byte(`openapi: 3.1.0
+paths:
+  /health:
+    $ref: './paths.yaml#/~1health'
+components:
+  schemas:
+    Tuple:
+      $ref: './schemas.yaml#/Tuple'
+`),
+		},
+		"paths.yaml": {
+			Data: []byte(`/health:
+  get:
+    summary: Embedded split health probe
+    responses:
+      '200':
+        description: ok
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Tuple'
+`),
+		},
+		"schemas.yaml": {
+			Data: []byte(`Tuple:
+  type: array
+  prefixItems:
+    - type: string
+    - type: integer
+`),
+		},
+	}
+
+	payload, err := ResolveDocumentFS(fsys, "openapi.yaml")
+	if err != nil {
+		t.Fatalf("resolve embedded openapi document: %v", err)
+	}
+
+	document, err := decodeDocument(payload)
+	if err != nil {
+		t.Fatalf("decode resolved embedded openapi document: %v", err)
+	}
+
+	operation, err := document.Operation("/health", "get")
+	if err != nil {
+		t.Fatalf("resolve embedded split health operation: %v", err)
+	}
+
+	if operation.Summary != "Embedded split health probe" {
+		t.Fatalf("unexpected embedded split operation summary: %q", operation.Summary)
+	}
+}
+
 func mustLoadRepositoryDocument(t *testing.T) Document {
 	t.Helper()
 
@@ -540,6 +599,35 @@ func TestRepositoryDocumentPatroniMonitoringCompatibility(t *testing.T) {
 	}
 }
 
+func TestRepositoryDocumentPublishedOpenAPIRoute(t *testing.T) {
+	t.Parallel()
+
+	document := mustLoadRepositoryDocument(t)
+	operation := mustOperation(t, document, "/openapi.yaml", "get")
+
+	if !operation.SecurityExplicitlyDisabled() {
+		t.Fatal("/openapi.yaml should allow unauthenticated read access")
+	}
+
+	response, ok := operation.Response("200")
+	if !ok {
+		t.Fatal("/openapi.yaml is missing 200 response")
+	}
+
+	mediaType, ok := response.Content["application/yaml"]
+	if !ok {
+		t.Fatal("/openapi.yaml is missing application/yaml content")
+	}
+
+	if mediaType.Schema == nil || mediaType.Schema.Type != "string" {
+		t.Fatalf("/openapi.yaml unexpected schema: %+v", mediaType.Schema)
+	}
+
+	if _, ok := operation.Response("503"); !ok {
+		t.Fatal("/openapi.yaml is missing 503 response")
+	}
+}
+
 func TestRepositoryDocumentPatroniAdminAndNativeRoutesRequireSecurity(t *testing.T) {
 	t.Parallel()
 
@@ -560,7 +648,15 @@ func TestRepositoryDocumentPatroniAdminAndNativeRoutesRequireSecurity(t *testing
 		{path: "/reload", method: "post"},
 		{path: "/reinitialize", method: "post"},
 		{path: "/api/v1/cluster", method: "get"},
+		{path: "/api/v1/cluster/spec", method: "get"},
+		{path: "/api/v1/members", method: "get"},
+		{path: "/api/v1/nodes/{nodeName}", method: "get"},
+		{path: "/api/v1/history", method: "get"},
+		{path: "/api/v1/maintenance", method: "get"},
+		{path: "/api/v1/maintenance", method: "put"},
+		{path: "/api/v1/diagnostics", method: "get"},
 		{path: "/api/v1/operations/switchover", method: "post"},
+		{path: "/api/v1/operations/switchover", method: "delete"},
 		{path: "/api/v1/operations/failover", method: "post"},
 	}
 

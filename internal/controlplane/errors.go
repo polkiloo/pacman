@@ -27,6 +27,8 @@ var (
 	ErrSwitchoverPrimaryUnhealthy           = errors.New("switchover requires a healthy current primary")
 	ErrSwitchoverOperationInProgress        = errors.New("switchover is blocked while another cluster operation is active")
 	ErrSwitchoverSchedulingNotAllowed       = errors.New("scheduled switchover is not allowed by cluster policy")
+	ErrScheduledSwitchoverNotFound          = errors.New("no scheduled switchover exists")
+	ErrSwitchoverAlreadyRunning             = errors.New("switchover is already running and can no longer be cancelled")
 	ErrSwitchoverIntentRequired             = errors.New("switchover execution requires an active switchover intent")
 	ErrSwitchoverDemotionExecutorRequired   = errors.New("switchover execution requires a demotion executor")
 	ErrSwitchoverPromotionExecutorRequired  = errors.New("switchover execution requires a promotion executor")

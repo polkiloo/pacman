@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,15 +86,16 @@ func TestRunStartsLocalDaemonAndHeartbeatLoopWhenProvided(t *testing.T) {
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "pacmand.yaml")
-	payload := `
+	payload := fmt.Sprintf(`
 apiVersion: pacman.io/v1alpha1
 kind: NodeConfig
 node:
   name: alpha-1
   role: data
+  apiAddress: "%s"
 postgres:
   dataDir: /var/lib/postgresql/data
-`
+`, reserveLoopbackAddress(t))
 
 	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
 		t.Fatalf("write config file: %v", err)
@@ -231,4 +234,20 @@ func assertContains(t *testing.T, got, want string) {
 	if !strings.Contains(got, want) {
 		t.Fatalf("expected %q to contain %q", got, want)
 	}
+}
+
+func reserveLoopbackAddress(t *testing.T) string {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve loopback address: %v", err)
+	}
+
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close reserved listener: %v", err)
+	}
+
+	return address
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net"
 	"strings"
 	"sync"
 	"testing"
@@ -72,9 +73,10 @@ func TestDaemonStartRecordsStartupStateAndHeartbeat(t *testing.T) {
 
 	var logs bytes.Buffer
 	now := time.Date(2026, time.March, 21, 10, 30, 0, 0, time.UTC)
+	cfg := validDataConfig()
 
 	daemon, err := NewDaemon(
-		validDataConfig(),
+		cfg,
 		logging.New("pacmand", &logs),
 		withNow(func() time.Time { return now }),
 		withHeartbeatInterval(time.Hour),
@@ -118,8 +120,8 @@ func TestDaemonStartRecordsStartupStateAndHeartbeat(t *testing.T) {
 		t.Fatalf("unexpected node role: got %q, want %q", startup.NodeRole, cluster.NodeRoleData)
 	}
 
-	if startup.APIAddress != config.DefaultAPIAddress {
-		t.Fatalf("unexpected api address: got %q, want %q", startup.APIAddress, config.DefaultAPIAddress)
+	if startup.APIAddress != cfg.Node.APIAddress {
+		t.Fatalf("unexpected api address: got %q, want %q", startup.APIAddress, cfg.Node.APIAddress)
 	}
 
 	if startup.ControlAddress != config.DefaultControlAddress {
@@ -232,8 +234,9 @@ func TestDaemonStartRecordsWitnessHeartbeatWithoutLocalPostgres(t *testing.T) {
 			APIVersion: config.APIVersionV1Alpha1,
 			Kind:       config.KindNodeConfig,
 			Node: config.NodeConfig{
-				Name: "witness-1",
-				Role: cluster.NodeRoleWitness,
+				Name:       "witness-1",
+				Role:       cluster.NodeRoleWitness,
+				APIAddress: reserveLoopbackAddress(),
 			},
 		},
 		logging.New("pacmand", &logs),
@@ -271,6 +274,91 @@ func TestDaemonStartRecordsWitnessHeartbeatWithoutLocalPostgres(t *testing.T) {
 	assertContains(t, logs.String(), `"msg":"observed heartbeat without local PostgreSQL"`)
 	assertContains(t, logs.String(), `"postgres_managed":false`)
 	assertContains(t, logs.String(), `"msg":"published local state to control plane"`)
+
+	cancel()
+	daemon.Wait()
+}
+
+func TestDaemonStartBootstrapsClusterSpecIntoControlPlane(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	now := time.Date(2026, time.April, 1, 10, 30, 0, 0, time.UTC)
+	store := controlplane.NewMemoryStateStore()
+
+	cfg := validDataConfig()
+	cfg.Bootstrap = &config.ClusterBootstrapConfig{
+		ClusterName:     "alpha",
+		InitialPrimary:  "alpha-1",
+		SeedAddresses:   []string{"127.0.0.1:9090"},
+		ExpectedMembers: []string{"alpha-1", "alpha-2"},
+	}
+
+	daemon, err := NewDaemon(
+		cfg,
+		logging.New("pacmand", &logs),
+		withNow(func() time.Time { return now }),
+		withHeartbeatInterval(time.Hour),
+		withPostgresProbe(func(context.Context, string) error { return nil }),
+		withPostgresStateProbe(func(context.Context, string) (postgres.Observation, error) {
+			return postgres.Observation{
+				Role:       cluster.MemberRolePrimary,
+				InRecovery: false,
+				Details: postgres.Details{
+					ServerVersion:    170002,
+					SystemIdentifier: "7599025879359099984",
+					Timeline:         1,
+				},
+				WAL: postgres.WALProgress{
+					WriteLSN: "0/3000148",
+					FlushLSN: "0/3000148",
+				},
+			}, nil
+		}),
+		WithControlPlanePublisher(store),
+	)
+	if err != nil {
+		t.Fatalf("new daemon: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := daemon.Start(ctx); err != nil {
+		t.Fatalf("start daemon: %v", err)
+	}
+
+	spec, ok := store.ClusterSpec()
+	if !ok {
+		t.Fatal("expected bootstrap cluster spec to be stored")
+	}
+
+	if spec.ClusterName != "alpha" {
+		t.Fatalf("unexpected cluster name: got %q", spec.ClusterName)
+	}
+
+	if len(spec.Members) != 2 {
+		t.Fatalf("unexpected bootstrap members: got %+v", spec.Members)
+	}
+
+	if spec.Members[0].Name != "alpha-1" || spec.Members[1].Name != "alpha-2" {
+		t.Fatalf("unexpected bootstrap member names: got %+v", spec.Members)
+	}
+
+	status, ok := store.ClusterStatus()
+	if !ok {
+		t.Fatal("expected cluster status after first heartbeat")
+	}
+
+	if status.ClusterName != "alpha" {
+		t.Fatalf("unexpected cluster status name: got %q", status.ClusterName)
+	}
+
+	if len(status.Members) != 1 || status.Members[0].Name != "alpha-1" {
+		t.Fatalf("unexpected observed members: got %+v", status.Members)
+	}
+
+	assertContains(t, logs.String(), `"msg":"stored bootstrap cluster spec"`)
 
 	cancel()
 	daemon.Wait()
@@ -490,9 +578,10 @@ func TestDaemonPublishesNodeStatusToControlPlane(t *testing.T) {
 	t.Parallel()
 
 	store := controlplane.NewMemoryStateStore()
+	cfg := validDataConfig()
 
 	daemon, err := NewDaemon(
-		validDataConfig(),
+		cfg,
 		logging.New("pacmand", &bytes.Buffer{}),
 		withHeartbeatInterval(time.Hour),
 		WithControlPlanePublisher(store),
@@ -531,7 +620,7 @@ func TestDaemonPublishesNodeStatusToControlPlane(t *testing.T) {
 		t.Fatal("expected registered member")
 	}
 
-	if registration.APIAddress != config.DefaultAPIAddress {
+	if registration.APIAddress != cfg.Node.APIAddress {
 		t.Fatalf("unexpected registered api address: got %q", registration.APIAddress)
 	}
 
@@ -578,7 +667,7 @@ func TestDaemonPublishesNodeStatusToControlPlane(t *testing.T) {
 		t.Fatal("expected discovered member")
 	}
 
-	if member.APIURL != "http://0.0.0.0:8080" {
+	if member.APIURL != "http://"+cfg.Node.APIAddress {
 		t.Fatalf("unexpected discovered api url: got %q", member.APIURL)
 	}
 
@@ -749,13 +838,28 @@ func validDataConfig() config.Config {
 		APIVersion: config.APIVersionV1Alpha1,
 		Kind:       config.KindNodeConfig,
 		Node: config.NodeConfig{
-			Name: "alpha-1",
-			Role: cluster.NodeRoleData,
+			Name:       "alpha-1",
+			Role:       cluster.NodeRoleData,
+			APIAddress: reserveLoopbackAddress(),
 		},
 		Postgres: &config.PostgresLocalConfig{
 			DataDir: "/var/lib/postgresql/data",
 		},
 	}
+}
+
+func reserveLoopbackAddress() string {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		panic(err)
+	}
+
+	return address
 }
 
 func waitForHeartbeat(t *testing.T, daemon *Daemon, predicate func(agentmodel.Heartbeat) bool) {
