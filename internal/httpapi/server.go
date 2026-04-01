@@ -1,0 +1,159 @@
+package httpapi
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/recover"
+
+	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
+	"github.com/polkiloo/pacman/internal/cluster"
+)
+
+// NodeStatusReader provides local node state from the control-plane store.
+type NodeStatusReader interface {
+	NodeStatus(nodeName string) (agentmodel.NodeStatus, bool)
+	ClusterSpec() (cluster.ClusterSpec, bool)
+	MaintenanceStatus() cluster.MaintenanceModeStatus
+}
+
+// Config carries optional Server parameters.
+type Config struct {
+	// LivenessWindow is the maximum allowed age of the last heartbeat before
+	// GET /liveness returns 503. Defaults to 30 seconds.
+	LivenessWindow time.Duration
+}
+
+var errServerAlreadyStarted = errors.New("http api server is already started")
+
+// Server is the PACMAN HTTP API server.
+type Server struct {
+	app            *fiber.App
+	nodeName       string
+	store          NodeStatusReader
+	logger         *slog.Logger
+	livenessWindow time.Duration
+
+	mu       sync.Mutex
+	runDone  chan struct{}
+	runErr   error
+	listener net.Listener
+	stopping bool
+}
+
+// New constructs and wires up the API server.
+func New(nodeName string, store NodeStatusReader, logger *slog.Logger, cfg Config) *Server {
+	lw := cfg.LivenessWindow
+	if lw <= 0 {
+		lw = 30 * time.Second
+	}
+
+	srv := &Server{
+		nodeName:       nodeName,
+		store:          store,
+		logger:         logger,
+		livenessWindow: lw,
+	}
+
+	srv.app = fiber.New(fiber.Config{
+		DisableStartupMessage: true,
+		ReadTimeout:           10 * time.Second,
+		WriteTimeout:          10 * time.Second,
+	})
+
+	srv.app.Use(recover.New())
+	srv.registerRoutes()
+
+	return srv
+}
+
+func (srv *Server) registerRoutes() {
+	srv.app.Get("/health", srv.handleHealth)
+	srv.app.Get("/liveness", srv.handleLiveness)
+	srv.app.Get("/readiness", srv.handleReadiness)
+}
+
+// Start binds addr, serves requests in the background, and shuts down when ctx
+// is cancelled.
+func (srv *Server) Start(ctx context.Context, addr string) error {
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+
+	srv.mu.Lock()
+	if srv.runDone != nil {
+		srv.mu.Unlock()
+		_ = listener.Close()
+		return errServerAlreadyStarted
+	}
+	srv.runDone = make(chan struct{})
+	srv.runErr = nil
+	srv.listener = listener
+	srv.stopping = false
+	done := srv.runDone
+	srv.mu.Unlock()
+
+	go func() {
+		<-ctx.Done()
+		srv.mu.Lock()
+		srv.stopping = true
+		listener := srv.listener
+		srv.mu.Unlock()
+
+		if listener != nil {
+			_ = listener.Close()
+		}
+
+		_ = srv.app.Shutdown()
+	}()
+
+	go func() {
+		err := srv.app.Listener(listener)
+
+		srv.mu.Lock()
+		srv.listener = nil
+		if srv.stopping && isClosedListenerError(err) {
+			srv.runErr = nil
+		} else {
+			srv.runErr = err
+		}
+		srv.mu.Unlock()
+		close(done)
+	}()
+
+	return nil
+}
+
+// Wait blocks until the server stops and returns the terminal serve error, if
+// any.
+func (srv *Server) Wait() error {
+	srv.mu.Lock()
+	done := srv.runDone
+	srv.mu.Unlock()
+
+	if done == nil {
+		return nil
+	}
+
+	<-done
+
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	return srv.runErr
+}
+
+func isClosedListenerError(err error) bool {
+	if err == nil || errors.Is(err, net.ErrClosed) {
+		return true
+	}
+
+	return strings.Contains(err.Error(), "use of closed network connection")
+}

@@ -11,6 +11,7 @@ import (
 	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
 	"github.com/polkiloo/pacman/internal/config"
 	"github.com/polkiloo/pacman/internal/controlplane"
+	"github.com/polkiloo/pacman/internal/httpapi"
 	"github.com/polkiloo/pacman/internal/postgres"
 )
 
@@ -28,6 +29,7 @@ type Daemon struct {
 	postgresProbe      postgresAvailabilityProbe
 	postgresStateProbe postgresStateProbe
 	statePublisher     controlplane.NodeStatePublisher
+	apiServer          httpServer
 	probeTimeout       time.Duration
 	startedFlag        atomic.Bool
 
@@ -36,6 +38,11 @@ type Daemon struct {
 	heartbeat  agentmodel.Heartbeat
 	nodeStatus agentmodel.NodeStatus
 	loopWG     sync.WaitGroup
+}
+
+type httpServer interface {
+	Start(context.Context, string) error
+	Wait() error
 }
 
 // NewDaemon constructs a local PACMAN daemon from the validated node config.
@@ -53,6 +60,8 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 		return nil, ErrPostgresConfigRequired
 	}
 
+	store := controlplane.NewMemoryStateStore()
+
 	daemon := &Daemon{
 		config:             defaulted,
 		logger:             logger,
@@ -60,7 +69,8 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 		heartbeatInterval:  defaultHeartbeatInterval,
 		postgresProbe:      dialPostgresAvailability,
 		postgresStateProbe: postgres.QueryObservation,
-		statePublisher:     controlplane.NewMemoryStateStore(),
+		statePublisher:     store,
+		apiServer:          httpapi.New(defaulted.Node.Name, store, logger, httpapi.Config{}),
 		probeTimeout:       defaultPostgresProbeTimeout,
 	}
 
@@ -84,9 +94,15 @@ func (daemon *Daemon) Start(ctx context.Context) error {
 		return err
 	}
 
+	if err := daemon.startAPIServer(ctx); err != nil {
+		daemon.rollbackStart()
+		return fmt.Errorf("start http api server: %w", err)
+	}
+
 	daemon.logStartup(ctx, startup)
 	daemon.registerMember(ctx, startup)
 	daemon.recordHeartbeat(ctx)
+	daemon.loopWG.Add(1)
 	go daemon.runHeartbeatLoop(ctx)
 
 	return nil
@@ -106,11 +122,19 @@ func (daemon *Daemon) beginStart() (agentmodel.Startup, error) {
 		StartedAt:       daemon.now().UTC(),
 	}
 
-	daemon.loopWG.Add(1)
 	daemon.mu.Lock()
 	defer daemon.mu.Unlock()
 	daemon.started = startup
 	return startup, nil
+}
+
+func (daemon *Daemon) rollbackStart() {
+	daemon.startedFlag.Store(false)
+
+	daemon.mu.Lock()
+	defer daemon.mu.Unlock()
+
+	daemon.started = agentmodel.Startup{}
 }
 
 func (daemon *Daemon) logStartup(ctx context.Context, startup agentmodel.Startup) {
@@ -194,4 +218,24 @@ func (daemon *Daemon) NodeStatus() agentmodel.NodeStatus {
 // cancelled.
 func (daemon *Daemon) Wait() {
 	daemon.loopWG.Wait()
+
+	if daemon.apiServer == nil {
+		return
+	}
+
+	if err := daemon.apiServer.Wait(); err != nil {
+		daemon.logger.Error(
+			"http api server stopped unexpectedly",
+			slog.String("component", "httpapi"),
+			slog.String("error", err.Error()),
+		)
+	}
+}
+
+func (daemon *Daemon) startAPIServer(ctx context.Context) error {
+	if daemon.apiServer == nil {
+		return nil
+	}
+
+	return daemon.apiServer.Start(ctx, daemon.config.Node.APIAddress)
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net"
 	"strings"
 	"sync"
 	"testing"
@@ -72,9 +73,10 @@ func TestDaemonStartRecordsStartupStateAndHeartbeat(t *testing.T) {
 
 	var logs bytes.Buffer
 	now := time.Date(2026, time.March, 21, 10, 30, 0, 0, time.UTC)
+	cfg := validDataConfig()
 
 	daemon, err := NewDaemon(
-		validDataConfig(),
+		cfg,
 		logging.New("pacmand", &logs),
 		withNow(func() time.Time { return now }),
 		withHeartbeatInterval(time.Hour),
@@ -118,8 +120,8 @@ func TestDaemonStartRecordsStartupStateAndHeartbeat(t *testing.T) {
 		t.Fatalf("unexpected node role: got %q, want %q", startup.NodeRole, cluster.NodeRoleData)
 	}
 
-	if startup.APIAddress != config.DefaultAPIAddress {
-		t.Fatalf("unexpected api address: got %q, want %q", startup.APIAddress, config.DefaultAPIAddress)
+	if startup.APIAddress != cfg.Node.APIAddress {
+		t.Fatalf("unexpected api address: got %q, want %q", startup.APIAddress, cfg.Node.APIAddress)
 	}
 
 	if startup.ControlAddress != config.DefaultControlAddress {
@@ -232,8 +234,9 @@ func TestDaemonStartRecordsWitnessHeartbeatWithoutLocalPostgres(t *testing.T) {
 			APIVersion: config.APIVersionV1Alpha1,
 			Kind:       config.KindNodeConfig,
 			Node: config.NodeConfig{
-				Name: "witness-1",
-				Role: cluster.NodeRoleWitness,
+				Name:       "witness-1",
+				Role:       cluster.NodeRoleWitness,
+				APIAddress: reserveLoopbackAddress(),
 			},
 		},
 		logging.New("pacmand", &logs),
@@ -490,9 +493,10 @@ func TestDaemonPublishesNodeStatusToControlPlane(t *testing.T) {
 	t.Parallel()
 
 	store := controlplane.NewMemoryStateStore()
+	cfg := validDataConfig()
 
 	daemon, err := NewDaemon(
-		validDataConfig(),
+		cfg,
 		logging.New("pacmand", &bytes.Buffer{}),
 		withHeartbeatInterval(time.Hour),
 		WithControlPlanePublisher(store),
@@ -531,7 +535,7 @@ func TestDaemonPublishesNodeStatusToControlPlane(t *testing.T) {
 		t.Fatal("expected registered member")
 	}
 
-	if registration.APIAddress != config.DefaultAPIAddress {
+	if registration.APIAddress != cfg.Node.APIAddress {
 		t.Fatalf("unexpected registered api address: got %q", registration.APIAddress)
 	}
 
@@ -578,7 +582,7 @@ func TestDaemonPublishesNodeStatusToControlPlane(t *testing.T) {
 		t.Fatal("expected discovered member")
 	}
 
-	if member.APIURL != "http://0.0.0.0:8080" {
+	if member.APIURL != "http://"+cfg.Node.APIAddress {
 		t.Fatalf("unexpected discovered api url: got %q", member.APIURL)
 	}
 
@@ -749,13 +753,28 @@ func validDataConfig() config.Config {
 		APIVersion: config.APIVersionV1Alpha1,
 		Kind:       config.KindNodeConfig,
 		Node: config.NodeConfig{
-			Name: "alpha-1",
-			Role: cluster.NodeRoleData,
+			Name:       "alpha-1",
+			Role:       cluster.NodeRoleData,
+			APIAddress: reserveLoopbackAddress(),
 		},
 		Postgres: &config.PostgresLocalConfig{
 			DataDir: "/var/lib/postgresql/data",
 		},
 	}
+}
+
+func reserveLoopbackAddress() string {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		panic(err)
+	}
+
+	return address
 }
 
 func waitForHeartbeat(t *testing.T, daemon *Daemon, predicate func(agentmodel.Heartbeat) bool) {

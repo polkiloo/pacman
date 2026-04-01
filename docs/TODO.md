@@ -247,10 +247,10 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] define stable API versioning and compatibility policy
 
 ### Implementation
-- [ ] implement API router with Fiber
-- [ ] expose `GET /health`
-- [ ] expose `GET /liveness`
-- [ ] expose `GET /readiness`
+- [x] implement API router with Fiber
+- [x] expose `GET /health`
+- [x] expose `GET /liveness`
+- [x] expose `GET /readiness`
 - [ ] expose `GET /primary`
 - [ ] expose `GET /replica`
 - [ ] expose `GET /api/v1/cluster`
