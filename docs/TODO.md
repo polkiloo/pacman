@@ -376,6 +376,19 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [ ] add watchdog and fencing coverage inspired by Patroni `tests/test_watchdog.py`
 - [ ] add logging and utility helper coverage inspired by Patroni `tests/test_log.py` and `tests/test_utils.py`
 - [ ] add distributed-topology and MPP coverage inspired by Patroni `tests/test_citus.py` and `tests/test_mpp.py`
+
+### Jepsen Fault-Injection Campaigns
+Inspired by [Wolfsrudel/database-postgres-ha-patroni-testing-jepsen](https://github.com/Wolfsrudel/database-postgres-ha-patroni-testing-jepsen), which uses Jepsen + Clojure/Leiningen with a Vagrant / k3s lab and a Patroni cluster target.
+- [ ] evaluate whether to adapt the Jepsen harness shape directly or build a PACMAN-specific harness with the same workload / nemesis model
+- [ ] add a Patroni baseline target so PACMAN Jepsen runs can be calibrated against a known HA implementation before PACMAN-specific assertions are trusted
+- [ ] define a PACMAN Jepsen target topology, including 3 data nodes and optional witness coverage where PACMAN semantics differ from Patroni
+- [ ] define Jepsen workload coverage for append/register-style histories, single-key stress, read committed checks, and serializable checks
+- [ ] define Jepsen nemesis coverage for `none`, `packet`, `kill`, combined `packet,kill`, and slow-network / repeated-failure campaigns inspired by the Patroni repo
+- [ ] add a repeat-run soak profile for non-deterministic failures, including multi-run 30-minute campaigns and archived failure seeds / histories
+- [ ] document local Jepsen lab prerequisites and bootstrap flow, including `JDK`, `Leiningen`, VM/Kubernetes substrate, node inventory generation, and artifact review
+- [ ] decide where Jepsen runs execute in automation, preferring separate long-running CI/CD stages or scheduled jobs instead of the fast default PR pipeline
+- [ ] add separate CI/CD jobs for Jepsen smoke validation on demand and extended nightly / scheduled Jepsen campaigns
+- [ ] publish Jepsen HTML/history artifacts and concise failure summaries from CI/CD for operator review and regression tracking
 ---
 
 ## 18. Kubernetes-Native MVP
@@ -462,6 +475,7 @@ This track captures the Kubernetes-native operator model described in [ARCHITECT
 - [ ] implement maintenance mode
 - [ ] implement reliability improvements
 - [ ] stabilize end-to-end tests
+- [ ] establish separate Jepsen fault-injection validation outside the fast PR pipeline
 
 ## Milestone 6 — Kubernetes Operator MVP
 - [ ] implement `PostgresCluster` CRD and status model
@@ -531,5 +545,6 @@ Close the MVP only after validating that PACMAN can reliably demonstrate the fol
 - [ ] validate explicit rejoin of a former primary
 - [ ] validate basic operator-facing CLI and API
 - [ ] validate repeatable integration and end-to-end test coverage
+- [ ] validate scheduled or on-demand Jepsen fault-injection coverage in separate CI/CD stages
 - [ ] validate operator-managed Kubernetes deployment with `StatefulSet` and role-based Services
 - [ ] validate repeatable Kubernetes failover test coverage in `kind`
