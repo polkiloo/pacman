@@ -79,7 +79,6 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [ ] implement background worker registration via `shared_preload_libraries`
 - [ ] define GUC-based configuration bridge from PostgreSQL settings to PACMAN node-runtime config
 - [ ] wire extension startup, shutdown, and restart handling to the shared PACMAN local-agent lifecycle
-- [ ] define logging, error propagation, and failure-isolation rules for the embedded worker
 - [ ] add dedicated build target for the PostgreSQL extension artifact separate from `pacmand`
 - [ ] add packaging/install flow for extension binaries, control files, and SQL assets
 - [ ] add `testcontainers-go` fixture/image variant with the extension installed and preloaded
@@ -255,8 +254,9 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] expose `GET /replica`
 - [x] expose `GET /api/v1/cluster`
 - [x] expose `GET /api/v1/cluster/spec`
-- [ ] expose `GET /api/v1/nodes/{nodeName}`
-- [ ] expose `GET /api/v1/members`
+- [x] expose `GET /api/v1/nodes/{nodeName}`
+- [x] expose `GET /api/v1/members`
+- [ ] add HTTP middleware for request IDs, auth hooks, and common API concerns
 - [ ] expose `GET /api/v1/history`
 - [ ] expose `GET /api/v1/maintenance`
 - [ ] expose `PUT /api/v1/maintenance`
@@ -289,23 +289,33 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [ ] add mTLS between cluster members
 - [ ] implement certificate loading
 - [ ] define admin authorization model
-- [ ] add audit logging for topology changes
 - [ ] secure sensitive config handling
 
 ---
 
-## 15. Observability
+## 15. Structured Logging (`slog`)
 
-- [ ] add Prometheus metrics
-- [ ] add health endpoints
-- [ ] add structured event log
-- [ ] add diagnostics dump
-- [ ] add trace points for failover / switchover / rejoin
-- [ ] add useful debug logging for reconciliation
+- [ ] expand `pacmand` runtime `slog` coverage and field consistency
+- [ ] add `slog`-backed HTTP access logging
+- [ ] add structured event logs for cluster lifecycle and state transitions
+- [ ] add request, node, member, and operation correlation fields across API and control-plane logs
+- [ ] add audit logging for topology changes and maintenance mode changes
+- [ ] add reconciliation debug logging with safe verbosity controls
+- [ ] define embedded-worker logging, error propagation, and failure-isolation rules
+- [ ] add secret redaction rules and logging-focused test coverage inspired by Patroni `tests/test_log.py` and `tests/test_utils.py`
 
 ---
 
-## 16. Packaging and Operations
+## 16. Observability
+
+- [ ] add Prometheus metrics
+- [ ] add health endpoints
+- [ ] add diagnostics dump
+- [ ] add trace points for failover / switchover / rejoin
+
+---
+
+## 17. Packaging and Operations
 
 - [ ] add systemd unit files
 - [ ] add example configs
@@ -317,7 +327,7 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 
 ---
 
-## 17. Testing
+## 18. Testing
 
 ### Testcontainers Environment
 - [x] add Docker test image for `pacmand` and `pacmanctl` with PostgreSQL 17 client tools
@@ -374,7 +384,6 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [ ] add backup, restore, and cloud-integration coverage inspired by Patroni `tests/test_aws.py`, `tests/test_barman.py`, and `tests/test_wale_restore.py`
 - [ ] add DCS backend contract coverage for Consul, etcd, etcd3, Exhibitor, Kubernetes, Raft, and ZooKeeper inspired by Patroni `tests/test_consul.py`, `tests/test_etcd.py`, `tests/test_etcd3.py`, `tests/test_exhibitor.py`, `tests/test_kubernetes.py`, `tests/test_raft.py`, `tests/test_raft_controller.py`, and `tests/test_zookeeper.py`
 - [ ] add watchdog and fencing coverage inspired by Patroni `tests/test_watchdog.py`
-- [ ] add logging and utility helper coverage inspired by Patroni `tests/test_log.py` and `tests/test_utils.py`
 - [ ] add distributed-topology and MPP coverage inspired by Patroni `tests/test_citus.py` and `tests/test_mpp.py`
 
 ### Jepsen Fault-Injection Campaigns

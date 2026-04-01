@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,6 +113,60 @@ func TestWaitReturnsNilWhenServerNeverStarted(t *testing.T) {
 
 	if err := srv.Wait(); err != nil {
 		t.Fatalf("unexpected error from Wait on unstarted server: %v", err)
+	}
+}
+
+func TestRequestIDMiddlewareGeneratesHeaderWhenMissing(t *testing.T) {
+	t.Parallel()
+
+	response := performRequest(t, New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{}), "/health")
+	defer response.Body.Close()
+
+	requestID := response.Header.Get(headerRequestID)
+	if strings.TrimSpace(requestID) == "" {
+		t.Fatal("expected generated request ID header")
+	}
+}
+
+func TestRequestIDMiddlewarePreservesProvidedHeader(t *testing.T) {
+	t.Parallel()
+
+	response := performRequestWithHeaders(t, New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{}), http.MethodGet, "/health", map[string]string{
+		headerRequestID: "req-123",
+	})
+	defer response.Body.Close()
+
+	if got := response.Header.Get(headerRequestID); got != "req-123" {
+		t.Fatalf("unexpected request ID header: got %q, want %q", got, "req-123")
+	}
+}
+
+func TestAccessLogMiddlewareLogsRequest(t *testing.T) {
+	t.Parallel()
+
+	var buffer bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buffer, nil))
+
+	response := performRequestWithHeaders(t, New("alpha-1", testNodeStatusStore{}, logger, Config{}), http.MethodGet, "/health", map[string]string{
+		headerRequestID: "req-456",
+	})
+	defer response.Body.Close()
+
+	logs := buffer.String()
+	if !strings.Contains(logs, `"msg":"handled http request"`) {
+		t.Fatalf("expected access log entry, got %q", logs)
+	}
+
+	for _, want := range []string{
+		`"component":"httpapi"`,
+		`"request_id":"req-456"`,
+		`"method":"GET"`,
+		`"path":"/health"`,
+		`"status":503`,
+	} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("expected access log to contain %q, got %q", want, logs)
+		}
 	}
 }
 
@@ -1341,6 +1397,274 @@ func TestGetClusterSpecFencingRequired(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/v1/nodes/{nodeName}
+// ---------------------------------------------------------------------------
+
+func TestGetNodeStatusReturnsOKWithNode(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.April, 1, 12, 0, 0, 0, time.UTC)
+	checkedAt := now.Add(-2 * time.Second)
+	postmasterAt := now.Add(-time.Hour)
+	replayAt := now.Add(-time.Second)
+	heartbeatAt := now.Add(-3 * time.Second)
+	dcsSeenAt := now.Add(-4 * time.Second)
+
+	node := agentmodel.NodeStatus{
+		NodeName:       "alpha-2",
+		MemberName:     "alpha-2",
+		Role:           cluster.MemberRoleReplica,
+		State:          cluster.MemberStateStreaming,
+		PendingRestart: true,
+		NeedsRejoin:    true,
+		Tags:           map[string]any{"zone": "us-east-1a"},
+		Postgres: agentmodel.PostgresStatus{
+			Managed:       true,
+			Address:       "alpha-2-postgres:5432",
+			CheckedAt:     checkedAt,
+			Up:            true,
+			Role:          cluster.MemberRoleReplica,
+			RecoveryKnown: true,
+			InRecovery:    true,
+			Details: agentmodel.PostgresDetails{
+				ServerVersion:       170002,
+				PendingRestart:      true,
+				SystemIdentifier:    "7599025879359099984",
+				Timeline:            7,
+				PostmasterStartAt:   postmasterAt,
+				ReplicationLagBytes: 128,
+			},
+			WAL: agentmodel.WALProgress{
+				WriteLSN:        "0/7000200",
+				FlushLSN:        "0/7000200",
+				ReceiveLSN:      "0/7000200",
+				ReplayLSN:       "0/7000100",
+				ReplayTimestamp: replayAt,
+			},
+			Errors: agentmodel.PostgresErrors{
+				Availability: "stale replica sample",
+			},
+		},
+		ControlPlane: agentmodel.ControlPlaneStatus{
+			ClusterReachable: true,
+			LastHeartbeatAt:  heartbeatAt,
+			LastDCSSeenAt:    dcsSeenAt,
+			PublishError:     "republish scheduled",
+		},
+		ObservedAt: now,
+	}
+
+	response := performRequest(t, New("alpha-1", testNodeStatusStore{
+		nodeStatus: node,
+		hasNode:    true,
+	}, discardLogger(), Config{}), "/api/v1/nodes/alpha-2")
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	var body nodeStatusResponse
+	decodeJSONResponse(t, response, &body)
+
+	if body.NodeName != "alpha-2" {
+		t.Fatalf("nodeName: got %q, want %q", body.NodeName, "alpha-2")
+	}
+
+	if body.Role != "replica" {
+		t.Errorf("role: got %q, want %q", body.Role, "replica")
+	}
+
+	if body.State != "streaming" {
+		t.Errorf("state: got %q, want %q", body.State, "streaming")
+	}
+
+	if !body.PendingRestart {
+		t.Error("pendingRestart: got false, want true")
+	}
+
+	if !body.NeedsRejoin {
+		t.Error("needsRejoin: got false, want true")
+	}
+
+	if body.Tags["zone"] != "us-east-1a" {
+		t.Errorf("tags.zone: got %#v", body.Tags["zone"])
+	}
+
+	if !body.Postgres.Managed {
+		t.Error("postgres.managed: got false, want true")
+	}
+
+	if body.Postgres.Address != "alpha-2-postgres:5432" {
+		t.Errorf("postgres.address: got %q", body.Postgres.Address)
+	}
+
+	if !body.Postgres.CheckedAt.Equal(checkedAt) {
+		t.Errorf("postgres.checkedAt: got %v, want %v", body.Postgres.CheckedAt, checkedAt)
+	}
+
+	if body.Postgres.Role != "replica" {
+		t.Errorf("postgres.role: got %q, want %q", body.Postgres.Role, "replica")
+	}
+
+	if !body.Postgres.Details.PendingRestart {
+		t.Error("postgres.details.pendingRestart: got false, want true")
+	}
+
+	if body.Postgres.Details.SystemIdentifier != "7599025879359099984" {
+		t.Errorf("postgres.details.systemIdentifier: got %q", body.Postgres.Details.SystemIdentifier)
+	}
+
+	if body.Postgres.Details.PostmasterStartAt == nil || !body.Postgres.Details.PostmasterStartAt.Equal(postmasterAt) {
+		t.Errorf("postgres.details.postmasterStartAt: got %v, want %v", body.Postgres.Details.PostmasterStartAt, postmasterAt)
+	}
+
+	if body.Postgres.WAL.ReplayTimestamp == nil || !body.Postgres.WAL.ReplayTimestamp.Equal(replayAt) {
+		t.Errorf("postgres.wal.replayTimestamp: got %v, want %v", body.Postgres.WAL.ReplayTimestamp, replayAt)
+	}
+
+	if body.Postgres.Errors.Availability != "stale replica sample" {
+		t.Errorf("postgres.errors.availability: got %q", body.Postgres.Errors.Availability)
+	}
+
+	if !body.ControlPlane.ClusterReachable {
+		t.Error("controlPlane.clusterReachable: got false, want true")
+	}
+
+	if body.ControlPlane.LastHeartbeatAt == nil || !body.ControlPlane.LastHeartbeatAt.Equal(heartbeatAt) {
+		t.Errorf("controlPlane.lastHeartbeatAt: got %v, want %v", body.ControlPlane.LastHeartbeatAt, heartbeatAt)
+	}
+
+	if body.ControlPlane.LastDCSSeenAt == nil || !body.ControlPlane.LastDCSSeenAt.Equal(dcsSeenAt) {
+		t.Errorf("controlPlane.lastDcsSeenAt: got %v, want %v", body.ControlPlane.LastDCSSeenAt, dcsSeenAt)
+	}
+
+	if body.ControlPlane.PublishError != "republish scheduled" {
+		t.Errorf("controlPlane.publishError: got %q", body.ControlPlane.PublishError)
+	}
+}
+
+func TestGetNodeStatusReturns404WhenMissing(t *testing.T) {
+	t.Parallel()
+
+	response := performRequest(t, New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{}), "/api/v1/nodes/missing")
+
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusNotFound)
+	}
+
+	var body errorResponseJSON
+	decodeJSONResponse(t, response, &body)
+
+	if body.Error != "node_not_found" {
+		t.Errorf("error: got %q, want %q", body.Error, "node_not_found")
+	}
+
+	if body.Message != `node "missing" was not found` {
+		t.Errorf("message: got %q", body.Message)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/members
+// ---------------------------------------------------------------------------
+
+func TestGetMembersReturnsOKWithClusterMembers(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.April, 1, 12, 0, 0, 0, time.UTC)
+	status := cluster.ClusterStatus{
+		ClusterName:  "alpha",
+		Phase:        cluster.ClusterPhaseHealthy,
+		CurrentEpoch: 3,
+		ObservedAt:   now,
+		Members: []cluster.MemberStatus{
+			{
+				Name:       "alpha-1",
+				APIURL:     "http://alpha-1:8080",
+				Host:       "10.0.0.1",
+				Port:       5432,
+				Role:       cluster.MemberRolePrimary,
+				State:      cluster.MemberStateRunning,
+				Healthy:    true,
+				Leader:     true,
+				Timeline:   3,
+				Priority:   100,
+				LastSeenAt: now,
+			},
+			{
+				Name:        "alpha-2",
+				APIURL:      "http://alpha-2:8080",
+				Host:        "10.0.0.2",
+				Port:        5432,
+				Role:        cluster.MemberRoleReplica,
+				State:       cluster.MemberStateStreaming,
+				Healthy:     true,
+				Timeline:    3,
+				LagBytes:    256,
+				Priority:    50,
+				NoFailover:  true,
+				NeedsRejoin: true,
+				Tags:        map[string]any{"zone": "us-east-1a"},
+				LastSeenAt:  now,
+			},
+		},
+	}
+
+	response := performRequest(t, New("alpha-1", testNodeStatusStore{
+		clusterStatus:    status,
+		hasClusterStatus: true,
+	}, discardLogger(), Config{}), "/api/v1/members")
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	var body membersResponse
+	decodeJSONResponse(t, response, &body)
+
+	if len(body.Items) != 2 {
+		t.Fatalf("items: got %d, want 2", len(body.Items))
+	}
+
+	if body.Items[0].Name != "alpha-1" || body.Items[0].Role != "primary" {
+		t.Errorf("items[0]: got %+v", body.Items[0])
+	}
+
+	if body.Items[1].LagBytes != 256 {
+		t.Errorf("items[1].lagBytes: got %d, want 256", body.Items[1].LagBytes)
+	}
+
+	if !body.Items[1].NoFailover {
+		t.Error("items[1].noFailover: got false, want true")
+	}
+
+	if !body.Items[1].NeedsRejoin {
+		t.Error("items[1].needsRejoin: got false, want true")
+	}
+
+	if body.Items[1].Tags["zone"] != "us-east-1a" {
+		t.Errorf("items[1].tags.zone: got %#v", body.Items[1].Tags["zone"])
+	}
+}
+
+func TestGetMembersReturns503WhenClusterStatusUnavailable(t *testing.T) {
+	t.Parallel()
+
+	response := performRequest(t, New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{}), "/api/v1/members")
+
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusServiceUnavailable)
+	}
+
+	var body errorResponseJSON
+	decodeJSONResponse(t, response, &body)
+
+	if body.Error != "cluster_status_unavailable" {
+		t.Errorf("error: got %q, want %q", body.Error, "cluster_status_unavailable")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // buildNodeStatus — full field coverage
 // ---------------------------------------------------------------------------
 
@@ -1816,7 +2140,17 @@ func performRequest(t *testing.T, srv *Server, path string) *http.Response {
 func performRequestMethod(t *testing.T, srv *Server, method, path string) *http.Response {
 	t.Helper()
 
+	return performRequestWithHeaders(t, srv, method, path, nil)
+}
+
+func performRequestWithHeaders(t *testing.T, srv *Server, method, path string, headers map[string]string) *http.Response {
+	t.Helper()
+
 	request := httptest.NewRequest(method, path, nil)
+	for key, value := range headers {
+		request.Header.Set(key, value)
+	}
+
 	response, err := srv.app.Test(request, int(time.Second.Milliseconds()))
 	if err != nil {
 		t.Fatalf("perform %s %q: %v", method, path, err)

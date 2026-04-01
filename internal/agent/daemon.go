@@ -94,6 +94,11 @@ func (daemon *Daemon) Start(ctx context.Context) error {
 		return err
 	}
 
+	if err := daemon.bootstrapClusterSpec(ctx); err != nil {
+		daemon.rollbackStart()
+		return fmt.Errorf("store bootstrap cluster spec: %w", err)
+	}
+
 	if err := daemon.startAPIServer(ctx); err != nil {
 		daemon.rollbackStart()
 		return fmt.Errorf("start http api server: %w", err)

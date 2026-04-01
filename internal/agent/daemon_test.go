@@ -279,6 +279,91 @@ func TestDaemonStartRecordsWitnessHeartbeatWithoutLocalPostgres(t *testing.T) {
 	daemon.Wait()
 }
 
+func TestDaemonStartBootstrapsClusterSpecIntoControlPlane(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	now := time.Date(2026, time.April, 1, 10, 30, 0, 0, time.UTC)
+	store := controlplane.NewMemoryStateStore()
+
+	cfg := validDataConfig()
+	cfg.Bootstrap = &config.ClusterBootstrapConfig{
+		ClusterName:     "alpha",
+		InitialPrimary:  "alpha-1",
+		SeedAddresses:   []string{"127.0.0.1:9090"},
+		ExpectedMembers: []string{"alpha-1", "alpha-2"},
+	}
+
+	daemon, err := NewDaemon(
+		cfg,
+		logging.New("pacmand", &logs),
+		withNow(func() time.Time { return now }),
+		withHeartbeatInterval(time.Hour),
+		withPostgresProbe(func(context.Context, string) error { return nil }),
+		withPostgresStateProbe(func(context.Context, string) (postgres.Observation, error) {
+			return postgres.Observation{
+				Role:       cluster.MemberRolePrimary,
+				InRecovery: false,
+				Details: postgres.Details{
+					ServerVersion:    170002,
+					SystemIdentifier: "7599025879359099984",
+					Timeline:         1,
+				},
+				WAL: postgres.WALProgress{
+					WriteLSN: "0/3000148",
+					FlushLSN: "0/3000148",
+				},
+			}, nil
+		}),
+		WithControlPlanePublisher(store),
+	)
+	if err != nil {
+		t.Fatalf("new daemon: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := daemon.Start(ctx); err != nil {
+		t.Fatalf("start daemon: %v", err)
+	}
+
+	spec, ok := store.ClusterSpec()
+	if !ok {
+		t.Fatal("expected bootstrap cluster spec to be stored")
+	}
+
+	if spec.ClusterName != "alpha" {
+		t.Fatalf("unexpected cluster name: got %q", spec.ClusterName)
+	}
+
+	if len(spec.Members) != 2 {
+		t.Fatalf("unexpected bootstrap members: got %+v", spec.Members)
+	}
+
+	if spec.Members[0].Name != "alpha-1" || spec.Members[1].Name != "alpha-2" {
+		t.Fatalf("unexpected bootstrap member names: got %+v", spec.Members)
+	}
+
+	status, ok := store.ClusterStatus()
+	if !ok {
+		t.Fatal("expected cluster status after first heartbeat")
+	}
+
+	if status.ClusterName != "alpha" {
+		t.Fatalf("unexpected cluster status name: got %q", status.ClusterName)
+	}
+
+	if len(status.Members) != 1 || status.Members[0].Name != "alpha-1" {
+		t.Fatalf("unexpected observed members: got %+v", status.Members)
+	}
+
+	assertContains(t, logs.String(), `"msg":"stored bootstrap cluster spec"`)
+
+	cancel()
+	daemon.Wait()
+}
+
 func TestDaemonStartDetectsReplicaRecoveryState(t *testing.T) {
 	t.Parallel()
 

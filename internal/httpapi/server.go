@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -40,6 +41,7 @@ type Server struct {
 	store          NodeStatusReader
 	logger         *slog.Logger
 	livenessWindow time.Duration
+	requestSeq     atomic.Uint64
 
 	mu       sync.Mutex
 	runDone  chan struct{}
@@ -68,6 +70,8 @@ func New(nodeName string, store NodeStatusReader, logger *slog.Logger, cfg Confi
 		WriteTimeout:          10 * time.Second,
 	})
 
+	srv.app.Use(srv.requestIDMiddleware())
+	srv.app.Use(srv.accessLogMiddleware())
 	srv.app.Use(recover.New())
 	srv.registerRoutes()
 
@@ -84,6 +88,8 @@ func (srv *Server) registerRoutes() {
 	v1 := srv.app.Group("/api/v1")
 	v1.Get("/cluster", srv.handleClusterStatus)
 	v1.Get("/cluster/spec", srv.handleClusterSpec)
+	v1.Get("/members", srv.handleMembers)
+	v1.Get("/nodes/:nodeName", srv.handleNodeStatus)
 }
 
 // addProbeRoute registers a probe handler for GET, HEAD, and OPTIONS on the

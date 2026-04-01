@@ -1,10 +1,12 @@
 package httpapi
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 
+	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
 	"github.com/polkiloo/pacman/internal/cluster"
 )
 
@@ -18,7 +20,7 @@ type clusterStatusResponse struct {
 	Maintenance         maintenanceModeStatusJSON `json:"maintenance"`
 	ActiveOperation     *operationJSON            `json:"activeOperation,omitempty"`
 	ScheduledSwitchover *scheduledSwitchoverJSON  `json:"scheduledSwitchover,omitempty"`
-	Members             []memberStatusJSON         `json:"members"`
+	Members             []memberStatusJSON        `json:"members"`
 }
 
 type memberStatusJSON struct {
@@ -68,15 +70,80 @@ type scheduledSwitchoverJSON struct {
 	To   string    `json:"to,omitempty"`
 }
 
+type membersResponse struct {
+	Items []memberStatusJSON `json:"items"`
+}
+
+type nodeStatusResponse struct {
+	NodeName       string                      `json:"nodeName"`
+	MemberName     string                      `json:"memberName,omitempty"`
+	Role           string                      `json:"role"`
+	State          string                      `json:"state"`
+	PendingRestart bool                        `json:"pendingRestart,omitempty"`
+	NeedsRejoin    bool                        `json:"needsRejoin,omitempty"`
+	Tags           map[string]any              `json:"tags,omitempty"`
+	Postgres       postgresLocalStatusJSON     `json:"postgres"`
+	ControlPlane   controlPlaneLocalStatusJSON `json:"controlPlane"`
+	ObservedAt     time.Time                   `json:"observedAt"`
+}
+
+type postgresLocalStatusJSON struct {
+	Managed       bool                `json:"managed"`
+	Address       string              `json:"address,omitempty"`
+	CheckedAt     time.Time           `json:"checkedAt"`
+	Up            bool                `json:"up"`
+	Role          string              `json:"role"`
+	RecoveryKnown bool                `json:"recoveryKnown"`
+	InRecovery    bool                `json:"inRecovery"`
+	Details       postgresDetailsJSON `json:"details"`
+	WAL           walProgressJSON     `json:"wal"`
+	Errors        postgresErrorsJSON  `json:"errors"`
+}
+
+type postgresDetailsJSON struct {
+	ServerVersion       int        `json:"serverVersion,omitempty"`
+	PendingRestart      bool       `json:"pendingRestart,omitempty"`
+	SystemIdentifier    string     `json:"systemIdentifier,omitempty"`
+	Timeline            int64      `json:"timeline,omitempty"`
+	PostmasterStartAt   *time.Time `json:"postmasterStartAt,omitempty"`
+	ReplicationLagBytes int64      `json:"replicationLagBytes,omitempty"`
+}
+
+type walProgressJSON struct {
+	WriteLSN        string     `json:"writeLsn,omitempty"`
+	FlushLSN        string     `json:"flushLsn,omitempty"`
+	ReceiveLSN      string     `json:"receiveLsn,omitempty"`
+	ReplayLSN       string     `json:"replayLsn,omitempty"`
+	ReplayTimestamp *time.Time `json:"replayTimestamp,omitempty"`
+}
+
+type controlPlaneLocalStatusJSON struct {
+	ClusterReachable bool       `json:"clusterReachable"`
+	Leader           bool       `json:"leader,omitempty"`
+	LastHeartbeatAt  *time.Time `json:"lastHeartbeatAt,omitempty"`
+	LastDCSSeenAt    *time.Time `json:"lastDcsSeenAt,omitempty"`
+	PublishError     string     `json:"publishError,omitempty"`
+}
+
+type postgresErrorsJSON struct {
+	Availability string `json:"availability,omitempty"`
+	State        string `json:"state,omitempty"`
+}
+
+type errorResponseJSON struct {
+	Error   string `json:"error"`
+	Message string `json:"message"`
+}
+
 // clusterSpecResponse is the JSON shape for GET /api/v1/cluster/spec.
 type clusterSpecResponse struct {
-	ClusterName string               `json:"clusterName"`
-	Generation  int64                `json:"generation"`
+	ClusterName string                 `json:"clusterName"`
+	Generation  int64                  `json:"generation"`
 	Maintenance maintenanceDesiredJSON `json:"maintenance"`
-	Failover    failoverPolicyJSON   `json:"failover"`
-	Switchover  switchoverPolicyJSON `json:"switchover"`
-	Postgres    postgresPolicyJSON   `json:"postgres"`
-	Members     []memberSpecJSON     `json:"members,omitempty"`
+	Failover    failoverPolicyJSON     `json:"failover"`
+	Switchover  switchoverPolicyJSON   `json:"switchover"`
+	Postgres    postgresPolicyJSON     `json:"postgres"`
+	Members     []memberSpecJSON       `json:"members,omitempty"`
 }
 
 type maintenanceDesiredJSON struct {
@@ -134,12 +201,36 @@ func (srv *Server) handleClusterSpec(c *fiber.Ctx) error {
 	return c.JSON(buildClusterSpecResponse(spec))
 }
 
-func buildClusterStatusResponse(status cluster.ClusterStatus) clusterStatusResponse {
-	members := make([]memberStatusJSON, len(status.Members))
-	for i, m := range status.Members {
-		members[i] = buildMemberStatusJSON(m)
+// handleMembers returns the aggregated observed member view.
+func (srv *Server) handleMembers(c *fiber.Ctx) error {
+	status, ok := srv.store.ClusterStatus()
+	if !ok {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(errorResponseJSON{
+			Error:   "cluster_status_unavailable",
+			Message: "cluster status unavailable",
+		})
 	}
 
+	return c.JSON(membersResponse{
+		Items: buildMemberStatusList(status.Members),
+	})
+}
+
+// handleNodeStatus returns the detailed node-local status for the requested node.
+func (srv *Server) handleNodeStatus(c *fiber.Ctx) error {
+	nodeName := c.Params("nodeName")
+	node, ok := srv.store.NodeStatus(nodeName)
+	if !ok {
+		return c.Status(fiber.StatusNotFound).JSON(errorResponseJSON{
+			Error:   "node_not_found",
+			Message: fmt.Sprintf("node %q was not found", nodeName),
+		})
+	}
+
+	return c.JSON(buildNodeStatusResponse(node))
+}
+
+func buildClusterStatusResponse(status cluster.ClusterStatus) clusterStatusResponse {
 	resp := clusterStatusResponse{
 		ClusterName:    status.ClusterName,
 		Phase:          string(status.Phase),
@@ -147,7 +238,7 @@ func buildClusterStatusResponse(status cluster.ClusterStatus) clusterStatusRespo
 		CurrentEpoch:   int64(status.CurrentEpoch),
 		ObservedAt:     status.ObservedAt,
 		Maintenance:    buildMaintenanceModeStatusJSON(status.Maintenance),
-		Members:        members,
+		Members:        buildMemberStatusList(status.Members),
 	}
 
 	if status.ActiveOperation != nil {
@@ -161,6 +252,15 @@ func buildClusterStatusResponse(status cluster.ClusterStatus) clusterStatusRespo
 	}
 
 	return resp
+}
+
+func buildMemberStatusList(members []cluster.MemberStatus) []memberStatusJSON {
+	items := make([]memberStatusJSON, len(members))
+	for i, m := range members {
+		items[i] = buildMemberStatusJSON(m)
+	}
+
+	return items
 }
 
 func buildMemberStatusJSON(m cluster.MemberStatus) memberStatusJSON {
@@ -234,6 +334,96 @@ func buildScheduledSwitchoverJSON(sw cluster.ScheduledSwitchover) scheduledSwitc
 	}
 }
 
+func buildNodeStatusResponse(node agentmodel.NodeStatus) nodeStatusResponse {
+	return nodeStatusResponse{
+		NodeName:       node.NodeName,
+		MemberName:     node.MemberName,
+		Role:           string(node.Role),
+		State:          string(node.State),
+		PendingRestart: node.PendingRestart,
+		NeedsRejoin:    node.NeedsRejoin,
+		Tags:           node.Tags,
+		Postgres:       buildPostgresLocalStatusJSON(node.Postgres),
+		ControlPlane:   buildControlPlaneLocalStatusJSON(node.ControlPlane),
+		ObservedAt:     node.ObservedAt,
+	}
+}
+
+func buildPostgresLocalStatusJSON(status agentmodel.PostgresStatus) postgresLocalStatusJSON {
+	return postgresLocalStatusJSON{
+		Managed:       status.Managed,
+		Address:       status.Address,
+		CheckedAt:     status.CheckedAt,
+		Up:            status.Up,
+		Role:          string(status.Role),
+		RecoveryKnown: status.RecoveryKnown,
+		InRecovery:    status.InRecovery,
+		Details:       buildPostgresDetailsJSON(status.Details),
+		WAL:           buildWALProgressJSON(status.WAL),
+		Errors:        buildPostgresErrorsJSON(status.Errors),
+	}
+}
+
+func buildPostgresDetailsJSON(details agentmodel.PostgresDetails) postgresDetailsJSON {
+	j := postgresDetailsJSON{
+		ServerVersion:       details.ServerVersion,
+		PendingRestart:      details.PendingRestart,
+		SystemIdentifier:    details.SystemIdentifier,
+		Timeline:            details.Timeline,
+		ReplicationLagBytes: details.ReplicationLagBytes,
+	}
+
+	if !details.PostmasterStartAt.IsZero() {
+		t := details.PostmasterStartAt
+		j.PostmasterStartAt = &t
+	}
+
+	return j
+}
+
+func buildWALProgressJSON(wal agentmodel.WALProgress) walProgressJSON {
+	j := walProgressJSON{
+		WriteLSN:   wal.WriteLSN,
+		FlushLSN:   wal.FlushLSN,
+		ReceiveLSN: wal.ReceiveLSN,
+		ReplayLSN:  wal.ReplayLSN,
+	}
+
+	if !wal.ReplayTimestamp.IsZero() {
+		t := wal.ReplayTimestamp
+		j.ReplayTimestamp = &t
+	}
+
+	return j
+}
+
+func buildControlPlaneLocalStatusJSON(status agentmodel.ControlPlaneStatus) controlPlaneLocalStatusJSON {
+	j := controlPlaneLocalStatusJSON{
+		ClusterReachable: status.ClusterReachable,
+		Leader:           status.Leader,
+		PublishError:     status.PublishError,
+	}
+
+	if !status.LastHeartbeatAt.IsZero() {
+		t := status.LastHeartbeatAt
+		j.LastHeartbeatAt = &t
+	}
+
+	if !status.LastDCSSeenAt.IsZero() {
+		t := status.LastDCSSeenAt
+		j.LastDCSSeenAt = &t
+	}
+
+	return j
+}
+
+func buildPostgresErrorsJSON(errors agentmodel.PostgresErrors) postgresErrorsJSON {
+	return postgresErrorsJSON{
+		Availability: errors.Availability,
+		State:        errors.State,
+	}
+}
+
 func buildClusterSpecResponse(spec cluster.ClusterSpec) clusterSpecResponse {
 	members := make([]memberSpecJSON, len(spec.Members))
 	for i, m := range spec.Members {
@@ -260,7 +450,7 @@ func buildClusterSpecResponse(spec cluster.ClusterSpec) clusterSpecResponse {
 			FencingRequired: spec.Failover.FencingRequired,
 		},
 		Switchover: switchoverPolicyJSON{
-			AllowScheduled:                            spec.Switchover.AllowScheduled,
+			AllowScheduled: spec.Switchover.AllowScheduled,
 			RequireSpecificCandidateDuringMaintenance: spec.Switchover.RequireSpecificCandidateDuringMaintenance,
 		},
 		Postgres: postgresPolicyJSON{
