@@ -120,6 +120,8 @@ func requireResponseMatchesContract(t *testing.T, document contractapi.Document,
 			t.Fatalf("decode json body for %s %s: %v", method, path, err)
 		}
 		requireSchemaAllowsValue(t, document, schema, value)
+	case "application/yaml":
+		requireSchemaAllowsValue(t, document, schema, strings.TrimSpace(string(body)))
 	case "text/plain":
 		requireSchemaAllowsValue(t, document, schema, strings.TrimSpace(string(body)))
 	default:

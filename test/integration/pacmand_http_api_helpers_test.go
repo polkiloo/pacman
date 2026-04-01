@@ -17,6 +17,8 @@ import (
 	"github.com/polkiloo/pacman/test/testenv"
 )
 
+const pacmandStartupTimeout = 30 * time.Second
+
 // daemonNodeConfig is the YAML template for a single-node pacmand configuration.
 // Arguments: nodeName, postgresListenAddress, nodeName (initialPrimary), nodeName (expectedMember).
 const daemonNodeConfig = `
@@ -70,7 +72,7 @@ func startSingleNodeDaemon(t *testing.T, nodeName string) singleNodeDaemon {
 			"-lc",
 			fmt.Sprintf("pacmand -config %s", daemonConfigPath),
 		},
-		WaitStrategy: wait.ForListeningPort("8080/tcp").WithStartupTimeout(30 * time.Second),
+		WaitStrategy: wait.ForListeningPort("8080/tcp").WithStartupTimeout(pacmandStartupTimeout),
 	})
 
 	return singleNodeDaemon{

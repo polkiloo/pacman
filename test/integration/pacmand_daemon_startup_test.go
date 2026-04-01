@@ -3,6 +3,8 @@
 package integration_test
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -348,5 +350,22 @@ func writeDaemonConfigFile(t *testing.T, body string) testcontainers.ContainerFi
 
 func sanitizeIntegrationName(value string) string {
 	replacer := strings.NewReplacer("/", "-", "_", "-", " ", "-", ":", "-")
-	return strings.ToLower(replacer.Replace(value))
+	sanitized := strings.Trim(strings.ToLower(replacer.Replace(value)), "-")
+	if sanitized == "" {
+		return "integration"
+	}
+
+	const maxLen = 40
+	if len(sanitized) <= maxLen {
+		return sanitized
+	}
+
+	sum := sha1.Sum([]byte(sanitized))
+	suffix := hex.EncodeToString(sum[:4])
+	prefixLen := maxLen - len(suffix) - 1
+	if prefixLen < 1 {
+		return suffix
+	}
+
+	return sanitized[:prefixLen] + "-" + suffix
 }

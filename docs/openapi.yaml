@@ -94,6 +94,25 @@ paths:
     $ref: './openapi/paths-patroni.yaml#/paths/~1reload'
   /reinitialize:
     $ref: './openapi/paths-patroni.yaml#/paths/~1reinitialize'
+  /openapi.yaml:
+    get:
+      security: []
+      summary: Published PACMAN OpenAPI document
+      description: Returns the resolved OpenAPI YAML served by the running PACMAN API process.
+      operationId: getPublishedOpenAPI
+      responses:
+        '200':
+          description: Published OpenAPI YAML document
+          content:
+            application/yaml:
+              schema:
+                type: string
+        '503':
+          description: Published OpenAPI document is not available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/cluster:
     $ref: './openapi/paths-pacman.yaml#/paths/~1api~1v1~1cluster'
   /api/v1/cluster/spec:

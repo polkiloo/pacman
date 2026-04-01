@@ -261,10 +261,10 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] expose `GET /api/v1/maintenance`
 - [x] expose `PUT /api/v1/maintenance`
 - [x] expose `GET /api/v1/diagnostics`
-- [ ] expose `POST /api/v1/operations/switchover`
-- [ ] expose `DELETE /api/v1/operations/switchover`
-- [ ] expose `POST /api/v1/operations/failover`
-- [ ] serve published OpenAPI document from the API process
+- [x] expose `POST /api/v1/operations/switchover`
+- [x] expose `DELETE /api/v1/operations/switchover`
+- [x] expose `POST /api/v1/operations/failover`
+- [x] serve published OpenAPI document from the API process
 
 ---
 

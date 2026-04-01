@@ -18,6 +18,7 @@ import (
 
 	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
 	"github.com/polkiloo/pacman/internal/cluster"
+	"github.com/polkiloo/pacman/internal/controlplane"
 )
 
 // ---------------------------------------------------------------------------
@@ -2269,6 +2270,393 @@ func TestGetDiagnosticsReturns503WhenUnavailable(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /openapi.yaml
+// ---------------------------------------------------------------------------
+
+func TestGetOpenAPIDocumentReturnsPublishedYAMLAndCachesProvider(t *testing.T) {
+	t.Parallel()
+
+	requests := 0
+	srv := New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{
+		OpenAPIDocument: func() ([]byte, error) {
+			requests++
+			return []byte("openapi: 3.1.0\ninfo:\n  title: Test API\n  version: 0.1.0\npaths: {}\n"), nil
+		},
+	})
+
+	first := performRequestMethod(t, srv, http.MethodGet, "/openapi.yaml")
+	firstBody, err := io.ReadAll(first.Body)
+	first.Body.Close()
+	if err != nil {
+		t.Fatalf("read first /openapi.yaml response: %v", err)
+	}
+
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected first status: got %d, want %d", first.StatusCode, http.StatusOK)
+	}
+
+	if got := first.Header.Get(fiber.HeaderContentType); !strings.HasPrefix(got, "application/yaml") {
+		t.Fatalf("content-type: got %q", got)
+	}
+
+	if got := first.Header.Get(fiber.HeaderCacheControl); got != "no-store" {
+		t.Fatalf("cache-control: got %q, want %q", got, "no-store")
+	}
+
+	if !strings.Contains(string(firstBody), "openapi: 3.1.0") {
+		t.Fatalf("unexpected openapi document: %s", firstBody)
+	}
+
+	second := performRequestMethod(t, srv, http.MethodGet, "/openapi.yaml")
+	secondBody, err := io.ReadAll(second.Body)
+	second.Body.Close()
+	if err != nil {
+		t.Fatalf("read second /openapi.yaml response: %v", err)
+	}
+
+	if second.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected second status: got %d, want %d", second.StatusCode, http.StatusOK)
+	}
+
+	if string(secondBody) != string(firstBody) {
+		t.Fatalf("expected cached openapi response body to stay stable")
+	}
+
+	if requests != 1 {
+		t.Fatalf("openapi provider calls: got %d, want 1", requests)
+	}
+}
+
+func TestGetOpenAPIDocumentReturns503WhenUnavailable(t *testing.T) {
+	t.Parallel()
+
+	response := performRequestMethod(t, New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{
+		OpenAPIDocument: func() ([]byte, error) {
+			return nil, errors.New("spec unavailable")
+		},
+	}), http.MethodGet, "/openapi.yaml")
+
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusServiceUnavailable)
+	}
+
+	var body errorResponseJSON
+	decodeJSONResponse(t, response, &body)
+
+	if body.Error != "openapi_unavailable" {
+		t.Fatalf("error: got %q, want %q", body.Error, "openapi_unavailable")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// POST/DELETE /api/v1/operations/*
+// ---------------------------------------------------------------------------
+
+func TestPostSwitchoverReturnsAcceptedOperation(t *testing.T) {
+	t.Parallel()
+
+	requestedAt := time.Date(2026, time.April, 2, 9, 0, 0, 0, time.UTC)
+	scheduledAt := time.Date(2026, time.April, 2, 12, 0, 0, 0, time.UTC)
+	expectedScheduledAt := time.Date(2026, time.April, 2, 9, 0, 0, 0, time.UTC)
+	var captured controlplane.SwitchoverRequest
+
+	response := performRequestBodyWithHeaders(
+		t,
+		New("alpha-1", testNodeStatusStore{
+			lastSwitchoverRequest: &captured,
+			switchoverIntent: controlplane.SwitchoverIntent{
+				Operation: cluster.Operation{
+					ID:          "switchover-1",
+					Kind:        cluster.OperationKindSwitchover,
+					State:       cluster.OperationStateScheduled,
+					RequestedBy: "ops",
+					RequestedAt: requestedAt,
+					Reason:      "planned cutover",
+					FromMember:  "alpha-1",
+					ToMember:    "alpha-2",
+					ScheduledAt: scheduledAt,
+					Result:      cluster.OperationResultPending,
+					Message:     "planned switchover from alpha-1 to alpha-2 scheduled",
+				},
+			},
+		}, discardLogger(), Config{}),
+		http.MethodPost,
+		"/api/v1/operations/switchover",
+		[]byte(`{"candidate":" alpha-2 ","scheduledAt":"2026-04-02T12:00:00+03:00","reason":" planned cutover ","requestedBy":" ops "}`),
+		map[string]string{"Content-Type": "application/json"},
+	)
+
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusAccepted)
+	}
+
+	var body operationAcceptedResponse
+	decodeJSONResponse(t, response, &body)
+
+	if body.Operation.Kind != "switchover" || body.Operation.State != "scheduled" {
+		t.Fatalf("unexpected switchover response: %+v", body.Operation)
+	}
+
+	if captured.Candidate != "alpha-2" {
+		t.Fatalf("candidate: got %q, want %q", captured.Candidate, "alpha-2")
+	}
+
+	if captured.Reason != "planned cutover" || captured.RequestedBy != "ops" {
+		t.Fatalf("unexpected captured switchover request: %+v", captured)
+	}
+
+	if !captured.ScheduledAt.Equal(expectedScheduledAt) {
+		t.Fatalf("scheduledAt: got %v, want %v", captured.ScheduledAt, expectedScheduledAt)
+	}
+}
+
+func TestPostSwitchoverRejectsEmptyBody(t *testing.T) {
+	t.Parallel()
+
+	response := performRequestBodyWithHeaders(
+		t,
+		New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{}),
+		http.MethodPost,
+		"/api/v1/operations/switchover",
+		nil,
+		map[string]string{"Content-Type": "application/json"},
+	)
+
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusBadRequest)
+	}
+
+	var body errorResponseJSON
+	decodeJSONResponse(t, response, &body)
+
+	if body.Error != "invalid_switchover_request" {
+		t.Fatalf("error: got %q, want %q", body.Error, "invalid_switchover_request")
+	}
+}
+
+func TestPostSwitchoverMapsControlPlaneErrors(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		err      error
+		wantCode int
+		wantErr  string
+	}{
+		{name: "conflict", err: controlplane.ErrSwitchoverOperationInProgress, wantCode: http.StatusConflict, wantErr: "switchover_conflict"},
+		{name: "precondition", err: controlplane.ErrSwitchoverTargetNotReady, wantCode: http.StatusPreconditionFailed, wantErr: "switchover_precondition_failed"},
+		{name: "unavailable", err: controlplane.ErrSwitchoverObservedStateRequired, wantCode: http.StatusServiceUnavailable, wantErr: "switchover_unavailable"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			response := performRequestBodyWithHeaders(
+				t,
+				New("alpha-1", testNodeStatusStore{switchoverErr: tc.err}, discardLogger(), Config{}),
+				http.MethodPost,
+				"/api/v1/operations/switchover",
+				[]byte(`{"candidate":"alpha-2"}`),
+				map[string]string{"Content-Type": "application/json"},
+			)
+
+			if response.StatusCode != tc.wantCode {
+				t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, tc.wantCode)
+			}
+
+			var body errorResponseJSON
+			decodeJSONResponse(t, response, &body)
+
+			if body.Error != tc.wantErr {
+				t.Fatalf("error: got %q, want %q", body.Error, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestDeleteSwitchoverReturnsCancelledOperation(t *testing.T) {
+	t.Parallel()
+
+	requestedAt := time.Date(2026, time.April, 2, 9, 0, 0, 0, time.UTC)
+	completedAt := time.Date(2026, time.April, 2, 9, 5, 0, 0, time.UTC)
+
+	response := performRequestMethod(t, New("alpha-1", testNodeStatusStore{
+		cancelledSwitchover: cluster.Operation{
+			ID:          "switchover-1",
+			Kind:        cluster.OperationKindSwitchover,
+			State:       cluster.OperationStateCancelled,
+			RequestedBy: "ops",
+			RequestedAt: requestedAt,
+			Reason:      "planned cutover",
+			FromMember:  "alpha-1",
+			ToMember:    "alpha-2",
+			CompletedAt: completedAt,
+			Result:      cluster.OperationResultCancelled,
+			Message:     "scheduled switchover cancelled",
+		},
+	}, discardLogger(), Config{}), http.MethodDelete, "/api/v1/operations/switchover")
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	var body operationAcceptedResponse
+	decodeJSONResponse(t, response, &body)
+
+	if body.Operation.State != "cancelled" || body.Operation.Result != "cancelled" {
+		t.Fatalf("unexpected cancelled operation: %+v", body.Operation)
+	}
+}
+
+func TestDeleteSwitchoverMapsControlPlaneErrors(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		err      error
+		wantCode int
+		wantErr  string
+	}{
+		{name: "missing", err: controlplane.ErrScheduledSwitchoverNotFound, wantCode: http.StatusNotFound, wantErr: "scheduled_switchover_not_found"},
+		{name: "running", err: controlplane.ErrSwitchoverAlreadyRunning, wantCode: http.StatusConflict, wantErr: "switchover_conflict"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			response := performRequestMethod(t, New("alpha-1", testNodeStatusStore{
+				cancelSwitchoverErr: tc.err,
+			}, discardLogger(), Config{}), http.MethodDelete, "/api/v1/operations/switchover")
+
+			if response.StatusCode != tc.wantCode {
+				t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, tc.wantCode)
+			}
+
+			var body errorResponseJSON
+			decodeJSONResponse(t, response, &body)
+
+			if body.Error != tc.wantErr {
+				t.Fatalf("error: got %q, want %q", body.Error, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestPostFailoverReturnsAcceptedOperationAndDefaultMetadata(t *testing.T) {
+	t.Parallel()
+
+	requestedAt := time.Date(2026, time.April, 2, 10, 0, 0, 0, time.UTC)
+	var captured controlplane.FailoverIntentRequest
+
+	response := performRequestBodyWithHeaders(
+		t,
+		New("alpha-1", testNodeStatusStore{
+			lastFailoverRequest: &captured,
+			failoverIntent: controlplane.FailoverIntent{
+				Operation: cluster.Operation{
+					ID:          "failover-1",
+					Kind:        cluster.OperationKindFailover,
+					State:       cluster.OperationStateAccepted,
+					RequestedBy: "operator",
+					RequestedAt: requestedAt,
+					Reason:      "manual failover",
+					FromMember:  "alpha-1",
+					ToMember:    "alpha-2",
+					Result:      cluster.OperationResultPending,
+					Message:     "automatic failover from alpha-1 to alpha-2 accepted",
+				},
+			},
+		}, discardLogger(), Config{}),
+		http.MethodPost,
+		"/api/v1/operations/failover",
+		[]byte(`{}`),
+		map[string]string{"Content-Type": "application/json"},
+	)
+
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusAccepted)
+	}
+
+	var body operationAcceptedResponse
+	decodeJSONResponse(t, response, &body)
+
+	if body.Operation.Kind != "failover" || body.Operation.State != "accepted" {
+		t.Fatalf("unexpected failover response: %+v", body.Operation)
+	}
+
+	if captured.RequestedBy != "operator" || captured.Reason != "manual failover" {
+		t.Fatalf("unexpected normalized failover request: %+v", captured)
+	}
+}
+
+func TestPostFailoverRejectsEmptyBody(t *testing.T) {
+	t.Parallel()
+
+	response := performRequestBodyWithHeaders(
+		t,
+		New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{}),
+		http.MethodPost,
+		"/api/v1/operations/failover",
+		nil,
+		map[string]string{"Content-Type": "application/json"},
+	)
+
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusBadRequest)
+	}
+
+	var body errorResponseJSON
+	decodeJSONResponse(t, response, &body)
+
+	if body.Error != "invalid_failover_request" {
+		t.Fatalf("error: got %q, want %q", body.Error, "invalid_failover_request")
+	}
+}
+
+func TestPostFailoverMapsControlPlaneErrors(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		err      error
+		wantCode int
+		wantErr  string
+	}{
+		{name: "conflict", err: controlplane.ErrFailoverOperationInProgress, wantCode: http.StatusConflict, wantErr: "failover_conflict"},
+		{name: "precondition", err: controlplane.ErrFailoverPrimaryHealthy, wantCode: http.StatusPreconditionFailed, wantErr: "failover_precondition_failed"},
+		{name: "unavailable", err: controlplane.ErrFailoverObservedStateRequired, wantCode: http.StatusServiceUnavailable, wantErr: "failover_unavailable"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			response := performRequestBodyWithHeaders(
+				t,
+				New("alpha-1", testNodeStatusStore{failoverErr: tc.err}, discardLogger(), Config{}),
+				http.MethodPost,
+				"/api/v1/operations/failover",
+				[]byte(`{"reason":"manual"}`),
+				map[string]string{"Content-Type": "application/json"},
+			)
+
+			if response.StatusCode != tc.wantCode {
+				t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, tc.wantCode)
+			}
+
+			var body errorResponseJSON
+			decodeJSONResponse(t, response, &body)
+
+			if body.Error != tc.wantErr {
+				t.Fatalf("error: got %q, want %q", body.Error, tc.wantErr)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // buildNodeStatus — full field coverage
 // ---------------------------------------------------------------------------
 
@@ -2706,17 +3094,25 @@ func TestReplicaStateOK(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type testNodeStatusStore struct {
-	nodeStatus        agentmodel.NodeStatus
-	nodeStatuses      []agentmodel.NodeStatus
-	hasNode           bool
-	clusterSpec       cluster.ClusterSpec
-	hasSpec           bool
-	clusterStatus     cluster.ClusterStatus
-	hasClusterStatus  bool
-	maintenance       cluster.MaintenanceModeStatus
-	maintenanceUpdate *cluster.MaintenanceModeStatus
-	maintenanceErr    error
-	history           []cluster.HistoryEntry
+	nodeStatus            agentmodel.NodeStatus
+	nodeStatuses          []agentmodel.NodeStatus
+	hasNode               bool
+	clusterSpec           cluster.ClusterSpec
+	hasSpec               bool
+	clusterStatus         cluster.ClusterStatus
+	hasClusterStatus      bool
+	maintenance           cluster.MaintenanceModeStatus
+	maintenanceUpdate     *cluster.MaintenanceModeStatus
+	maintenanceErr        error
+	history               []cluster.HistoryEntry
+	lastSwitchoverRequest *controlplane.SwitchoverRequest
+	switchoverIntent      controlplane.SwitchoverIntent
+	switchoverErr         error
+	cancelledSwitchover   cluster.Operation
+	cancelSwitchoverErr   error
+	lastFailoverRequest   *controlplane.FailoverIntentRequest
+	failoverIntent        controlplane.FailoverIntent
+	failoverErr           error
 }
 
 func (store testNodeStatusStore) NodeStatus(nodeName string) (agentmodel.NodeStatus, bool) {
@@ -2801,6 +3197,52 @@ func (store testNodeStatusStore) History() []cluster.HistoryEntry {
 	items := make([]cluster.HistoryEntry, len(store.history))
 	copy(items, store.history)
 	return items
+}
+
+func (store testNodeStatusStore) CreateSwitchoverIntent(ctx context.Context, request controlplane.SwitchoverRequest) (controlplane.SwitchoverIntent, error) {
+	if err := ctx.Err(); err != nil {
+		return controlplane.SwitchoverIntent{}, err
+	}
+
+	if store.lastSwitchoverRequest != nil {
+		captured := request.Clone()
+		*store.lastSwitchoverRequest = captured
+	}
+
+	if store.switchoverErr != nil {
+		return controlplane.SwitchoverIntent{}, store.switchoverErr
+	}
+
+	return store.switchoverIntent.Clone(), nil
+}
+
+func (store testNodeStatusStore) CancelSwitchover(ctx context.Context) (cluster.Operation, error) {
+	if err := ctx.Err(); err != nil {
+		return cluster.Operation{}, err
+	}
+
+	if store.cancelSwitchoverErr != nil {
+		return cluster.Operation{}, store.cancelSwitchoverErr
+	}
+
+	return store.cancelledSwitchover.Clone(), nil
+}
+
+func (store testNodeStatusStore) CreateFailoverIntent(ctx context.Context, request controlplane.FailoverIntentRequest) (controlplane.FailoverIntent, error) {
+	if err := ctx.Err(); err != nil {
+		return controlplane.FailoverIntent{}, err
+	}
+
+	if store.lastFailoverRequest != nil {
+		captured := request
+		*store.lastFailoverRequest = captured
+	}
+
+	if store.failoverErr != nil {
+		return controlplane.FailoverIntent{}, store.failoverErr
+	}
+
+	return store.failoverIntent.Clone(), nil
 }
 
 type testAuthorizer struct {

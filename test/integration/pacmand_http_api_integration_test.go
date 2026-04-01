@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestPacmandHTTPAPIServesHealth(t *testing.T) {
@@ -17,7 +16,7 @@ func TestPacmandHTTPAPIServesHealth(t *testing.T) {
 	}
 
 	daemon := startSingleNodeDaemon(t, "alpha-http")
-	waitForProbeStatus(t, daemon.Client, daemon.Base+"/health", http.StatusOK, 15*time.Second)
+	waitForProbeStatus(t, daemon.Client, daemon.Base+"/health", http.StatusOK, pacmandStartupTimeout)
 
 	resp, err := daemon.Client.Get(daemon.Base + "/health")
 	if err != nil {
@@ -59,7 +58,7 @@ func TestPacmandPrimaryAndReplicaProbes(t *testing.T) {
 	daemon := startSingleNodeDaemon(t, "alpha-primary")
 	document := loadContractDocument(t)
 
-	waitForProbeStatus(t, daemon.Client, daemon.Base+"/health", http.StatusOK, 15*time.Second)
+	waitForProbeStatus(t, daemon.Client, daemon.Base+"/health", http.StatusOK, pacmandStartupTimeout)
 
 	probes := []struct {
 		path           string
@@ -148,12 +147,12 @@ func TestPacmandNativeNodeAndMembersAPIWithRealPostgresOperation(t *testing.T) {
 		t.Skip("skipping Docker-backed integration test in short mode")
 	}
 
-	daemon := startSingleNodeDaemon(t, "alpha-api")
+	daemon := startSingleNodeDaemon(t, "alpha-node")
 	document := loadContractDocument(t)
 
-	waitForProbeStatus(t, daemon.Client, daemon.Base+"/health", http.StatusOK, 15*time.Second)
-	waitForProbeStatus(t, daemon.Client, daemon.Base+"/primary", http.StatusOK, 15*time.Second)
-	waitForProbeStatus(t, daemon.Client, daemon.Base+"/api/v1/members", http.StatusOK, 15*time.Second)
+	waitForProbeStatus(t, daemon.Client, daemon.Base+"/health", http.StatusOK, pacmandStartupTimeout)
+	waitForProbeStatus(t, daemon.Client, daemon.Base+"/primary", http.StatusOK, pacmandStartupTimeout)
+	waitForProbeStatus(t, daemon.Client, daemon.Base+"/api/v1/members", http.StatusOK, pacmandStartupTimeout)
 
 	db := openFixtureDB(t, daemon.Postgres)
 	defer db.Close()
@@ -203,14 +202,14 @@ func TestPacmandNativeNodeAndMembersAPIWithRealPostgresOperation(t *testing.T) {
 	}
 
 	// Validate /api/v1/nodes/{nodeName} returns full node status with postgres details.
-	nodeResp := performHTTPRequest(t, http.MethodGet, daemon.Base+"/api/v1/nodes/alpha-api", nil, nil)
+	nodeResp := performHTTPRequest(t, http.MethodGet, daemon.Base+"/api/v1/nodes/alpha-node", nil, nil)
 	nodeBody, err := io.ReadAll(nodeResp.Body)
 	nodeResp.Body.Close()
 	if err != nil {
 		t.Fatalf("read /api/v1/nodes response: %v", err)
 	}
 	if nodeResp.StatusCode != http.StatusOK {
-		t.Fatalf("/api/v1/nodes/alpha-api: got status %d, want %d", nodeResp.StatusCode, http.StatusOK)
+		t.Fatalf("/api/v1/nodes/alpha-node: got status %d, want %d", nodeResp.StatusCode, http.StatusOK)
 	}
 	requireResponseMatchesContract(t, document, "/api/v1/nodes/{nodeName}", "get", nodeResp, nodeBody)
 
@@ -230,11 +229,11 @@ func TestPacmandNativeNodeAndMembersAPIWithRealPostgresOperation(t *testing.T) {
 	if err := json.Unmarshal(nodeBody, &nodePayload); err != nil {
 		t.Fatalf("decode /api/v1/nodes payload: %v", err)
 	}
-	if nodePayload.NodeName != "alpha-api" || nodePayload.Role != "primary" {
-		t.Fatalf("/api/v1/nodes/alpha-api unexpected payload: %+v", nodePayload)
+	if nodePayload.NodeName != "alpha-node" || nodePayload.Role != "primary" {
+		t.Fatalf("/api/v1/nodes/alpha-node unexpected payload: %+v", nodePayload)
 	}
 	if !nodePayload.Postgres.Managed || !nodePayload.Postgres.Up {
-		t.Fatalf("/api/v1/nodes/alpha-api unexpected postgres payload: %+v", nodePayload.Postgres)
+		t.Fatalf("/api/v1/nodes/alpha-node unexpected postgres payload: %+v", nodePayload.Postgres)
 	}
 	if nodePayload.Postgres.Details.ServerVersion == 0 || nodePayload.Postgres.Details.SystemIdentifier == "" {
 		t.Fatalf("expected postgres details from real postgres observation, got %+v", nodePayload.Postgres.Details)
@@ -267,7 +266,7 @@ func TestPacmandNativeNodeAndMembersAPIWithRealPostgresOperation(t *testing.T) {
 		t.Fatalf("/api/v1/members: got %d items, want 1", len(membersPayload.Items))
 	}
 	member := membersPayload.Items[0]
-	if member.Name != "alpha-api" || member.Role != "primary" || !member.Healthy {
+	if member.Name != "alpha-node" || member.Role != "primary" || !member.Healthy {
 		t.Fatalf("/api/v1/members unexpected member payload: %+v", member)
 	}
 }
@@ -280,8 +279,8 @@ func TestPacmandHistoryMaintenanceAndDiagnosticsAPI(t *testing.T) {
 	daemon := startSingleNodeDaemon(t, "alpha-admin")
 	document := loadContractDocument(t)
 
-	waitForProbeStatus(t, daemon.Client, daemon.Base+"/health", http.StatusOK, 15*time.Second)
-	waitForProbeStatus(t, daemon.Client, daemon.Base+"/api/v1/members", http.StatusOK, 15*time.Second)
+	waitForProbeStatus(t, daemon.Client, daemon.Base+"/health", http.StatusOK, pacmandStartupTimeout)
+	waitForProbeStatus(t, daemon.Client, daemon.Base+"/api/v1/members", http.StatusOK, pacmandStartupTimeout)
 
 	// History must be empty at startup.
 	historyResp := performHTTPRequest(t, http.MethodGet, daemon.Base+"/api/v1/history", nil, nil)
@@ -437,5 +436,128 @@ func TestPacmandHistoryMaintenanceAndDiagnosticsAPI(t *testing.T) {
 	}
 	if len(compactPayload.Members) != 0 {
 		t.Fatalf("expected empty compact diagnostics members, got %+v", compactPayload.Members)
+	}
+}
+
+func TestPacmandOperationsAndPublishedOpenAPI(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Docker-backed integration test in short mode")
+	}
+
+	daemon := startSingleNodeDaemon(t, "alpha-ops")
+	document := loadContractDocument(t)
+
+	waitForProbeStatus(t, daemon.Client, daemon.Base+"/health", http.StatusOK, pacmandStartupTimeout)
+	waitForProbeStatus(t, daemon.Client, daemon.Base+"/api/v1/members", http.StatusOK, pacmandStartupTimeout)
+
+	db := openFixtureDB(t, daemon.Postgres)
+	defer db.Close()
+
+	for _, stmt := range []string{
+		`create table if not exists api_operations_smoke (id integer primary key, note text not null)`,
+		`insert into api_operations_smoke (id, note) values (1, 'published-openapi') on conflict (id) do update set note = excluded.note`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("exec operations sql: %v", err)
+		}
+	}
+
+	var note string
+	if err := db.QueryRow(`select note from api_operations_smoke where id = 1`).Scan(&note); err != nil {
+		t.Fatalf("verify operations postgres write/read: %v", err)
+	}
+	if note != "published-openapi" {
+		t.Fatalf("unexpected operations postgres note: got %q", note)
+	}
+
+	openAPIResp := performHTTPRequest(t, http.MethodGet, daemon.Base+"/openapi.yaml", nil, nil)
+	openAPIBody, err := io.ReadAll(openAPIResp.Body)
+	openAPIResp.Body.Close()
+	if err != nil {
+		t.Fatalf("read /openapi.yaml response: %v", err)
+	}
+	if openAPIResp.StatusCode != http.StatusOK {
+		t.Fatalf("/openapi.yaml: got status %d, want %d", openAPIResp.StatusCode, http.StatusOK)
+	}
+	requireResponseMatchesContract(t, document, "/openapi.yaml", "get", openAPIResp, openAPIBody)
+
+	openAPIDoc := string(openAPIBody)
+	for _, want := range []string{"/openapi.yaml:", "/api/v1/operations/switchover:", "/api/v1/operations/failover:"} {
+		if !strings.Contains(openAPIDoc, want) {
+			t.Fatalf("published openapi document is missing %q", want)
+		}
+	}
+
+	switchoverRequest := []byte(`{"candidate":"alpha-2","reason":"integration switchover","requestedBy":"integration"}`)
+	requireRequestMatchesContract(t, document, "/api/v1/operations/switchover", "post", "application/json", switchoverRequest)
+
+	switchoverResp := performHTTPRequest(t, http.MethodPost, daemon.Base+"/api/v1/operations/switchover", switchoverRequest, map[string]string{
+		"Content-Type": "application/json",
+	})
+	switchoverBody, err := io.ReadAll(switchoverResp.Body)
+	switchoverResp.Body.Close()
+	if err != nil {
+		t.Fatalf("read POST /api/v1/operations/switchover response: %v", err)
+	}
+	if switchoverResp.StatusCode != http.StatusPreconditionFailed {
+		t.Fatalf("POST /api/v1/operations/switchover: got status %d, want %d (body: %s)", switchoverResp.StatusCode, http.StatusPreconditionFailed, switchoverBody)
+	}
+	requireResponseMatchesContract(t, document, "/api/v1/operations/switchover", "post", switchoverResp, switchoverBody)
+
+	var switchoverError struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(switchoverBody, &switchoverError); err != nil {
+		t.Fatalf("decode switchover error payload: %v", err)
+	}
+	if switchoverError.Error != "switchover_precondition_failed" {
+		t.Fatalf("unexpected switchover error: %+v", switchoverError)
+	}
+
+	cancelResp := performHTTPRequest(t, http.MethodDelete, daemon.Base+"/api/v1/operations/switchover", nil, nil)
+	cancelBody, err := io.ReadAll(cancelResp.Body)
+	cancelResp.Body.Close()
+	if err != nil {
+		t.Fatalf("read DELETE /api/v1/operations/switchover response: %v", err)
+	}
+	if cancelResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("DELETE /api/v1/operations/switchover: got status %d, want %d (body: %s)", cancelResp.StatusCode, http.StatusNotFound, cancelBody)
+	}
+	requireResponseMatchesContract(t, document, "/api/v1/operations/switchover", "delete", cancelResp, cancelBody)
+
+	var cancelError struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(cancelBody, &cancelError); err != nil {
+		t.Fatalf("decode switchover cancel error payload: %v", err)
+	}
+	if cancelError.Error != "scheduled_switchover_not_found" {
+		t.Fatalf("unexpected switchover cancel error: %+v", cancelError)
+	}
+
+	failoverRequest := []byte(`{"reason":"integration failover","requestedBy":"integration"}`)
+	requireRequestMatchesContract(t, document, "/api/v1/operations/failover", "post", "application/json", failoverRequest)
+
+	failoverResp := performHTTPRequest(t, http.MethodPost, daemon.Base+"/api/v1/operations/failover", failoverRequest, map[string]string{
+		"Content-Type": "application/json",
+	})
+	failoverBody, err := io.ReadAll(failoverResp.Body)
+	failoverResp.Body.Close()
+	if err != nil {
+		t.Fatalf("read POST /api/v1/operations/failover response: %v", err)
+	}
+	if failoverResp.StatusCode != http.StatusPreconditionFailed {
+		t.Fatalf("POST /api/v1/operations/failover: got status %d, want %d (body: %s)", failoverResp.StatusCode, http.StatusPreconditionFailed, failoverBody)
+	}
+	requireResponseMatchesContract(t, document, "/api/v1/operations/failover", "post", failoverResp, failoverBody)
+
+	var failoverError struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(failoverBody, &failoverError); err != nil {
+		t.Fatalf("decode failover error payload: %v", err)
+	}
+	if failoverError.Error != "failover_precondition_failed" {
+		t.Fatalf("unexpected failover error: %+v", failoverError)
 	}
 }

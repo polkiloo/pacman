@@ -13,8 +13,10 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 
+	apidoc "github.com/polkiloo/pacman/docs"
 	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
 	"github.com/polkiloo/pacman/internal/cluster"
+	"github.com/polkiloo/pacman/internal/controlplane"
 )
 
 // NodeStatusReader provides local node state from the control-plane store.
@@ -26,7 +28,13 @@ type NodeStatusReader interface {
 	MaintenanceStatus() cluster.MaintenanceModeStatus
 	UpdateMaintenanceMode(context.Context, cluster.MaintenanceModeUpdateRequest) (cluster.MaintenanceModeStatus, error)
 	History() []cluster.HistoryEntry
+	CreateSwitchoverIntent(context.Context, controlplane.SwitchoverRequest) (controlplane.SwitchoverIntent, error)
+	CancelSwitchover(context.Context) (cluster.Operation, error)
+	CreateFailoverIntent(context.Context, controlplane.FailoverIntentRequest) (controlplane.FailoverIntent, error)
 }
+
+// OpenAPIDocumentProvider returns the published OpenAPI YAML served by pacmand.
+type OpenAPIDocumentProvider func() ([]byte, error)
 
 // Config carries optional Server parameters.
 type Config struct {
@@ -36,6 +44,9 @@ type Config struct {
 	// Authorizer optionally enforces authenticated access for administrative
 	// control-plane endpoints. When nil, authentication is disabled.
 	Authorizer Authorizer
+	// OpenAPIDocument optionally overrides the published OpenAPI document
+	// served by GET /openapi.yaml.
+	OpenAPIDocument OpenAPIDocumentProvider
 }
 
 var errServerAlreadyStarted = errors.New("http api server is already started")
@@ -48,7 +59,11 @@ type Server struct {
 	logger         *slog.Logger
 	livenessWindow time.Duration
 	authorizer     Authorizer
+	openAPIDoc     OpenAPIDocumentProvider
 	requestSeq     atomic.Uint64
+	openAPILoad    sync.Once
+	openAPIBytes   []byte
+	openAPIErr     error
 
 	mu       sync.Mutex
 	runDone  chan struct{}
@@ -70,6 +85,11 @@ func New(nodeName string, store NodeStatusReader, logger *slog.Logger, cfg Confi
 		logger:         logger,
 		livenessWindow: lw,
 		authorizer:     cfg.Authorizer,
+		openAPIDoc:     cfg.OpenAPIDocument,
+	}
+
+	if srv.openAPIDoc == nil {
+		srv.openAPIDoc = apidoc.OpenAPIYAML
 	}
 
 	srv.app = fiber.New(fiber.Config{
@@ -92,6 +112,8 @@ func (srv *Server) registerRoutes() {
 	srv.addProbeRoute("/readiness", srv.handleReadiness)
 	srv.addProbeRoute("/primary", srv.handlePrimary)
 	srv.addProbeRoute("/replica", srv.handleReplica)
+	srv.app.Get("/openapi.yaml", srv.handleOpenAPIDocument)
+	srv.app.Head("/openapi.yaml", srv.handleOpenAPIDocument)
 
 	v1 := srv.app.Group("/api/v1", srv.apiCommonMiddleware())
 	v1.Get("/cluster", srv.authMiddleware(AccessScopeClusterRead), srv.handleClusterStatus)
@@ -102,6 +124,9 @@ func (srv *Server) registerRoutes() {
 	v1.Get("/maintenance", srv.authMiddleware(AccessScopeClusterRead), srv.handleMaintenanceStatus)
 	v1.Put("/maintenance", srv.authMiddleware(AccessScopeClusterWrite), srv.requireJSONContentTypeMiddleware(), srv.handleMaintenanceUpdate)
 	v1.Get("/diagnostics", srv.authMiddleware(AccessScopeClusterRead), srv.handleDiagnostics)
+	v1.Post("/operations/switchover", srv.authMiddleware(AccessScopeClusterWrite), srv.requireJSONContentTypeMiddleware(), srv.handleSwitchoverCreate)
+	v1.Delete("/operations/switchover", srv.authMiddleware(AccessScopeClusterWrite), srv.handleSwitchoverCancel)
+	v1.Post("/operations/failover", srv.authMiddleware(AccessScopeClusterWrite), srv.requireJSONContentTypeMiddleware(), srv.handleFailoverCreate)
 
 	srv.app.Use("/api/v1", srv.apiNotFoundMiddleware())
 }

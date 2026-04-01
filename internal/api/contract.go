@@ -3,7 +3,9 @@ package api
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -115,6 +117,12 @@ func LoadDocument(path string) (Document, error) {
 	}
 
 	return decodeDocument(payload)
+}
+
+// ResolveDocumentFS reads a split OpenAPI document from fsys, resolves its
+// top-level external references, and returns the resulting YAML payload.
+func ResolveDocumentFS(fsys fs.FS, rootPath string) ([]byte, error) {
+	return loadResolvedDocumentFS(fsys, rootPath)
 }
 
 // LoadRepositoryDocument loads the repository OpenAPI contract from docs/openapi.yaml.
@@ -355,6 +363,30 @@ func loadResolvedDocument(path string) ([]byte, error) {
 	return resolved, nil
 }
 
+func loadResolvedDocumentFS(fsys fs.FS, rootPath string) ([]byte, error) {
+	cleanPath := pathpkg.Clean(strings.TrimSpace(rootPath))
+	payload, err := fs.ReadFile(fsys, cleanPath)
+	if err != nil {
+		return nil, fmt.Errorf("read openapi document: %w", err)
+	}
+
+	var raw map[string]any
+	if err := yaml.Unmarshal(payload, &raw); err != nil {
+		return nil, fmt.Errorf("decode openapi document: %w", err)
+	}
+
+	if err := resolveTopLevelExternalRefsFS(fsys, cleanPath, raw); err != nil {
+		return nil, fmt.Errorf("resolve openapi document refs: %w", err)
+	}
+
+	resolved, err := yaml.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("encode openapi document: %w", err)
+	}
+
+	return resolved, nil
+}
+
 func decodeDocument(payload []byte) (Document, error) {
 	var document Document
 	if err := yaml.Unmarshal(payload, &document); err != nil {
@@ -371,6 +403,20 @@ func resolveTopLevelExternalRefs(rootPath string, document map[string]any) error
 
 	for _, componentSection := range []string{"parameters", "responses", "securitySchemes", "schemas"} {
 		if err := resolveObjectRefs(rootPath, document, "components", componentSection); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func resolveTopLevelExternalRefsFS(fsys fs.FS, rootPath string, document map[string]any) error {
+	if err := resolveObjectRefsFS(fsys, rootPath, document, "paths"); err != nil {
+		return err
+	}
+
+	for _, componentSection := range []string{"parameters", "responses", "securitySchemes", "schemas"} {
+		if err := resolveObjectRefsFS(fsys, rootPath, document, "components", componentSection); err != nil {
 			return err
 		}
 	}
@@ -395,6 +441,24 @@ func resolveObjectRefs(rootPath string, document map[string]any, keys ...string)
 	return nil
 }
 
+func resolveObjectRefsFS(fsys fs.FS, rootPath string, document map[string]any, keys ...string) error {
+	target, ok := lookupMap(document, keys...)
+	if !ok {
+		return nil
+	}
+
+	baseDir := pathpkg.Dir(rootPath)
+	for name, value := range target {
+		resolved, err := resolveExternalRefFS(fsys, baseDir, value)
+		if err != nil {
+			return fmt.Errorf("%s %q: %w", strings.Join(keys, "."), name, err)
+		}
+		target[name] = resolved
+	}
+
+	return nil
+}
+
 func resolveExternalRef(rootPath string, value any) (any, error) {
 	node, ok := value.(map[string]any)
 	if !ok {
@@ -410,6 +474,38 @@ func resolveExternalRef(rootPath string, value any) (any, error) {
 	fragmentPath := filepath.Join(filepath.Dir(rootPath), refPath)
 
 	payload, err := os.ReadFile(fragmentPath)
+	if err != nil {
+		return nil, fmt.Errorf("read ref %q: %w", ref, err)
+	}
+
+	var fragment any
+	if err := yaml.Unmarshal(payload, &fragment); err != nil {
+		return nil, fmt.Errorf("decode ref %q: %w", ref, err)
+	}
+
+	resolved, err := resolvePointer(fragment, pointer)
+	if err != nil {
+		return nil, fmt.Errorf("resolve ref %q: %w", ref, err)
+	}
+
+	return resolved, nil
+}
+
+func resolveExternalRefFS(fsys fs.FS, rootPath string, value any) (any, error) {
+	node, ok := value.(map[string]any)
+	if !ok {
+		return value, nil
+	}
+
+	ref, ok := node["$ref"].(string)
+	if !ok || strings.HasPrefix(ref, "#") {
+		return value, nil
+	}
+
+	refPath, pointer := splitRef(ref)
+	fragmentPath := pathpkg.Clean(pathpkg.Join(rootPath, refPath))
+
+	payload, err := fs.ReadFile(fsys, fragmentPath)
 	if err != nil {
 		return nil, fmt.Errorf("read ref %q: %w", ref, err)
 	}

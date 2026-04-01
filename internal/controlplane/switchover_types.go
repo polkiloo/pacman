@@ -13,6 +13,7 @@ type SwitchoverEngine interface {
 	SwitchoverTargetReadiness(string) (SwitchoverTargetReadiness, error)
 	ValidateSwitchover(context.Context, SwitchoverRequest) (SwitchoverValidation, error)
 	CreateSwitchoverIntent(context.Context, SwitchoverRequest) (SwitchoverIntent, error)
+	CancelSwitchover(context.Context) (cluster.Operation, error)
 	ExecuteSwitchover(context.Context, DemotionExecutor, PromotionExecutor) (SwitchoverExecution, error)
 }
 
