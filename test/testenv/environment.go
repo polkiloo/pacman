@@ -326,6 +326,13 @@ func (r *Runner) RequireExec(t *testing.T, cmd ...string) string {
 	return result.Output
 }
 
+// Logs returns the current container log stream collected for the runner.
+func (r *Runner) Logs(t *testing.T) string {
+	t.Helper()
+
+	return readContainerLogs(t, r.ctx, r.container, r.name)
+}
+
 // NetworkAliases returns the Docker network alias map for the runner.
 func (r *Runner) NetworkAliases(t *testing.T) map[string][]string {
 	t.Helper()
@@ -460,6 +467,13 @@ func (p *Postgres) RequireExec(t *testing.T, cmd ...string) string {
 	return result.Output
 }
 
+// Logs returns the current container log stream collected for the PostgreSQL fixture.
+func (p *Postgres) Logs(t *testing.T) string {
+	t.Helper()
+
+	return readContainerLogs(t, p.ctx, p.container, p.name)
+}
+
 // Stop stops the PostgreSQL fixture container.
 func (p *Postgres) Stop(t *testing.T) {
 	t.Helper()
@@ -518,4 +532,21 @@ func requireDockerDaemon(t *testing.T) {
 func sanitizeName(value string) string {
 	replacer := strings.NewReplacer("/", "-", "_", "-", " ", "-", ":", "-")
 	return strings.ToLower(replacer.Replace(value))
+}
+
+func readContainerLogs(t *testing.T, ctx context.Context, container testcontainers.Container, name string) string {
+	t.Helper()
+
+	reader, err := container.Logs(ctx)
+	if err != nil {
+		t.Fatalf("load logs for %q: %v", name, err)
+	}
+	defer reader.Close()
+
+	output, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read logs for %q: %v", name, err)
+	}
+
+	return string(output)
 }

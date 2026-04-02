@@ -8,11 +8,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/polkiloo/pacman/internal/logging"
+	"github.com/polkiloo/pacman/internal/pgext"
 	"github.com/polkiloo/pacman/internal/version"
 )
 
@@ -78,6 +80,92 @@ func TestRunRequiresConfigPath(t *testing.T) {
 
 	if logs.Len() != 0 {
 		t.Fatalf("expected no logs for missing config path, got %q", logs.String())
+	}
+}
+
+func TestRunStartsLocalDaemonFromPostgresExtensionEnvironment(t *testing.T) {
+	apiAddress := reserveLoopbackAddress(t)
+	controlAddress := reserveLoopbackAddress(t)
+	postgresAddress := reserveLoopbackAddress(t)
+	postgresHost, postgresPort := splitHostPort(t, postgresAddress)
+
+	for key, value := range (pgext.Snapshot{
+		NodeName:              "alpha-1",
+		NodeRole:              "data",
+		APIAddress:            apiAddress,
+		ControlAddress:        controlAddress,
+		PostgresDataDir:       "/var/lib/postgresql/data",
+		PostgresListenAddress: postgresHost,
+		PostgresPort:          postgresPort,
+		ClusterName:           "alpha",
+		InitialPrimary:        "alpha-1",
+		SeedAddresses:         "alpha-1:9090",
+		ExpectedMembers:       "alpha-1",
+	}).Environment() {
+		t.Setenv(key, value)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var logs bytes.Buffer
+
+	app := New(Params{
+		Stdout: &stdout,
+		Stderr: &stderr,
+		Logger: logging.New("pacmand", &logs),
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	if err := app.Run(ctx, []string{"-pgext-env"}); err != nil {
+		t.Fatalf("run pacmand from pgext env: %v", err)
+	}
+
+	assertContains(t, logs.String(), `"msg":"loaded node configuration"`)
+	assertContains(t, logs.String(), `"source":"pgext-env"`)
+	assertContains(t, logs.String(), `"node":"alpha-1"`)
+	assertContains(t, logs.String(), `"msg":"started local agent daemon"`)
+	assertContains(t, logs.String(), `"postgres_up":false`)
+}
+
+func TestRunRejectsConfigPathAndPostgresExtensionEnvironmentTogether(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var logs bytes.Buffer
+
+	app := New(Params{
+		Stdout: &stdout,
+		Stderr: &stderr,
+		Logger: logging.New("pacmand", &logs),
+	})
+
+	err := app.Run(context.Background(), []string{"-config", "node.yaml", "-pgext-env"})
+	if !errors.Is(err, errConfigSourceConflict) {
+		t.Fatalf("unexpected error: got %v want %v", err, errConfigSourceConflict)
+	}
+}
+
+func TestRunReturnsPostgresExtensionEnvironmentError(t *testing.T) {
+	t.Setenv(pgext.EnvNodeRole, "witness")
+	t.Setenv(pgext.EnvNodeName, "alpha-witness")
+	t.Setenv(pgext.EnvPostgresDataDir, "/var/lib/postgresql/data")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var logs bytes.Buffer
+
+	app := New(Params{
+		Stdout: &stdout,
+		Stderr: &stderr,
+		Logger: logging.New("pacmand", &logs),
+	})
+
+	err := app.Run(context.Background(), []string{"-pgext-env"})
+	if !errors.Is(err, pgext.ErrPostgresManagedNodeRequired) {
+		t.Fatalf("expected ErrPostgresManagedNodeRequired, got %v", err)
 	}
 }
 
@@ -250,4 +338,20 @@ func reserveLoopbackAddress(t *testing.T) string {
 	}
 
 	return address
+}
+
+func splitHostPort(t *testing.T, address string) (string, int) {
+	t.Helper()
+
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		t.Fatalf("split host port: %v", err)
+	}
+
+	value, err := strconv.Atoi(port)
+	if err != nil {
+		t.Fatalf("parse port: %v", err)
+	}
+
+	return host, value
 }

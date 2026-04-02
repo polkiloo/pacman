@@ -1560,7 +1560,6 @@ func TestGetClusterSpecWithMemberTags(t *testing.T) {
 		hasSpec:     true,
 	}, discardLogger(), Config{}), "/api/v1/cluster/spec")
 	defer response.Body.Close()
-	defer response.Body.Close()
 
 	var body clusterSpecResponse
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {

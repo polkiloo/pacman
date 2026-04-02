@@ -72,17 +72,17 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ## 5. PostgreSQL Background Worker Extension
 
-- [ ] define extension boundary between `pacmand` process mode and in-PostgreSQL background-worker mode
-- [ ] extract reusable local-agent core from `pacmand` so the extension stays a thin bootstrap layer
-- [ ] define extension name, on-disk layout, and PostgreSQL version support policy
-- [ ] scaffold PostgreSQL extension sources, `.control` file, and SQL install/upgrade scripts
-- [ ] implement background worker registration via `shared_preload_libraries`
-- [ ] define GUC-based configuration bridge from PostgreSQL settings to PACMAN node-runtime config
-- [ ] wire extension startup, shutdown, and restart handling to the shared PACMAN local-agent lifecycle
-- [ ] add dedicated build target for the PostgreSQL extension artifact separate from `pacmand`
-- [ ] add packaging/install flow for extension binaries, control files, and SQL assets
-- [ ] add `testcontainers-go` fixture/image variant with the extension installed and preloaded
-- [ ] add Docker-backed integration tests for extension startup, shutdown, invalid config, and local state observation
+- [x] define extension boundary between `pacmand` process mode and in-PostgreSQL background-worker mode
+- [x] extract reusable local-agent core from `pacmand` so the extension stays a thin bootstrap layer
+- [x] define extension name, on-disk layout, and PostgreSQL version support policy
+- [x] scaffold PostgreSQL extension sources, `.control` file, and SQL install/upgrade scripts
+- [x] implement background worker registration via `shared_preload_libraries`
+- [x] define GUC-based configuration bridge from PostgreSQL settings to PACMAN node-runtime config
+- [x] wire extension startup, shutdown, and restart handling to the shared PACMAN local-agent lifecycle
+- [x] add dedicated build target for the PostgreSQL extension artifact separate from `pacmand`
+- [x] add packaging/install flow for extension binaries, control files, and SQL assets
+- [x] add `testcontainers-go` fixture/image variant with the extension installed and preloaded
+- [x] add Docker-backed integration tests for extension startup, shutdown, invalid config, and local state observation
 
 ---
 

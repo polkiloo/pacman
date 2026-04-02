@@ -163,6 +163,13 @@ func (s *Service) RequireExec(t *testing.T, cmd ...string) string {
 	return result.Output
 }
 
+// Logs returns the current container log stream collected for the service.
+func (s *Service) Logs(t *testing.T) string {
+	t.Helper()
+
+	return readContainerLogs(t, s.ctx, s.container, s.name)
+}
+
 func (s *Service) mappedPort(t *testing.T, port string) nat.Port {
 	t.Helper()
 
