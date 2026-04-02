@@ -7,15 +7,20 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 
 	"go.uber.org/dig"
 
-	"github.com/polkiloo/pacman/internal/agent"
+	"github.com/polkiloo/pacman/internal/app/localagent"
 	"github.com/polkiloo/pacman/internal/config"
+	"github.com/polkiloo/pacman/internal/pgext"
 	"github.com/polkiloo/pacman/internal/version"
 )
 
-var errConfigPathRequired = errors.New("pacmand config path is required")
+var (
+	errConfigPathRequired   = errors.New("pacmand config path is required")
+	errConfigSourceConflict = errors.New("pacmand config path and postgres extension environment are mutually exclusive")
+)
 
 // App is the pacmand process entrypoint.
 type App struct {
@@ -49,6 +54,7 @@ func (a *App) Run(ctx context.Context, args []string) error {
 
 	showVersion := fs.Bool("version", false, "print version and exit")
 	configPath := fs.String("config", "", "path to pacmand node configuration file")
+	loadPGExtEnv := fs.Bool("pgext-env", false, "load PACMAN node configuration from PostgreSQL extension environment")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -63,34 +69,54 @@ func (a *App) Run(ctx context.Context, args []string) error {
 		return err
 	}
 
-	if *configPath == "" {
-		return errConfigPathRequired
+	if *loadPGExtEnv && *configPath != "" {
+		return errConfigSourceConflict
 	}
 
-	loadedConfig, err := config.Load(*configPath)
+	var (
+		loadedConfig config.Config
+		configSource string
+		err          error
+	)
+
+	switch {
+	case *loadPGExtEnv:
+		configSource = "pgext-env"
+		loadedConfig, err = loadFromPGExtEnv()
+	case *configPath == "":
+		return errConfigPathRequired
+	default:
+		configSource = "file"
+		loadedConfig, err = config.Load(*configPath)
+	}
 	if err != nil {
 		return err
 	}
 
-	a.logger.InfoContext(
-		ctx,
-		"loaded node configuration",
+	a.logLoadedConfig(ctx, loadedConfig, configSource, *configPath)
+
+	return localagent.Run(ctx, a.logger, loadedConfig)
+}
+
+func loadFromPGExtEnv() (config.Config, error) {
+	snapshot, err := pgext.LoadSnapshotFromEnv(os.LookupEnv)
+	if err != nil {
+		return config.Config{}, err
+	}
+
+	return snapshot.RuntimeConfig()
+}
+
+func (a *App) logLoadedConfig(ctx context.Context, loadedConfig config.Config, source, path string) {
+	attributes := []slog.Attr{
 		slog.String("component", "config"),
-		slog.String("path", *configPath),
+		slog.String("source", source),
 		slog.String("node", loadedConfig.Node.Name),
 		slog.String("role", loadedConfig.Node.Role.String()),
-	)
-
-	daemon, err := agent.NewDaemon(loadedConfig, a.logger)
-	if err != nil {
-		return fmt.Errorf("construct local agent daemon: %w", err)
+	}
+	if path != "" {
+		attributes = append(attributes, slog.String("path", path))
 	}
 
-	if err := daemon.Start(ctx); err != nil {
-		return fmt.Errorf("start local agent daemon: %w", err)
-	}
-
-	daemon.Wait()
-
-	return nil
+	a.logger.LogAttrs(ctx, slog.LevelInfo, "loaded node configuration", attributes...)
 }
