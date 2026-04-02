@@ -1,0 +1,5 @@
+comment = 'PACMAN PostgreSQL background worker'
+default_version = '0.1.0'
+module_pathname = '$libdir/pacman_agent'
+relocatable = true
+superuser = true
