@@ -38,6 +38,10 @@ type membersResponse struct {
 	Items []memberStatusJSON `json:"items"`
 }
 
+type historyResponse struct {
+	Items []historyEntryJSON `json:"items"`
+}
+
 type maintenanceModeUpdateRequestJSON struct {
 	Enabled     bool   `json:"enabled"`
 	Reason      string `json:"reason,omitempty"`
@@ -45,14 +49,33 @@ type maintenanceModeUpdateRequestJSON struct {
 }
 
 type memberStatusJSON struct {
-	Name       string    `json:"name"`
-	Role       string    `json:"role"`
-	State      string    `json:"state"`
-	Healthy    bool      `json:"healthy"`
-	Leader     bool      `json:"leader,omitempty"`
-	Timeline   int64     `json:"timeline,omitempty"`
-	LagBytes   int64     `json:"lagBytes,omitempty"`
-	LastSeenAt time.Time `json:"lastSeenAt"`
+	Name        string         `json:"name"`
+	APIURL      string         `json:"apiUrl,omitempty"`
+	Host        string         `json:"host,omitempty"`
+	Port        int            `json:"port,omitempty"`
+	Role        string         `json:"role"`
+	State       string         `json:"state"`
+	Healthy     bool           `json:"healthy"`
+	Leader      bool           `json:"leader,omitempty"`
+	Timeline    int64          `json:"timeline,omitempty"`
+	LagBytes    int64          `json:"lagBytes,omitempty"`
+	Priority    int            `json:"priority,omitempty"`
+	NoFailover  bool           `json:"noFailover,omitempty"`
+	NeedsRejoin bool           `json:"needsRejoin,omitempty"`
+	Tags        map[string]any `json:"tags,omitempty"`
+	LastSeenAt  time.Time      `json:"lastSeenAt"`
+}
+
+type historyEntryJSON struct {
+	OperationID string    `json:"operationId"`
+	Kind        string    `json:"kind"`
+	Timeline    int64     `json:"timeline,omitempty"`
+	WALLSN      string    `json:"walLsn,omitempty"`
+	FromMember  string    `json:"fromMember,omitempty"`
+	ToMember    string    `json:"toMember,omitempty"`
+	Reason      string    `json:"reason,omitempty"`
+	Result      string    `json:"result"`
+	FinishedAt  time.Time `json:"finishedAt"`
 }
 
 type maintenanceModeStatusJSON struct {
@@ -82,6 +105,121 @@ type scheduledSwitchoverJSON struct {
 	At   time.Time `json:"at"`
 	From string    `json:"from"`
 	To   string    `json:"to,omitempty"`
+}
+
+type clusterSpecResponse struct {
+	ClusterName string                 `json:"clusterName"`
+	Generation  int64                  `json:"generation"`
+	Maintenance maintenanceDesiredJSON `json:"maintenance"`
+	Failover    failoverPolicyJSON     `json:"failover"`
+	Switchover  switchoverPolicyJSON   `json:"switchover"`
+	Postgres    postgresPolicyJSON     `json:"postgres"`
+	Members     []memberSpecJSON       `json:"members,omitempty"`
+}
+
+type maintenanceDesiredJSON struct {
+	Enabled       bool   `json:"enabled,omitempty"`
+	DefaultReason string `json:"defaultReason,omitempty"`
+}
+
+type failoverPolicyJSON struct {
+	Mode            string `json:"mode,omitempty"`
+	MaximumLagBytes int64  `json:"maximumLagBytes,omitempty"`
+	CheckTimeline   bool   `json:"checkTimeline,omitempty"`
+	RequireQuorum   bool   `json:"requireQuorum,omitempty"`
+	FencingRequired bool   `json:"fencingRequired,omitempty"`
+}
+
+type switchoverPolicyJSON struct {
+	AllowScheduled                            bool `json:"allowScheduled,omitempty"`
+	RequireSpecificCandidateDuringMaintenance bool `json:"requireSpecificCandidateDuringMaintenance,omitempty"`
+}
+
+type postgresPolicyJSON struct {
+	SynchronousMode string         `json:"synchronousMode,omitempty"`
+	UsePgRewind     bool           `json:"usePgRewind,omitempty"`
+	Parameters      map[string]any `json:"parameters,omitempty"`
+}
+
+type memberSpecJSON struct {
+	Name       string         `json:"name"`
+	Priority   int            `json:"priority,omitempty"`
+	NoFailover bool           `json:"noFailover,omitempty"`
+	Tags       map[string]any `json:"tags,omitempty"`
+}
+
+type nodeStatusResponse struct {
+	NodeName       string                      `json:"nodeName"`
+	MemberName     string                      `json:"memberName,omitempty"`
+	Role           string                      `json:"role"`
+	State          string                      `json:"state"`
+	PendingRestart bool                        `json:"pendingRestart,omitempty"`
+	NeedsRejoin    bool                        `json:"needsRejoin,omitempty"`
+	Tags           map[string]any              `json:"tags,omitempty"`
+	Postgres       postgresLocalStatusJSON     `json:"postgres"`
+	ControlPlane   controlPlaneLocalStatusJSON `json:"controlPlane"`
+	ObservedAt     time.Time                   `json:"observedAt"`
+}
+
+type postgresLocalStatusJSON struct {
+	Managed       bool                `json:"managed"`
+	Address       string              `json:"address,omitempty"`
+	CheckedAt     time.Time           `json:"checkedAt"`
+	Up            bool                `json:"up"`
+	Role          string              `json:"role"`
+	RecoveryKnown bool                `json:"recoveryKnown"`
+	InRecovery    bool                `json:"inRecovery"`
+	Details       postgresDetailsJSON `json:"details"`
+	WAL           walProgressJSON     `json:"wal"`
+	Errors        postgresErrorsJSON  `json:"errors"`
+}
+
+type postgresDetailsJSON struct {
+	ServerVersion       int        `json:"serverVersion,omitempty"`
+	PendingRestart      bool       `json:"pendingRestart,omitempty"`
+	SystemIdentifier    string     `json:"systemIdentifier,omitempty"`
+	Timeline            int64      `json:"timeline,omitempty"`
+	PostmasterStartAt   *time.Time `json:"postmasterStartAt,omitempty"`
+	ReplicationLagBytes int64      `json:"replicationLagBytes,omitempty"`
+}
+
+type walProgressJSON struct {
+	WriteLSN        string     `json:"writeLsn,omitempty"`
+	FlushLSN        string     `json:"flushLsn,omitempty"`
+	ReceiveLSN      string     `json:"receiveLsn,omitempty"`
+	ReplayLSN       string     `json:"replayLsn,omitempty"`
+	ReplayTimestamp *time.Time `json:"replayTimestamp,omitempty"`
+}
+
+type controlPlaneLocalStatusJSON struct {
+	ClusterReachable bool       `json:"clusterReachable"`
+	Leader           bool       `json:"leader,omitempty"`
+	LastHeartbeatAt  *time.Time `json:"lastHeartbeatAt,omitempty"`
+	LastDCSSeenAt    *time.Time `json:"lastDcsSeenAt,omitempty"`
+	PublishError     string     `json:"publishError,omitempty"`
+}
+
+type postgresErrorsJSON struct {
+	Availability string `json:"availability,omitempty"`
+	State        string `json:"state,omitempty"`
+}
+
+type diagnosticsSummaryJSON struct {
+	ClusterName        string                        `json:"clusterName"`
+	GeneratedAt        time.Time                     `json:"generatedAt"`
+	ControlPlaneLeader string                        `json:"controlPlaneLeader,omitempty"`
+	QuorumReachable    *bool                         `json:"quorumReachable,omitempty"`
+	Warnings           []string                      `json:"warnings,omitempty"`
+	Members            []memberDiagnosticSummaryJSON `json:"members"`
+}
+
+type memberDiagnosticSummaryJSON struct {
+	Name        string     `json:"name"`
+	Role        string     `json:"role"`
+	State       string     `json:"state"`
+	LagBytes    int64      `json:"lagBytes,omitempty"`
+	LastSeenAt  *time.Time `json:"lastSeenAt,omitempty"`
+	NeedsRejoin bool       `json:"needsRejoin,omitempty"`
 }
 
 type switchoverRequestJSON struct {
@@ -144,6 +282,47 @@ func (client *apiClient) members(ctx context.Context) (membersResponse, error) {
 	return response, nil
 }
 
+func (client *apiClient) history(ctx context.Context) (historyResponse, error) {
+	var response historyResponse
+	if err := client.getJSON(ctx, "/api/v1/history", &response); err != nil {
+		return historyResponse{}, err
+	}
+
+	return response, nil
+}
+
+func (client *apiClient) clusterSpec(ctx context.Context) (clusterSpecResponse, error) {
+	var response clusterSpecResponse
+	if err := client.getJSON(ctx, "/api/v1/cluster/spec", &response); err != nil {
+		return clusterSpecResponse{}, err
+	}
+
+	return response, nil
+}
+
+func (client *apiClient) nodeStatus(ctx context.Context, nodeName string) (nodeStatusResponse, error) {
+	var response nodeStatusResponse
+	if err := client.getJSON(ctx, fmt.Sprintf("/api/v1/nodes/%s", url.PathEscape(strings.TrimSpace(nodeName))), &response); err != nil {
+		return nodeStatusResponse{}, err
+	}
+
+	return response, nil
+}
+
+func (client *apiClient) diagnostics(ctx context.Context, includeMembers bool) (diagnosticsSummaryJSON, error) {
+	var response diagnosticsSummaryJSON
+	path := "/api/v1/diagnostics"
+	if !includeMembers {
+		path += "?includeMembers=false"
+	}
+
+	if err := client.getJSON(ctx, path, &response); err != nil {
+		return diagnosticsSummaryJSON{}, err
+	}
+
+	return response, nil
+}
+
 func (client *apiClient) updateMaintenance(ctx context.Context, request maintenanceModeUpdateRequestJSON) (maintenanceModeStatusJSON, error) {
 	var response maintenanceModeStatusJSON
 	if err := client.doJSON(ctx, http.MethodPut, "/api/v1/maintenance", request, &response); err != nil {
@@ -185,7 +364,12 @@ func (client *apiClient) doJSON(ctx context.Context, method, path string, body a
 		requestBody = bytes.NewReader(payload)
 	}
 
-	requestURL := client.baseURL.ResolveReference(&url.URL{Path: path})
+	relativeURL, err := url.Parse(path)
+	if err != nil {
+		return fmt.Errorf("parse request path %q: %w", path, err)
+	}
+
+	requestURL := client.baseURL.ResolveReference(relativeURL)
 	request, err := http.NewRequestWithContext(ctx, method, requestURL.String(), requestBody)
 	if err != nil {
 		return fmt.Errorf("build request %s %s: %w", method, path, err)

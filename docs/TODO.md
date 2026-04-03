@@ -276,10 +276,10 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] implement `cluster failover`
 - [x] implement `cluster maintenance enable`
 - [x] implement `cluster maintenance disable`
-- [ ] implement `history list`
-- [ ] implement `cluster spec show`
-- [ ] implement `node status`
-- [ ] implement diagnostics commands
+- [x] implement `history list`
+- [x] implement `cluster spec show`
+- [x] implement `node status`
+- [x] implement diagnostics commands
 - [ ] add `patronictl`-compatible command aliases, flags, and output modes for automation scripts
 
 ---

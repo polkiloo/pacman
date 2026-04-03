@@ -17,7 +17,7 @@ func TestRunReturnsSuccessForHelp(t *testing.T) {
 		t.Fatalf("expected exit code 0, got %d", exitCode)
 	}
 
-	if got, want := stdout, "pacmanctl commands: cluster status, cluster switchover, cluster failover, cluster maintenance enable, cluster maintenance disable, members list\n"; got != want {
+	if got, want := stdout, "pacmanctl commands: cluster status, cluster spec show, cluster switchover, cluster failover, cluster maintenance enable, cluster maintenance disable, members list, history list, node status, diagnostics show\n"; got != want {
 		t.Fatalf("unexpected stdout output: got %q, want %q", got, want)
 	}
 
@@ -111,6 +111,54 @@ func TestRunReturnsSuccessForMaintenanceEnable(t *testing.T) {
 
 	if !strings.Contains(stdout, "Enabled:") || !strings.Contains(stdout, "true") {
 		t.Fatalf("expected maintenance text output, got %q", stdout)
+	}
+
+	if stderr != "" {
+		t.Fatalf("expected no stderr output, got %q", stderr)
+	}
+}
+
+func TestRunReturnsSuccessForNodeStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/v1/nodes/alpha-1" {
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(map[string]any{
+			"nodeName":   "alpha-1",
+			"memberName": "alpha-1",
+			"role":       "primary",
+			"state":      "running",
+			"postgres": map[string]any{
+				"managed":       true,
+				"checkedAt":     "2026-04-04T10:00:00Z",
+				"up":            true,
+				"role":          "primary",
+				"recoveryKnown": true,
+				"inRecovery":    false,
+				"details":       map[string]any{},
+				"wal":           map[string]any{},
+				"errors":        map[string]any{},
+			},
+			"controlPlane": map[string]any{
+				"clusterReachable": true,
+			},
+			"observedAt": "2026-04-04T10:00:00Z",
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	exitCode, stdout, stderr := runWithCapturedIO(t, []string{"-api-url", server.URL, "node", "status", "alpha-1"})
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d stderr=%q", exitCode, stderr)
+	}
+
+	if !strings.Contains(stdout, "Node Name:") || !strings.Contains(stdout, "alpha-1") {
+		t.Fatalf("expected node status output, got %q", stdout)
 	}
 
 	if stderr != "" {

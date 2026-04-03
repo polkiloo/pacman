@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -29,6 +30,7 @@ const (
 var (
 	errAPIURLRequired          = errors.New("pacmanctl api-url is required")
 	errCandidateRequired       = errors.New("switchover candidate is required: use -candidate")
+	errNodeNameRequired        = errors.New("node name is required: use `node status NODE_NAME` or -node")
 	errUnsupportedOutputFormat = errors.New("unsupported output format")
 )
 
@@ -94,13 +96,19 @@ func (a *App) Run(ctx context.Context, args []string) error {
 		return a.runCluster(ctx, client, remaining[1:])
 	case "members":
 		return a.runMembers(ctx, client, remaining[1:])
+	case "history":
+		return a.runHistory(ctx, client, remaining[1:])
+	case "node":
+		return a.runNode(ctx, client, remaining[1:])
+	case "diagnostics":
+		return a.runDiagnostics(ctx, client, remaining[1:])
 	default:
 		return fmt.Errorf("unsupported pacmanctl command: %s", strings.Join(remaining, " "))
 	}
 }
 
 func (a *App) printCommandHelp() error {
-	_, err := fmt.Fprintln(a.stdout, "pacmanctl commands: cluster status, cluster switchover, cluster failover, cluster maintenance enable, cluster maintenance disable, members list")
+	_, err := fmt.Fprintln(a.stdout, "pacmanctl commands: cluster status, cluster spec show, cluster switchover, cluster failover, cluster maintenance enable, cluster maintenance disable, members list, history list, node status, diagnostics show")
 	return err
 }
 
@@ -122,6 +130,8 @@ func (a *App) runCluster(ctx context.Context, client *apiClient, args []string) 
 		}
 
 		return renderOutput(a.stdout, format, status, renderClusterStatusText)
+	case "spec":
+		return a.runClusterSpec(ctx, client, args[1:])
 	case "switchover":
 		options, err := parseSwitchoverCommandOptions(args[1:], a.stderr)
 		if err != nil {
@@ -161,6 +171,29 @@ func (a *App) runCluster(ctx context.Context, client *apiClient, args []string) 
 	}
 }
 
+func (a *App) runClusterSpec(ctx context.Context, client *apiClient, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("unsupported pacmanctl command: cluster spec")
+	}
+
+	switch args[0] {
+	case "show":
+		format, err := parseOutputFormat("cluster spec show", args[1:], a.stderr)
+		if err != nil {
+			return err
+		}
+
+		spec, err := client.clusterSpec(ctx)
+		if err != nil {
+			return err
+		}
+
+		return renderOutput(a.stdout, format, spec, renderClusterSpecText)
+	default:
+		return fmt.Errorf("unsupported pacmanctl command: cluster spec %s", strings.Join(args, " "))
+	}
+}
+
 func (a *App) runMembers(ctx context.Context, client *apiClient, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("unsupported pacmanctl command: members")
@@ -181,6 +214,75 @@ func (a *App) runMembers(ctx context.Context, client *apiClient, args []string) 
 		return renderOutput(a.stdout, format, members, renderMembersText)
 	default:
 		return fmt.Errorf("unsupported pacmanctl command: members %s", strings.Join(args, " "))
+	}
+}
+
+func (a *App) runHistory(ctx context.Context, client *apiClient, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("unsupported pacmanctl command: history")
+	}
+
+	switch args[0] {
+	case "list":
+		format, err := parseOutputFormat("history list", args[1:], a.stderr)
+		if err != nil {
+			return err
+		}
+
+		history, err := client.history(ctx)
+		if err != nil {
+			return err
+		}
+
+		return renderOutput(a.stdout, format, history, renderHistoryText)
+	default:
+		return fmt.Errorf("unsupported pacmanctl command: history %s", strings.Join(args, " "))
+	}
+}
+
+func (a *App) runNode(ctx context.Context, client *apiClient, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("unsupported pacmanctl command: node")
+	}
+
+	switch args[0] {
+	case "status":
+		options, err := parseNodeStatusOptions(args[1:], a.stderr)
+		if err != nil {
+			return err
+		}
+
+		status, err := client.nodeStatus(ctx, options.nodeName)
+		if err != nil {
+			return err
+		}
+
+		return renderOutput(a.stdout, options.format, status, renderNodeStatusText)
+	default:
+		return fmt.Errorf("unsupported pacmanctl command: node %s", strings.Join(args, " "))
+	}
+}
+
+func (a *App) runDiagnostics(ctx context.Context, client *apiClient, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("unsupported pacmanctl command: diagnostics")
+	}
+
+	switch args[0] {
+	case "show":
+		options, err := parseDiagnosticsOptions(args[1:], a.stderr)
+		if err != nil {
+			return err
+		}
+
+		summary, err := client.diagnostics(ctx, options.includeMembers)
+		if err != nil {
+			return err
+		}
+
+		return renderOutput(a.stdout, options.format, summary, renderDiagnosticsText)
+	default:
+		return fmt.Errorf("unsupported pacmanctl command: diagnostics %s", strings.Join(args, " "))
 	}
 }
 
@@ -272,6 +374,16 @@ type maintenanceCommandOptions struct {
 	format      string
 	reason      string
 	requestedBy string
+}
+
+type nodeStatusOptions struct {
+	format   string
+	nodeName string
+}
+
+type diagnosticsOptions struct {
+	format         string
+	includeMembers bool
 }
 
 func parseSwitchoverCommandOptions(args []string, stderr io.Writer) (switchoverCommandOptions, error) {
@@ -388,6 +500,72 @@ func parseMaintenanceCommandOptions(command string, args []string, stderr io.Wri
 	}, nil
 }
 
+func parseNodeStatusOptions(args []string, stderr io.Writer) (nodeStatusOptions, error) {
+	fs := flag.NewFlagSet("node status", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	var nodeName string
+	format := defaultOutputFormat
+
+	fs.StringVar(&nodeName, "node", "", "PACMAN node name")
+	addOutputFormatFlags(fs, &format)
+
+	if err := fs.Parse(args); err != nil {
+		return nodeStatusOptions{}, err
+	}
+
+	trimmedName := strings.TrimSpace(nodeName)
+	remaining := fs.Args()
+	switch {
+	case trimmedName != "" && len(remaining) > 0:
+		return nodeStatusOptions{}, fmt.Errorf("unexpected arguments for node status: %s", strings.Join(remaining, " "))
+	case trimmedName == "" && len(remaining) == 1:
+		trimmedName = strings.TrimSpace(remaining[0])
+	case trimmedName == "" && len(remaining) == 0:
+		return nodeStatusOptions{}, errNodeNameRequired
+	case trimmedName == "" && len(remaining) > 1:
+		return nodeStatusOptions{}, fmt.Errorf("unexpected arguments for node status: %s", strings.Join(remaining, " "))
+	}
+
+	normalizedFormat, err := validateOutputFormat(format)
+	if err != nil {
+		return nodeStatusOptions{}, err
+	}
+
+	return nodeStatusOptions{
+		format:   normalizedFormat,
+		nodeName: trimmedName,
+	}, nil
+}
+
+func parseDiagnosticsOptions(args []string, stderr io.Writer) (diagnosticsOptions, error) {
+	fs := flag.NewFlagSet("diagnostics show", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	includeMembers := true
+	format := defaultOutputFormat
+
+	fs.BoolVar(&includeMembers, "include-members", true, "include per-member diagnostics")
+	addOutputFormatFlags(fs, &format)
+
+	if err := fs.Parse(args); err != nil {
+		return diagnosticsOptions{}, err
+	}
+	if len(fs.Args()) > 0 {
+		return diagnosticsOptions{}, fmt.Errorf("unexpected arguments for diagnostics show: %s", strings.Join(fs.Args(), " "))
+	}
+
+	normalizedFormat, err := validateOutputFormat(format)
+	if err != nil {
+		return diagnosticsOptions{}, err
+	}
+
+	return diagnosticsOptions{
+		format:         normalizedFormat,
+		includeMembers: includeMembers,
+	}, nil
+}
+
 func addOutputFormatFlags(fs *flag.FlagSet, format *string) {
 	fs.StringVar(format, "format", defaultOutputFormat, "output format: text|json")
 	fs.StringVar(format, "o", defaultOutputFormat, "output format: text|json")
@@ -492,6 +670,210 @@ func renderMaintenanceStatusText(writer io.Writer, status maintenanceModeStatusJ
 	return tab.Flush()
 }
 
+func renderHistoryText(writer io.Writer, response historyResponse) error {
+	if len(response.Items) == 0 {
+		_, err := fmt.Fprintln(writer, "No history.")
+		return err
+	}
+
+	tab := tabwriter.NewWriter(writer, 0, 0, 2, ' ', 0)
+	if _, err := fmt.Fprintln(tab, "OPERATION ID\tKIND\tRESULT\tTIMELINE\tWAL LSN\tFROM\tTO\tFINISHED AT\tREASON"); err != nil {
+		return err
+	}
+
+	for _, item := range response.Items {
+		if _, err := fmt.Fprintf(
+			tab,
+			"%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			orDash(item.OperationID),
+			orDash(item.Kind),
+			orDash(item.Result),
+			formatOptionalInt64(item.Timeline),
+			orDash(item.WALLSN),
+			orDash(item.FromMember),
+			orDash(item.ToMember),
+			formatTime(item.FinishedAt),
+			orDash(item.Reason),
+		); err != nil {
+			return err
+		}
+	}
+
+	return tab.Flush()
+}
+
+func renderClusterSpecText(writer io.Writer, spec clusterSpecResponse) error {
+	tab := tabwriter.NewWriter(writer, 0, 0, 2, ' ', 0)
+
+	fmt.Fprintf(tab, "Cluster Name:\t%s\n", orDash(spec.ClusterName))
+	fmt.Fprintf(tab, "Generation:\t%d\n", spec.Generation)
+	fmt.Fprintf(tab, "Maintenance Enabled:\t%t\n", spec.Maintenance.Enabled)
+	fmt.Fprintf(tab, "Maintenance Default Reason:\t%s\n", orDash(spec.Maintenance.DefaultReason))
+	fmt.Fprintf(tab, "Failover Mode:\t%s\n", orDash(spec.Failover.Mode))
+	fmt.Fprintf(tab, "Maximum Lag Bytes:\t%s\n", formatOptionalInt64(spec.Failover.MaximumLagBytes))
+	fmt.Fprintf(tab, "Check Timeline:\t%t\n", spec.Failover.CheckTimeline)
+	fmt.Fprintf(tab, "Require Quorum:\t%t\n", spec.Failover.RequireQuorum)
+	fmt.Fprintf(tab, "Fencing Required:\t%t\n", spec.Failover.FencingRequired)
+	fmt.Fprintf(tab, "Allow Scheduled:\t%t\n", spec.Switchover.AllowScheduled)
+	fmt.Fprintf(tab, "Require Specific Candidate During Maintenance:\t%t\n", spec.Switchover.RequireSpecificCandidateDuringMaintenance)
+	fmt.Fprintf(tab, "Synchronous Mode:\t%s\n", orDash(spec.Postgres.SynchronousMode))
+	fmt.Fprintf(tab, "Use pgRewind:\t%t\n", spec.Postgres.UsePgRewind)
+	fmt.Fprintf(tab, "PostgreSQL Parameters:\t%d\n", len(spec.Postgres.Parameters))
+	fmt.Fprintf(tab, "Members:\t%d\n", len(spec.Members))
+
+	if err := tab.Flush(); err != nil {
+		return err
+	}
+
+	if len(spec.Postgres.Parameters) > 0 {
+		if _, err := fmt.Fprintln(writer); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(writer, "PostgreSQL Parameters:"); err != nil {
+			return err
+		}
+
+		paramTab := tabwriter.NewWriter(writer, 0, 0, 2, ' ', 0)
+		if _, err := fmt.Fprintln(paramTab, "NAME\tVALUE"); err != nil {
+			return err
+		}
+		names := sortedMapKeys(spec.Postgres.Parameters)
+		for _, name := range names {
+			value := spec.Postgres.Parameters[name]
+			if _, err := fmt.Fprintf(paramTab, "%s\t%s\n", name, formatAny(value)); err != nil {
+				return err
+			}
+		}
+		if err := paramTab.Flush(); err != nil {
+			return err
+		}
+	}
+
+	if len(spec.Members) == 0 {
+		return nil
+	}
+
+	if _, err := fmt.Fprintln(writer); err != nil {
+		return err
+	}
+
+	memberTab := tabwriter.NewWriter(writer, 0, 0, 2, ' ', 0)
+	if _, err := fmt.Fprintln(memberTab, "NAME\tPRIORITY\tNO FAILOVER\tTAGS"); err != nil {
+		return err
+	}
+	for _, member := range spec.Members {
+		if _, err := fmt.Fprintf(
+			memberTab,
+			"%s\t%s\t%t\t%s\n",
+			orDash(member.Name),
+			formatOptionalInt(member.Priority),
+			member.NoFailover,
+			formatMap(member.Tags),
+		); err != nil {
+			return err
+		}
+	}
+
+	return memberTab.Flush()
+}
+
+func renderNodeStatusText(writer io.Writer, status nodeStatusResponse) error {
+	tab := tabwriter.NewWriter(writer, 0, 0, 2, ' ', 0)
+
+	fmt.Fprintf(tab, "Node Name:\t%s\n", orDash(status.NodeName))
+	fmt.Fprintf(tab, "Member Name:\t%s\n", orDash(status.MemberName))
+	fmt.Fprintf(tab, "Role:\t%s\n", orDash(status.Role))
+	fmt.Fprintf(tab, "State:\t%s\n", orDash(status.State))
+	fmt.Fprintf(tab, "Pending Restart:\t%t\n", status.PendingRestart)
+	fmt.Fprintf(tab, "Needs Rejoin:\t%t\n", status.NeedsRejoin)
+	fmt.Fprintf(tab, "Tags:\t%s\n", formatMap(status.Tags))
+	fmt.Fprintf(tab, "Observed At:\t%s\n", formatTime(status.ObservedAt))
+	fmt.Fprintf(tab, "Postgres Managed:\t%t\n", status.Postgres.Managed)
+	fmt.Fprintf(tab, "Postgres Address:\t%s\n", orDash(status.Postgres.Address))
+	fmt.Fprintf(tab, "Postgres Checked At:\t%s\n", formatTime(status.Postgres.CheckedAt))
+	fmt.Fprintf(tab, "Postgres Up:\t%t\n", status.Postgres.Up)
+	fmt.Fprintf(tab, "Postgres Role:\t%s\n", orDash(status.Postgres.Role))
+	fmt.Fprintf(tab, "Postgres Recovery Known:\t%t\n", status.Postgres.RecoveryKnown)
+	fmt.Fprintf(tab, "Postgres In Recovery:\t%t\n", status.Postgres.InRecovery)
+	fmt.Fprintf(tab, "Server Version:\t%s\n", formatOptionalInt(status.Postgres.Details.ServerVersion))
+	fmt.Fprintf(tab, "System Identifier:\t%s\n", orDash(status.Postgres.Details.SystemIdentifier))
+	fmt.Fprintf(tab, "Timeline:\t%s\n", formatOptionalInt64(status.Postgres.Details.Timeline))
+	fmt.Fprintf(tab, "Postmaster Start:\t%s\n", formatOptionalTime(status.Postgres.Details.PostmasterStartAt))
+	fmt.Fprintf(tab, "Replication Lag Bytes:\t%s\n", formatOptionalInt64(status.Postgres.Details.ReplicationLagBytes))
+	fmt.Fprintf(tab, "Write LSN:\t%s\n", orDash(status.Postgres.WAL.WriteLSN))
+	fmt.Fprintf(tab, "Flush LSN:\t%s\n", orDash(status.Postgres.WAL.FlushLSN))
+	fmt.Fprintf(tab, "Receive LSN:\t%s\n", orDash(status.Postgres.WAL.ReceiveLSN))
+	fmt.Fprintf(tab, "Replay LSN:\t%s\n", orDash(status.Postgres.WAL.ReplayLSN))
+	fmt.Fprintf(tab, "Replay Timestamp:\t%s\n", formatOptionalTime(status.Postgres.WAL.ReplayTimestamp))
+	fmt.Fprintf(tab, "Availability Error:\t%s\n", orDash(status.Postgres.Errors.Availability))
+	fmt.Fprintf(tab, "State Error:\t%s\n", orDash(status.Postgres.Errors.State))
+	fmt.Fprintf(tab, "Cluster Reachable:\t%t\n", status.ControlPlane.ClusterReachable)
+	fmt.Fprintf(tab, "Control-Plane Leader:\t%t\n", status.ControlPlane.Leader)
+	fmt.Fprintf(tab, "Last Heartbeat At:\t%s\n", formatOptionalTime(status.ControlPlane.LastHeartbeatAt))
+	fmt.Fprintf(tab, "Last DCS Seen At:\t%s\n", formatOptionalTime(status.ControlPlane.LastDCSSeenAt))
+	fmt.Fprintf(tab, "Publish Error:\t%s\n", orDash(status.ControlPlane.PublishError))
+
+	return tab.Flush()
+}
+
+func renderDiagnosticsText(writer io.Writer, summary diagnosticsSummaryJSON) error {
+	tab := tabwriter.NewWriter(writer, 0, 0, 2, ' ', 0)
+
+	fmt.Fprintf(tab, "Cluster Name:\t%s\n", orDash(summary.ClusterName))
+	fmt.Fprintf(tab, "Generated At:\t%s\n", formatTime(summary.GeneratedAt))
+	fmt.Fprintf(tab, "Control-Plane Leader:\t%s\n", orDash(summary.ControlPlaneLeader))
+	fmt.Fprintf(tab, "Quorum Reachable:\t%s\n", formatOptionalBool(summary.QuorumReachable))
+	fmt.Fprintf(tab, "Warnings:\t%d\n", len(summary.Warnings))
+	fmt.Fprintf(tab, "Members:\t%d\n", len(summary.Members))
+
+	if err := tab.Flush(); err != nil {
+		return err
+	}
+
+	if len(summary.Warnings) > 0 {
+		if _, err := fmt.Fprintln(writer); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(writer, "Warnings:"); err != nil {
+			return err
+		}
+		for _, warning := range summary.Warnings {
+			if _, err := fmt.Fprintf(writer, "- %s\n", warning); err != nil {
+				return err
+			}
+		}
+	}
+
+	if len(summary.Members) == 0 {
+		return nil
+	}
+
+	if _, err := fmt.Fprintln(writer); err != nil {
+		return err
+	}
+
+	memberTab := tabwriter.NewWriter(writer, 0, 0, 2, ' ', 0)
+	if _, err := fmt.Fprintln(memberTab, "NAME\tROLE\tSTATE\tLAG BYTES\tNEEDS REJOIN\tLAST SEEN"); err != nil {
+		return err
+	}
+	for _, member := range summary.Members {
+		if _, err := fmt.Fprintf(
+			memberTab,
+			"%s\t%s\t%s\t%s\t%t\t%s\n",
+			orDash(member.Name),
+			orDash(member.Role),
+			orDash(member.State),
+			formatOptionalInt64(member.LagBytes),
+			member.NeedsRejoin,
+			formatOptionalTime(member.LastSeenAt),
+		); err != nil {
+			return err
+		}
+	}
+
+	return memberTab.Flush()
+}
+
 func writeMembersTable(writer io.Writer, members []memberStatusJSON) error {
 	tab := tabwriter.NewWriter(writer, 0, 0, 2, ' ', 0)
 	if _, err := fmt.Fprintln(tab, "NAME\tROLE\tSTATE\tHEALTHY\tLEADER\tTIMELINE\tLAG BYTES\tLAST SEEN"); err != nil {
@@ -592,6 +974,61 @@ func formatOptionalInt64(value int64) string {
 	}
 
 	return fmt.Sprintf("%d", value)
+}
+
+func formatOptionalInt(value int) string {
+	if value == 0 {
+		return "-"
+	}
+
+	return fmt.Sprintf("%d", value)
+}
+
+func formatOptionalBool(value *bool) string {
+	if value == nil {
+		return "-"
+	}
+
+	return fmt.Sprintf("%t", *value)
+}
+
+func formatMap(values map[string]any) string {
+	if len(values) == 0 {
+		return "-"
+	}
+
+	return formatAny(values)
+}
+
+func formatAny(value any) string {
+	if value == nil {
+		return "-"
+	}
+
+	switch typed := value.(type) {
+	case string:
+		return orDash(typed)
+	case bool:
+		return fmt.Sprintf("%t", typed)
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return fmt.Sprintf("%v", typed)
+	}
+
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Sprintf("%v", value)
+	}
+
+	return string(encoded)
+}
+
+func sortedMapKeys(values map[string]any) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func orDash(value string) string {

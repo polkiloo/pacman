@@ -101,9 +101,29 @@ func TestPACMANClusterEnvironment(t *testing.T) {
 		t.Fatalf("unexpected pacmanctl cluster status output: %q", statusOutput)
 	}
 
+	specOutput := cli.RequireExec(t, "/bin/sh", "-lc", fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl cluster spec show", daemonAlias))
+	if !strings.Contains(specOutput, "Cluster Name:") || !strings.Contains(specOutput, "alpha") || !strings.Contains(specOutput, daemonNodeName) {
+		t.Fatalf("unexpected pacmanctl cluster spec output: %q", specOutput)
+	}
+
 	membersOutput := cli.RequireExec(t, "/bin/sh", "-lc", fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl members list", daemonAlias))
 	if !strings.Contains(membersOutput, "NAME") || !strings.Contains(membersOutput, daemonNodeName) || !strings.Contains(membersOutput, "primary") {
 		t.Fatalf("unexpected pacmanctl members list output: %q", membersOutput)
+	}
+
+	historyOutput := cli.RequireExec(t, "/bin/sh", "-lc", fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl history list", daemonAlias))
+	if !strings.Contains(historyOutput, "No history.") {
+		t.Fatalf("unexpected pacmanctl history output: %q", historyOutput)
+	}
+
+	nodeOutput := cli.RequireExec(t, "/bin/sh", "-lc", fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl node status %s", daemonAlias, daemonNodeName))
+	if !strings.Contains(nodeOutput, "Node Name:") || !strings.Contains(nodeOutput, daemonNodeName) || !strings.Contains(nodeOutput, "Cluster Reachable:") {
+		t.Fatalf("unexpected pacmanctl node status output: %q", nodeOutput)
+	}
+
+	diagnosticsOutput := cli.RequireExec(t, "/bin/sh", "-lc", fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl diagnostics show", daemonAlias))
+	if !strings.Contains(diagnosticsOutput, "Cluster Name:") || !strings.Contains(diagnosticsOutput, "alpha") || !strings.Contains(diagnosticsOutput, "Members:") {
+		t.Fatalf("unexpected pacmanctl diagnostics output: %q", diagnosticsOutput)
 	}
 
 	// Ensure maintenance is always disabled on exit, even if assertions below fail.

@@ -53,7 +53,7 @@ func TestRunWithoutCommandPrintsHelp(t *testing.T) {
 		t.Fatalf("run pacmanctl help: %v", err)
 	}
 
-	const want = "pacmanctl commands: cluster status, cluster switchover, cluster failover, cluster maintenance enable, cluster maintenance disable, members list\n"
+	const want = "pacmanctl commands: cluster status, cluster spec show, cluster switchover, cluster failover, cluster maintenance enable, cluster maintenance disable, members list, history list, node status, diagnostics show\n"
 	if got := stdout.String(); got != want {
 		t.Fatalf("unexpected help output: got %q, want %q", got, want)
 	}
@@ -336,10 +336,10 @@ func TestRunClusterSwitchoverJSON(t *testing.T) {
 		writer.WriteHeader(http.StatusAccepted)
 		if err := json.NewEncoder(writer).Encode(operationAcceptedResponse{
 			Operation: operationJSON{
-				ID:          "sw-2",
-				Kind:        "switchover",
-				State:       "pending",
-				ToMember:    "alpha-3",
+				ID:       "sw-2",
+				Kind:     "switchover",
+				State:    "pending",
+				ToMember: "alpha-3",
 			},
 		}); err != nil {
 			t.Fatalf("encode response: %v", err)
@@ -571,6 +571,332 @@ func TestRunClusterMaintenanceDisableJSON(t *testing.T) {
 	}
 }
 
+func TestRunHistoryListText(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/v1/history" {
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(historyResponse{
+			Items: []historyEntryJSON{
+				{
+					OperationID: "op-1",
+					Kind:        "switchover",
+					Timeline:    4,
+					WALLSN:      "0/4000000",
+					FromMember:  "alpha-1",
+					ToMember:    "alpha-2",
+					Reason:      "planned maintenance",
+					Result:      "succeeded",
+					FinishedAt:  time.Date(2026, time.April, 4, 9, 0, 0, 0, time.UTC),
+				},
+			},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New(Params{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "history", "list"}); err != nil {
+		t.Fatalf("run history list: %v", err)
+	}
+
+	output := stdout.String()
+	assertContains(t, output, "OPERATION ID")
+	assertContains(t, output, "op-1")
+	assertContains(t, output, "planned maintenance")
+}
+
+func TestRunHistoryListEmpty(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/v1/history" {
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(historyResponse{}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New(Params{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "history", "list"}); err != nil {
+		t.Fatalf("run history list empty: %v", err)
+	}
+
+	assertContains(t, stdout.String(), "No history.")
+}
+
+func TestRunClusterSpecShowText(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/v1/cluster/spec" {
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(clusterSpecResponse{
+			ClusterName: "alpha",
+			Generation:  7,
+			Maintenance: maintenanceDesiredJSON{
+				DefaultReason: "ops",
+			},
+			Failover: failoverPolicyJSON{
+				Mode:            "automatic",
+				MaximumLagBytes: 1048576,
+				CheckTimeline:   true,
+				RequireQuorum:   true,
+			},
+			Switchover: switchoverPolicyJSON{
+				AllowScheduled: true,
+				RequireSpecificCandidateDuringMaintenance: true,
+			},
+			Postgres: postgresPolicyJSON{
+				SynchronousMode: "quorum",
+				UsePgRewind:     true,
+				Parameters: map[string]any{
+					"max_connections": 200,
+					"wal_level":       "replica",
+				},
+			},
+			Members: []memberSpecJSON{
+				{Name: "alpha-1", Priority: 100},
+				{Name: "alpha-2", Priority: 90, NoFailover: true, Tags: map[string]any{"zone": "b"}},
+			},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New(Params{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "cluster", "spec", "show"}); err != nil {
+		t.Fatalf("run cluster spec show: %v", err)
+	}
+
+	output := stdout.String()
+	assertContains(t, output, "Cluster Name:")
+	assertContains(t, output, "alpha")
+	assertContains(t, output, "PostgreSQL Parameters:")
+	assertContains(t, output, "max_connections")
+	assertContains(t, output, "alpha-2")
+}
+
+func TestRunNodeStatusText(t *testing.T) {
+	t.Parallel()
+
+	replayTimestamp := time.Date(2026, time.April, 4, 10, 0, 30, 0, time.UTC)
+	heartbeatAt := time.Date(2026, time.April, 4, 10, 1, 0, 0, time.UTC)
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/v1/nodes/alpha-1" {
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(nodeStatusResponse{
+			NodeName:   "alpha-1",
+			MemberName: "alpha-1",
+			Role:       "primary",
+			State:      "running",
+			ObservedAt: time.Date(2026, time.April, 4, 10, 2, 0, 0, time.UTC),
+			Postgres: postgresLocalStatusJSON{
+				Managed:       true,
+				Address:       "127.0.0.1:5432",
+				CheckedAt:     time.Date(2026, time.April, 4, 10, 2, 0, 0, time.UTC),
+				Up:            true,
+				Role:          "primary",
+				RecoveryKnown: true,
+				InRecovery:    false,
+				Details: postgresDetailsJSON{
+					ServerVersion:    170004,
+					SystemIdentifier: "sys-1",
+					Timeline:         2,
+				},
+				WAL: walProgressJSON{
+					WriteLSN:        "0/5000000",
+					ReplayTimestamp: &replayTimestamp,
+				},
+			},
+			ControlPlane: controlPlaneLocalStatusJSON{
+				ClusterReachable: true,
+				Leader:           true,
+				LastHeartbeatAt:  &heartbeatAt,
+			},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New(Params{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "node", "status", "alpha-1"}); err != nil {
+		t.Fatalf("run node status: %v", err)
+	}
+
+	output := stdout.String()
+	assertContains(t, output, "Node Name:")
+	assertContains(t, output, "alpha-1")
+	assertContains(t, output, "Cluster Reachable:")
+	assertContains(t, output, "Write LSN:")
+}
+
+func TestRunNodeStatusRequiresName(t *testing.T) {
+	t.Parallel()
+
+	app := New(Params{
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+	})
+
+	err := app.Run(context.Background(), []string{"node", "status"})
+	if !errors.Is(err, errNodeNameRequired) {
+		t.Fatalf("expected missing node name error, got %v", err)
+	}
+}
+
+func TestRunDiagnosticsShowText(t *testing.T) {
+	t.Parallel()
+
+	quorumReachable := true
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/v1/diagnostics" {
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+		if got, want := request.URL.Query().Get("includeMembers"), "false"; got != want {
+			t.Fatalf("includeMembers query: got %q, want %q", got, want)
+		}
+
+		// When includeMembers=false the API omits the members list.
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(diagnosticsSummaryJSON{
+			ClusterName:        "alpha",
+			GeneratedAt:        time.Date(2026, time.April, 4, 11, 5, 0, 0, time.UTC),
+			ControlPlaneLeader: "alpha-1",
+			QuorumReachable:    &quorumReachable,
+			Warnings:           []string{"maintenance mode is enabled"},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New(Params{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "diagnostics", "show", "-include-members=false"}); err != nil {
+		t.Fatalf("run diagnostics show: %v", err)
+	}
+
+	output := stdout.String()
+	assertContains(t, output, "Cluster Name:")
+	assertContains(t, output, "alpha")
+	assertContains(t, output, "Warnings:")
+	assertContains(t, output, "maintenance mode is enabled")
+}
+
+func TestRunDiagnosticsShowWithMembers(t *testing.T) {
+	t.Parallel()
+
+	lastSeenAt := time.Date(2026, time.April, 4, 11, 0, 0, 0, time.UTC)
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/v1/diagnostics" {
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+		if got := request.URL.Query().Get("includeMembers"); got != "" {
+			t.Fatalf("expected no includeMembers query param, got %q", got)
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(diagnosticsSummaryJSON{
+			ClusterName:        "alpha",
+			GeneratedAt:        time.Date(2026, time.April, 4, 11, 5, 0, 0, time.UTC),
+			ControlPlaneLeader: "alpha-1",
+			Members: []memberDiagnosticSummaryJSON{
+				{
+					Name:       "alpha-1",
+					Role:       "primary",
+					State:      "running",
+					LastSeenAt: &lastSeenAt,
+				},
+				{
+					Name:        "alpha-2",
+					Role:        "replica",
+					State:       "streaming",
+					NeedsRejoin: true,
+					LastSeenAt:  &lastSeenAt,
+				},
+			},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New(Params{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "diagnostics", "show"}); err != nil {
+		t.Fatalf("run diagnostics show with members: %v", err)
+	}
+
+	output := stdout.String()
+	assertContains(t, output, "Cluster Name:")
+	assertContains(t, output, "Members:")
+	assertContains(t, output, "NAME")
+	assertContains(t, output, "alpha-1")
+	assertContains(t, output, "alpha-2")
+	assertContains(t, output, "primary")
+}
+
 func TestRunReturnsAPIError(t *testing.T) {
 	t.Parallel()
 
@@ -653,7 +979,7 @@ func TestRunReturnsUnsupportedCommandError(t *testing.T) {
 		Stderr: &bytes.Buffer{},
 	})
 
-	err := app.Run(context.Background(), []string{"history", "list"})
+	err := app.Run(context.Background(), []string{"unknown", "command"})
 	if err == nil {
 		t.Fatal("expected unsupported command error")
 	}
