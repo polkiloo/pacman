@@ -106,6 +106,32 @@ func TestPACMANClusterEnvironment(t *testing.T) {
 		t.Fatalf("unexpected pacmanctl members list output: %q", membersOutput)
 	}
 
+	// Ensure maintenance is always disabled on exit, even if assertions below fail.
+	t.Cleanup(func() {
+		cli.Exec(t, "/bin/sh", "-lc",
+			fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl cluster maintenance disable", daemonAlias))
+	})
+
+	maintenanceEnableOutput := cli.RequireExec(
+		t,
+		"/bin/sh",
+		"-lc",
+		fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl cluster maintenance enable -reason cli-smoke", daemonAlias),
+	)
+	if !strings.Contains(maintenanceEnableOutput, "Enabled:") || !strings.Contains(maintenanceEnableOutput, "true") || !strings.Contains(maintenanceEnableOutput, "cli-smoke") {
+		t.Fatalf("unexpected pacmanctl maintenance enable output: %q", maintenanceEnableOutput)
+	}
+
+	maintenanceDisableOutput := cli.RequireExec(
+		t,
+		"/bin/sh",
+		"-lc",
+		fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl cluster maintenance disable -reason cli-smoke-complete", daemonAlias),
+	)
+	if !strings.Contains(maintenanceDisableOutput, "Enabled:") || !strings.Contains(maintenanceDisableOutput, "false") {
+		t.Fatalf("unexpected pacmanctl maintenance disable output: %q", maintenanceDisableOutput)
+	}
+
 	if !contains(cli.Networks(t), env.NetworkName()) {
 		t.Fatalf("expected pacmanctl runner to be attached to network %q", env.NetworkName())
 	}

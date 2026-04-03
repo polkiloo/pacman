@@ -17,7 +17,7 @@ func TestRunReturnsSuccessForHelp(t *testing.T) {
 		t.Fatalf("expected exit code 0, got %d", exitCode)
 	}
 
-	if got, want := stdout, "pacmanctl commands: cluster status, members list\n"; got != want {
+	if got, want := stdout, "pacmanctl commands: cluster status, cluster switchover, cluster failover, cluster maintenance enable, cluster maintenance disable, members list\n"; got != want {
 		t.Fatalf("unexpected stdout output: got %q, want %q", got, want)
 	}
 
@@ -67,6 +67,50 @@ func TestRunReturnsSuccessForClusterStatus(t *testing.T) {
 
 	if !strings.Contains(stdout, `"clusterName": "alpha"`) {
 		t.Fatalf("expected cluster status json output, got %q", stdout)
+	}
+
+	if stderr != "" {
+		t.Fatalf("expected no stderr output, got %q", stderr)
+	}
+}
+
+func TestRunReturnsSuccessForMaintenanceEnable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPut {
+			t.Fatalf("unexpected method: %s", request.Method)
+		}
+		if request.URL.Path != "/api/v1/maintenance" {
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if enabled, _ := body["enabled"].(bool); !enabled {
+			t.Fatalf("expected enabled=true in request body, got %v", body["enabled"])
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(map[string]any{
+			"enabled":     true,
+			"reason":      "upgrade",
+			"requestedBy": "main-test",
+			"updatedAt":   "2026-04-03T13:00:00Z",
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	exitCode, stdout, stderr := runWithCapturedIO(t, []string{"-api-url", server.URL, "cluster", "maintenance", "enable", "-reason", "upgrade"})
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d stderr=%q", exitCode, stderr)
+	}
+
+	if !strings.Contains(stdout, "Enabled:") || !strings.Contains(stdout, "true") {
+		t.Fatalf("expected maintenance text output, got %q", stdout)
 	}
 
 	if stderr != "" {

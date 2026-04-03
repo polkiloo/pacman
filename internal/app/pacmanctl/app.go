@@ -28,6 +28,7 @@ const (
 
 var (
 	errAPIURLRequired          = errors.New("pacmanctl api-url is required")
+	errCandidateRequired       = errors.New("switchover candidate is required: use -candidate")
 	errUnsupportedOutputFormat = errors.New("unsupported output format")
 )
 
@@ -99,7 +100,7 @@ func (a *App) Run(ctx context.Context, args []string) error {
 }
 
 func (a *App) printCommandHelp() error {
-	_, err := fmt.Fprintln(a.stdout, "pacmanctl commands: cluster status, members list")
+	_, err := fmt.Fprintln(a.stdout, "pacmanctl commands: cluster status, cluster switchover, cluster failover, cluster maintenance enable, cluster maintenance disable, members list")
 	return err
 }
 
@@ -121,6 +122,40 @@ func (a *App) runCluster(ctx context.Context, client *apiClient, args []string) 
 		}
 
 		return renderOutput(a.stdout, format, status, renderClusterStatusText)
+	case "switchover":
+		options, err := parseSwitchoverCommandOptions(args[1:], a.stderr)
+		if err != nil {
+			return err
+		}
+
+		response, err := client.switchover(ctx, switchoverRequestJSON{
+			Candidate:   options.candidate,
+			ScheduledAt: options.scheduledAt,
+			Reason:      options.reason,
+			RequestedBy: options.requestedBy,
+		})
+		if err != nil {
+			return err
+		}
+
+		return renderOutput(a.stdout, options.format, response, renderOperationAcceptedText)
+	case "failover":
+		options, err := parseFailoverCommandOptions(args[1:], a.stderr)
+		if err != nil {
+			return err
+		}
+
+		response, err := client.failover(ctx, failoverRequestJSON{
+			Reason:      options.reason,
+			RequestedBy: options.requestedBy,
+		})
+		if err != nil {
+			return err
+		}
+
+		return renderOutput(a.stdout, options.format, response, renderOperationAcceptedText)
+	case "maintenance":
+		return a.runClusterMaintenance(ctx, client, args[1:])
 	default:
 		return fmt.Errorf("unsupported pacmanctl command: cluster %s", strings.Join(args, " "))
 	}
@@ -149,13 +184,55 @@ func (a *App) runMembers(ctx context.Context, client *apiClient, args []string) 
 	}
 }
 
+func (a *App) runClusterMaintenance(ctx context.Context, client *apiClient, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("unsupported pacmanctl command: cluster maintenance")
+	}
+
+	switch args[0] {
+	case "enable":
+		options, err := parseMaintenanceCommandOptions("cluster maintenance enable", args[1:], a.stderr)
+		if err != nil {
+			return err
+		}
+
+		response, err := client.updateMaintenance(ctx, maintenanceModeUpdateRequestJSON{
+			Enabled:     true,
+			Reason:      options.reason,
+			RequestedBy: options.requestedBy,
+		})
+		if err != nil {
+			return err
+		}
+
+		return renderOutput(a.stdout, options.format, response, renderMaintenanceStatusText)
+	case "disable":
+		options, err := parseMaintenanceCommandOptions("cluster maintenance disable", args[1:], a.stderr)
+		if err != nil {
+			return err
+		}
+
+		response, err := client.updateMaintenance(ctx, maintenanceModeUpdateRequestJSON{
+			Enabled:     false,
+			Reason:      options.reason,
+			RequestedBy: options.requestedBy,
+		})
+		if err != nil {
+			return err
+		}
+
+		return renderOutput(a.stdout, options.format, response, renderMaintenanceStatusText)
+	default:
+		return fmt.Errorf("unsupported pacmanctl command: cluster maintenance %s", strings.Join(args, " "))
+	}
+}
+
 func parseOutputFormat(command string, args []string, stderr io.Writer) (string, error) {
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
 	format := defaultOutputFormat
-	fs.StringVar(&format, "format", defaultOutputFormat, "output format: text|json")
-	fs.StringVar(&format, "o", defaultOutputFormat, "output format: text|json")
+	addOutputFormatFlags(fs, &format)
 
 	if err := fs.Parse(args); err != nil {
 		return "", err
@@ -165,13 +242,7 @@ func parseOutputFormat(command string, args []string, stderr io.Writer) (string,
 		return "", fmt.Errorf("unexpected arguments for %s: %s", command, strings.Join(fs.Args(), " "))
 	}
 
-	normalized := normalizeOutputFormat(format)
-	switch normalized {
-	case outputFormatText, outputFormatJSON:
-		return normalized, nil
-	default:
-		return "", fmt.Errorf("%w: %s", errUnsupportedOutputFormat, format)
-	}
+	return validateOutputFormat(format)
 }
 
 func normalizeOutputFormat(value string) string {
@@ -181,6 +252,155 @@ func normalizeOutputFormat(value string) string {
 	}
 
 	return trimmed
+}
+
+type switchoverCommandOptions struct {
+	format      string
+	candidate   string
+	scheduledAt *time.Time
+	reason      string
+	requestedBy string
+}
+
+type failoverCommandOptions struct {
+	format      string
+	reason      string
+	requestedBy string
+}
+
+type maintenanceCommandOptions struct {
+	format      string
+	reason      string
+	requestedBy string
+}
+
+func parseSwitchoverCommandOptions(args []string, stderr io.Writer) (switchoverCommandOptions, error) {
+	fs := flag.NewFlagSet("cluster switchover", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	var candidate string
+	var scheduledAt string
+	var reason string
+	var requestedBy string
+	format := defaultOutputFormat
+
+	fs.StringVar(&candidate, "candidate", "", "switchover target member")
+	fs.StringVar(&scheduledAt, "scheduled-at", "", "RFC3339 schedule time")
+	fs.StringVar(&reason, "reason", "", "operator reason for the switchover")
+	fs.StringVar(&requestedBy, "requested-by", "", "operator identity")
+	addOutputFormatFlags(fs, &format)
+
+	if err := fs.Parse(args); err != nil {
+		return switchoverCommandOptions{}, err
+	}
+	if len(fs.Args()) > 0 {
+		return switchoverCommandOptions{}, fmt.Errorf("unexpected arguments for cluster switchover: %s", strings.Join(fs.Args(), " "))
+	}
+
+	normalizedFormat, err := validateOutputFormat(format)
+	if err != nil {
+		return switchoverCommandOptions{}, err
+	}
+
+	trimmedCandidate := strings.TrimSpace(candidate)
+	if trimmedCandidate == "" {
+		return switchoverCommandOptions{}, errCandidateRequired
+	}
+
+	options := switchoverCommandOptions{
+		format:      normalizedFormat,
+		candidate:   trimmedCandidate,
+		reason:      strings.TrimSpace(reason),
+		requestedBy: strings.TrimSpace(requestedBy),
+	}
+
+	if strings.TrimSpace(scheduledAt) != "" {
+		parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(scheduledAt))
+		if err != nil {
+			return switchoverCommandOptions{}, fmt.Errorf("invalid -scheduled-at value %q: %w", scheduledAt, err)
+		}
+		parsed = parsed.UTC()
+		options.scheduledAt = &parsed
+	}
+
+	return options, nil
+}
+
+func parseFailoverCommandOptions(args []string, stderr io.Writer) (failoverCommandOptions, error) {
+	fs := flag.NewFlagSet("cluster failover", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	var reason string
+	var requestedBy string
+	format := defaultOutputFormat
+
+	fs.StringVar(&reason, "reason", "", "operator reason for the failover")
+	fs.StringVar(&requestedBy, "requested-by", "", "operator identity")
+	addOutputFormatFlags(fs, &format)
+
+	if err := fs.Parse(args); err != nil {
+		return failoverCommandOptions{}, err
+	}
+	if len(fs.Args()) > 0 {
+		return failoverCommandOptions{}, fmt.Errorf("unexpected arguments for cluster failover: %s", strings.Join(fs.Args(), " "))
+	}
+
+	normalizedFormat, err := validateOutputFormat(format)
+	if err != nil {
+		return failoverCommandOptions{}, err
+	}
+
+	return failoverCommandOptions{
+		format:      normalizedFormat,
+		reason:      strings.TrimSpace(reason),
+		requestedBy: strings.TrimSpace(requestedBy),
+	}, nil
+}
+
+func parseMaintenanceCommandOptions(command string, args []string, stderr io.Writer) (maintenanceCommandOptions, error) {
+	fs := flag.NewFlagSet(command, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	var reason string
+	var requestedBy string
+	format := defaultOutputFormat
+
+	fs.StringVar(&reason, "reason", "", "maintenance reason")
+	fs.StringVar(&requestedBy, "requested-by", "", "operator identity")
+	addOutputFormatFlags(fs, &format)
+
+	if err := fs.Parse(args); err != nil {
+		return maintenanceCommandOptions{}, err
+	}
+	if len(fs.Args()) > 0 {
+		return maintenanceCommandOptions{}, fmt.Errorf("unexpected arguments for %s: %s", command, strings.Join(fs.Args(), " "))
+	}
+
+	normalizedFormat, err := validateOutputFormat(format)
+	if err != nil {
+		return maintenanceCommandOptions{}, err
+	}
+
+	return maintenanceCommandOptions{
+		format:      normalizedFormat,
+		reason:      strings.TrimSpace(reason),
+		requestedBy: strings.TrimSpace(requestedBy),
+	}, nil
+}
+
+func addOutputFormatFlags(fs *flag.FlagSet, format *string) {
+	fs.StringVar(format, "format", defaultOutputFormat, "output format: text|json")
+	fs.StringVar(format, "o", defaultOutputFormat, "output format: text|json")
+}
+
+func validateOutputFormat(format string) (string, error) {
+	normalized := normalizeOutputFormat(format)
+	switch normalized {
+	case outputFormatText, outputFormatJSON:
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("%w: %s", errUnsupportedOutputFormat, format)
+	}
 }
 
 func renderOutput[T any](writer io.Writer, format string, payload T, renderText func(io.Writer, T) error) error {
@@ -231,6 +451,45 @@ func renderMembersText(writer io.Writer, response membersResponse) error {
 	}
 
 	return writeMembersTable(writer, response.Items)
+}
+
+func renderOperationAcceptedText(writer io.Writer, response operationAcceptedResponse) error {
+	tab := tabwriter.NewWriter(writer, 0, 0, 2, ' ', 0)
+
+	topMsg := strings.TrimSpace(response.Message)
+	opMsg := strings.TrimSpace(response.Operation.Message)
+
+	if topMsg != "" {
+		fmt.Fprintf(tab, "Message:\t%s\n", topMsg)
+	}
+	fmt.Fprintf(tab, "Operation ID:\t%s\n", orDash(response.Operation.ID))
+	fmt.Fprintf(tab, "Kind:\t%s\n", orDash(response.Operation.Kind))
+	fmt.Fprintf(tab, "State:\t%s\n", orDash(response.Operation.State))
+	fmt.Fprintf(tab, "Requested By:\t%s\n", orDash(response.Operation.RequestedBy))
+	fmt.Fprintf(tab, "Requested At:\t%s\n", formatOptionalTime(response.Operation.RequestedAt))
+	fmt.Fprintf(tab, "Reason:\t%s\n", orDash(response.Operation.Reason))
+	fmt.Fprintf(tab, "From Member:\t%s\n", orDash(response.Operation.FromMember))
+	fmt.Fprintf(tab, "To Member:\t%s\n", orDash(response.Operation.ToMember))
+	fmt.Fprintf(tab, "Scheduled At:\t%s\n", formatOptionalTime(response.Operation.ScheduledAt))
+	fmt.Fprintf(tab, "Started At:\t%s\n", formatOptionalTime(response.Operation.StartedAt))
+	fmt.Fprintf(tab, "Completed At:\t%s\n", formatOptionalTime(response.Operation.CompletedAt))
+	fmt.Fprintf(tab, "Result:\t%s\n", orDash(response.Operation.Result))
+	if opMsg != "" && opMsg != topMsg {
+		fmt.Fprintf(tab, "Operation Message:\t%s\n", opMsg)
+	}
+
+	return tab.Flush()
+}
+
+func renderMaintenanceStatusText(writer io.Writer, status maintenanceModeStatusJSON) error {
+	tab := tabwriter.NewWriter(writer, 0, 0, 2, ' ', 0)
+
+	fmt.Fprintf(tab, "Enabled:\t%t\n", status.Enabled)
+	fmt.Fprintf(tab, "Reason:\t%s\n", orDash(status.Reason))
+	fmt.Fprintf(tab, "Requested By:\t%s\n", orDash(status.RequestedBy))
+	fmt.Fprintf(tab, "Updated At:\t%s\n", formatOptionalTime(status.UpdatedAt))
+
+	return tab.Flush()
 }
 
 func writeMembersTable(writer io.Writer, members []memberStatusJSON) error {
@@ -317,6 +576,14 @@ func formatTime(value time.Time) string {
 	}
 
 	return value.UTC().Format(time.RFC3339)
+}
+
+func formatOptionalTime(value *time.Time) string {
+	if value == nil {
+		return "-"
+	}
+
+	return formatTime(*value)
 }
 
 func formatOptionalInt64(value int64) string {

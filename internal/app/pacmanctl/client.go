@@ -1,6 +1,7 @@
 package pacmanctl
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -37,6 +38,12 @@ type membersResponse struct {
 	Items []memberStatusJSON `json:"items"`
 }
 
+type maintenanceModeUpdateRequestJSON struct {
+	Enabled     bool   `json:"enabled"`
+	Reason      string `json:"reason,omitempty"`
+	RequestedBy string `json:"requestedBy,omitempty"`
+}
+
 type memberStatusJSON struct {
 	Name       string    `json:"name"`
 	Role       string    `json:"role"`
@@ -60,7 +67,7 @@ type operationJSON struct {
 	Kind        string     `json:"kind"`
 	State       string     `json:"state"`
 	RequestedBy string     `json:"requestedBy,omitempty"`
-	RequestedAt time.Time  `json:"requestedAt"`
+	RequestedAt *time.Time `json:"requestedAt,omitempty"`
 	Reason      string     `json:"reason,omitempty"`
 	FromMember  string     `json:"fromMember,omitempty"`
 	ToMember    string     `json:"toMember,omitempty"`
@@ -75,6 +82,23 @@ type scheduledSwitchoverJSON struct {
 	At   time.Time `json:"at"`
 	From string    `json:"from"`
 	To   string    `json:"to,omitempty"`
+}
+
+type switchoverRequestJSON struct {
+	Candidate   string     `json:"candidate"`
+	ScheduledAt *time.Time `json:"scheduledAt,omitempty"`
+	Reason      string     `json:"reason,omitempty"`
+	RequestedBy string     `json:"requestedBy,omitempty"`
+}
+
+type failoverRequestJSON struct {
+	Reason      string `json:"reason,omitempty"`
+	RequestedBy string `json:"requestedBy,omitempty"`
+}
+
+type operationAcceptedResponse struct {
+	Message   string        `json:"message,omitempty"`
+	Operation operationJSON `json:"operation"`
 }
 
 func newAPIClient(rawBaseURL string, httpClient *http.Client) (*apiClient, error) {
@@ -120,50 +144,97 @@ func (client *apiClient) members(ctx context.Context) (membersResponse, error) {
 	return response, nil
 }
 
+func (client *apiClient) updateMaintenance(ctx context.Context, request maintenanceModeUpdateRequestJSON) (maintenanceModeStatusJSON, error) {
+	var response maintenanceModeStatusJSON
+	if err := client.doJSON(ctx, http.MethodPut, "/api/v1/maintenance", request, &response); err != nil {
+		return maintenanceModeStatusJSON{}, err
+	}
+
+	return response, nil
+}
+
+func (client *apiClient) switchover(ctx context.Context, request switchoverRequestJSON) (operationAcceptedResponse, error) {
+	var response operationAcceptedResponse
+	if err := client.doJSON(ctx, http.MethodPost, "/api/v1/operations/switchover", request, &response); err != nil {
+		return operationAcceptedResponse{}, err
+	}
+
+	return response, nil
+}
+
+func (client *apiClient) failover(ctx context.Context, request failoverRequestJSON) (operationAcceptedResponse, error) {
+	var response operationAcceptedResponse
+	if err := client.doJSON(ctx, http.MethodPost, "/api/v1/operations/failover", request, &response); err != nil {
+		return operationAcceptedResponse{}, err
+	}
+
+	return response, nil
+}
+
 func (client *apiClient) getJSON(ctx context.Context, path string, target any) error {
+	return client.doJSON(ctx, http.MethodGet, path, nil, target)
+}
+
+func (client *apiClient) doJSON(ctx context.Context, method, path string, body any, target any) error {
+	var requestBody io.Reader
+	if body != nil {
+		payload, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("encode %s %s request: %w", method, path, err)
+		}
+		requestBody = bytes.NewReader(payload)
+	}
+
 	requestURL := client.baseURL.ResolveReference(&url.URL{Path: path})
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), nil)
+	request, err := http.NewRequestWithContext(ctx, method, requestURL.String(), requestBody)
 	if err != nil {
-		return fmt.Errorf("build request GET %s: %w", path, err)
+		return fmt.Errorf("build request %s %s: %w", method, path, err)
+	}
+	if body != nil {
+		request.Header.Set("Content-Type", "application/json")
 	}
 
 	response, err := client.httpClient.Do(request)
 	if err != nil {
-		return fmt.Errorf("perform GET %s: %w", path, err)
+		return fmt.Errorf("perform %s %s: %w", method, path, err)
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return decodeAPIError(path, response)
+		return decodeAPIError(method, path, response)
+	}
+
+	if target == nil {
+		return nil
 	}
 
 	if err := json.NewDecoder(response.Body).Decode(target); err != nil {
-		return fmt.Errorf("decode GET %s response: %w", path, err)
+		return fmt.Errorf("decode %s %s response: %w", method, path, err)
 	}
 
 	return nil
 }
 
-func decodeAPIError(path string, response *http.Response) error {
+func decodeAPIError(method, path string, response *http.Response) error {
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return fmt.Errorf("read GET %s error response: %w", path, err)
+		return fmt.Errorf("read %s %s error response: %w", method, path, err)
 	}
 
 	var apiError apiErrorResponse
 	if json.Unmarshal(body, &apiError) == nil {
 		if apiError.Message != "" {
-			return fmt.Errorf("GET %s returned %d: %s", path, response.StatusCode, apiError.Message)
+			return fmt.Errorf("%s %s returned %d: %s", method, path, response.StatusCode, apiError.Message)
 		}
 		if apiError.Error != "" {
-			return fmt.Errorf("GET %s returned %d: %s", path, response.StatusCode, apiError.Error)
+			return fmt.Errorf("%s %s returned %d: %s", method, path, response.StatusCode, apiError.Error)
 		}
 	}
 
 	trimmed := strings.TrimSpace(string(body))
 	if trimmed == "" {
-		return fmt.Errorf("GET %s returned %d", path, response.StatusCode)
+		return fmt.Errorf("%s %s returned %d", method, path, response.StatusCode)
 	}
 
-	return fmt.Errorf("GET %s returned %d: %s", path, response.StatusCode, trimmed)
+	return fmt.Errorf("%s %s returned %d: %s", method, path, response.StatusCode, trimmed)
 }
