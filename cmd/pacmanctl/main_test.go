@@ -1,21 +1,72 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 )
 
-func TestRunReturnsSuccessForScaffold(t *testing.T) {
+func TestRunReturnsSuccessForHelp(t *testing.T) {
 	exitCode, stdout, stderr := runWithCapturedIO(t, nil)
 
 	if exitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d", exitCode)
 	}
 
-	if got, want := stdout, "pacmanctl scaffold: CLI commands are not implemented yet\n"; got != want {
+	if got, want := stdout, "pacmanctl commands: cluster status, members list\n"; got != want {
 		t.Fatalf("unexpected stdout output: got %q, want %q", got, want)
+	}
+
+	if stderr != "" {
+		t.Fatalf("expected no stderr output, got %q", stderr)
+	}
+}
+
+func TestRunReturnsSuccessForClusterStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/v1/cluster" {
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(map[string]any{
+			"clusterName":    "alpha",
+			"phase":          "healthy",
+			"currentPrimary": "alpha-1",
+			"currentEpoch":   1,
+			"observedAt":     "2026-04-02T12:00:00Z",
+			"maintenance": map[string]any{
+				"enabled": false,
+			},
+			"members": []map[string]any{
+				{
+					"name":       "alpha-1",
+					"role":       "primary",
+					"state":      "running",
+					"healthy":    true,
+					"leader":     true,
+					"timeline":   1,
+					"lastSeenAt": "2026-04-02T12:00:00Z",
+				},
+			},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	exitCode, stdout, stderr := runWithCapturedIO(t, []string{"-api-url", server.URL, "cluster", "status", "-o", "json"})
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d stderr=%q", exitCode, stderr)
+	}
+
+	if !strings.Contains(stdout, `"clusterName": "alpha"`) {
+		t.Fatalf("expected cluster status json output, got %q", stdout)
 	}
 
 	if stderr != "" {

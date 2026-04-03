@@ -3,8 +3,12 @@
 package integration_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+
+	testcontainers "github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/polkiloo/pacman/test/testenv"
 )
@@ -23,6 +27,24 @@ func TestPACMANClusterEnvironment(t *testing.T) {
 	}
 
 	cli := env.StartPacmanctl(t, "pacmanctl-1")
+	daemonNodeName := "alpha-cli"
+	daemonAlias := "pacmand-cli-api"
+	daemonConfig := fmt.Sprintf(daemonNodeConfig, daemonNodeName, nodes[0].Postgres.Alias(), daemonNodeName, daemonNodeName)
+
+	env.StartService(t, testenv.ServiceConfig{
+		Name:         "pacmand-cli-service",
+		Image:        pacmanTestImage(),
+		Aliases:      []string{daemonAlias},
+		Env:          postgresConnectionEnv(nodes[0].Postgres),
+		Files:        []testcontainers.ContainerFile{writeDaemonConfigFile(t, daemonConfig)},
+		ExposedPorts: []string{"8080/tcp"},
+		Cmd: []string{
+			"/bin/sh",
+			"-lc",
+			fmt.Sprintf("pacmand -config %s", daemonConfigPath),
+		},
+		WaitStrategy: wait.ForListeningPort("8080/tcp").WithStartupTimeout(pacmandStartupTimeout),
+	})
 
 	for _, node := range nodes {
 		version := node.Pacmand.RequireExec(t, "pacmand", "-version")
@@ -74,9 +96,14 @@ func TestPACMANClusterEnvironment(t *testing.T) {
 		t.Fatalf("expected version output from pacmanctl runner, got %q", cliVersion)
 	}
 
-	statusOutput := cli.RequireExec(t, "pacmanctl", "cluster", "status")
-	if !strings.Contains(statusOutput, "pacmanctl scaffold: command support is not implemented yet (cluster status)") {
-		t.Fatalf("unexpected pacmanctl scaffold output: %q", statusOutput)
+	statusOutput := cli.RequireExec(t, "/bin/sh", "-lc", fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl cluster status", daemonAlias))
+	if !strings.Contains(statusOutput, "Cluster Name:") || !strings.Contains(statusOutput, "alpha") || !strings.Contains(statusOutput, daemonNodeName) {
+		t.Fatalf("unexpected pacmanctl cluster status output: %q", statusOutput)
+	}
+
+	membersOutput := cli.RequireExec(t, "/bin/sh", "-lc", fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl members list", daemonAlias))
+	if !strings.Contains(membersOutput, "NAME") || !strings.Contains(membersOutput, daemonNodeName) || !strings.Contains(membersOutput, "primary") {
+		t.Fatalf("unexpected pacmanctl members list output: %q", membersOutput)
 	}
 
 	if !contains(cli.Networks(t), env.NetworkName()) {

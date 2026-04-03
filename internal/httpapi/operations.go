@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -88,9 +89,9 @@ func (srv *Server) handleOpenAPIDocument(c *fiber.Ctx) error {
 		if srv.logger != nil {
 			srv.logger.Error(
 				"published openapi document unavailable",
-				"component", "httpapi",
-				"path", c.Path(),
-				"error", err.Error(),
+				slog.String("component", "httpapi"),
+				slog.String("path", c.Path()),
+				slog.String("error", err.Error()),
 			)
 		}
 
