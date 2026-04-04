@@ -3,9 +3,12 @@
 package integration_test
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	testcontainers "github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -31,7 +34,7 @@ func TestPACMANClusterEnvironment(t *testing.T) {
 	daemonAlias := "pacmand-cli-api"
 	daemonConfig := fmt.Sprintf(daemonNodeConfig, daemonNodeName, nodes[0].Postgres.Alias(), daemonNodeName, daemonNodeName)
 
-	env.StartService(t, testenv.ServiceConfig{
+	service := env.StartService(t, testenv.ServiceConfig{
 		Name:         "pacmand-cli-service",
 		Image:        pacmanTestImage(),
 		Aliases:      []string{daemonAlias},
@@ -45,6 +48,10 @@ func TestPACMANClusterEnvironment(t *testing.T) {
 		},
 		WaitStrategy: wait.ForListeningPort("8080/tcp").WithStartupTimeout(pacmandStartupTimeout),
 	})
+	daemonBase := "http://" + service.Address(t, "8080")
+	daemonClient := &http.Client{Timeout: 2 * time.Second}
+	waitForProbeStatus(t, daemonClient, daemonBase+"/health", http.StatusOK, pacmandStartupTimeout)
+	waitForProbeStatus(t, daemonClient, daemonBase+"/api/v1/members", http.StatusOK, pacmandStartupTimeout)
 
 	for _, node := range nodes {
 		version := node.Pacmand.RequireExec(t, "pacmand", "-version")
@@ -116,6 +123,11 @@ func TestPACMANClusterEnvironment(t *testing.T) {
 		t.Fatalf("unexpected pacmanctl history output: %q", historyOutput)
 	}
 
+	patroniHistoryOutput := cli.RequireExec(t, "/bin/sh", "-lc", fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl history", daemonAlias))
+	if !strings.Contains(patroniHistoryOutput, "No history.") {
+		t.Fatalf("unexpected patronictl-compatible history output: %q", patroniHistoryOutput)
+	}
+
 	nodeOutput := cli.RequireExec(t, "/bin/sh", "-lc", fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl node status %s", daemonAlias, daemonNodeName))
 	if !strings.Contains(nodeOutput, "Node Name:") || !strings.Contains(nodeOutput, daemonNodeName) || !strings.Contains(nodeOutput, "Cluster Reachable:") {
 		t.Fatalf("unexpected pacmanctl node status output: %q", nodeOutput)
@@ -124,6 +136,43 @@ func TestPACMANClusterEnvironment(t *testing.T) {
 	diagnosticsOutput := cli.RequireExec(t, "/bin/sh", "-lc", fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl diagnostics show", daemonAlias))
 	if !strings.Contains(diagnosticsOutput, "Cluster Name:") || !strings.Contains(diagnosticsOutput, "alpha") || !strings.Contains(diagnosticsOutput, "Members:") {
 		t.Fatalf("unexpected pacmanctl diagnostics output: %q", diagnosticsOutput)
+	}
+
+	listOutput := cli.RequireExec(t, "/bin/sh", "-lc", fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl list", daemonAlias))
+	if !strings.Contains(listOutput, "Cluster") || !strings.Contains(listOutput, daemonNodeName) || !strings.Contains(listOutput, "primary") {
+		t.Fatalf("unexpected patronictl-compatible list output: %q", listOutput)
+	}
+
+	topologyOutput := cli.RequireExec(t, "/bin/sh", "-lc", fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl topology", daemonAlias))
+	if !strings.Contains(topologyOutput, "Cluster") || !strings.Contains(topologyOutput, daemonNodeName) {
+		t.Fatalf("unexpected patronictl-compatible topology output: %q", topologyOutput)
+	}
+
+	listJSONOutput := cli.RequireExec(t, "/bin/sh", "-lc", fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl list -f json", daemonAlias))
+	var listJSON struct {
+		Cluster string `json:"cluster"`
+		Members []struct {
+			Member string `json:"member"`
+			Role   string `json:"role"`
+		} `json:"members"`
+	}
+	if err := json.Unmarshal([]byte(listJSONOutput), &listJSON); err != nil {
+		t.Fatalf("decode patronictl-compatible list json: %v\noutput=%q", err, listJSONOutput)
+	}
+	foundDaemonMember := false
+	for _, member := range listJSON.Members {
+		if member.Member == daemonNodeName && member.Role == "primary" {
+			foundDaemonMember = true
+			break
+		}
+	}
+	if listJSON.Cluster != "alpha" || !foundDaemonMember {
+		t.Fatalf("unexpected patronictl-compatible list json payload: %+v", listJSON)
+	}
+
+	showConfigOutput := cli.RequireExec(t, "/bin/sh", "-lc", fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl show-config", daemonAlias))
+	if !strings.Contains(showConfigOutput, "pause: false") || !strings.Contains(showConfigOutput, "cluster_name: alpha") {
+		t.Fatalf("unexpected patronictl-compatible show-config output: %q", showConfigOutput)
 	}
 
 	// Ensure maintenance is always disabled on exit, even if assertions below fail.
@@ -150,6 +199,26 @@ func TestPACMANClusterEnvironment(t *testing.T) {
 	)
 	if !strings.Contains(maintenanceDisableOutput, "Enabled:") || !strings.Contains(maintenanceDisableOutput, "false") {
 		t.Fatalf("unexpected pacmanctl maintenance disable output: %q", maintenanceDisableOutput)
+	}
+
+	pauseOutput := cli.RequireExec(
+		t,
+		"/bin/sh",
+		"-lc",
+		fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl pause --reason patroni-cli-smoke", daemonAlias),
+	)
+	if !strings.Contains(pauseOutput, "Enabled:") || !strings.Contains(pauseOutput, "true") || !strings.Contains(pauseOutput, "patroni-cli-smoke") {
+		t.Fatalf("unexpected patronictl-compatible pause output: %q", pauseOutput)
+	}
+
+	resumeOutput := cli.RequireExec(
+		t,
+		"/bin/sh",
+		"-lc",
+		fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl resume --reason patroni-cli-smoke-complete", daemonAlias),
+	)
+	if !strings.Contains(resumeOutput, "Enabled:") || !strings.Contains(resumeOutput, "false") {
+		t.Fatalf("unexpected patronictl-compatible resume output: %q", resumeOutput)
 	}
 
 	if !contains(cli.Networks(t), env.NetworkName()) {
