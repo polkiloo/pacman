@@ -112,21 +112,21 @@ func TestNormalizeLocalProbeHost(t *testing.T) {
 	}
 }
 
+// stubHTTPServer satisfies the httpServer interface with no-op implementations
+// so that tests can assign a non-nil apiServer without starting a real listener.
+type stubHTTPServer struct{}
+
+func (stubHTTPServer) Start(_ context.Context, _ string) error { return nil }
+func (stubHTTPServer) Wait() error                             { return nil }
+
 func TestWithNoAPIServer(t *testing.T) {
 	t.Parallel()
 
-	// Construct a daemon that already has an apiServer set via NewDaemon,
-	// then verify WithNoAPIServer clears it.
-	daemon := &Daemon{}
-	// apiServer starts nil; set it to a non-nil value via direct assignment
-	// by calling the option on a daemon that has a non-nil server would
-	// require a real httpServer. Instead, verify the option on a nil daemon
-	// is a no-op (nil stays nil), which exercises the function body.
-	opt := WithNoAPIServer()
-	opt(daemon)
+	daemon := &Daemon{apiServer: stubHTTPServer{}}
+	WithNoAPIServer()(daemon)
 
 	if daemon.apiServer != nil {
-		t.Fatal("expected apiServer to remain nil")
+		t.Fatal("expected apiServer to be nil after WithNoAPIServer")
 	}
 }
 
