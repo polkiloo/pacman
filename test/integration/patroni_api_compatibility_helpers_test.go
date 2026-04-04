@@ -34,8 +34,10 @@ func startPatroniCompatibilityFixture(t *testing.T, env *testenv.Environment, na
 				FileMode:          0o755,
 			},
 		},
-		Cmd:          []string{"python", "-u", "/fixture/server.py"},
-		WaitStrategy: wait.ForListeningPort("8008/tcp").WithStartupTimeout(60 * time.Second),
+		Cmd: []string{"python", "-u", "/fixture/server.py"},
+		WaitStrategy: wait.ForHTTP("/patroni").
+			WithPort("8008/tcp").
+			WithStartupTimeout(60 * time.Second),
 	})
 }
 
