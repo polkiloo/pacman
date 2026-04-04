@@ -219,6 +219,51 @@ postgres:
 	assertContains(t, logs.String(), `"postgres_up":false`)
 }
 
+func TestRunLogsAdminAuthStateWithoutLeakingToken(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pacmand.yaml")
+	payload := fmt.Sprintf(`
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: alpha-1
+  role: data
+  apiAddress: "%s"
+security:
+  adminBearerToken: super-secret-token
+postgres:
+  dataDir: /var/lib/postgresql/data
+`, reserveLoopbackAddress(t))
+
+	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var logs bytes.Buffer
+
+	app := New(Params{
+		Stdout: &stdout,
+		Stderr: &stderr,
+		Logger: logging.New("pacmand", &logs),
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	if err := app.Run(ctx, []string{"-config", path}); err != nil {
+		t.Fatalf("run pacmand with authenticated config: %v", err)
+	}
+
+	assertContains(t, logs.String(), `"admin_auth_enabled":true`)
+	if strings.Contains(logs.String(), "super-secret-token") {
+		t.Fatalf("expected logs to avoid token leakage, got %q", logs.String())
+	}
+}
+
 func TestRunReturnsConfigLoadError(t *testing.T) {
 	t.Parallel()
 

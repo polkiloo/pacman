@@ -113,6 +113,7 @@ func (a *App) logLoadedConfig(ctx context.Context, loadedConfig config.Config, s
 		slog.String("source", source),
 		slog.String("node", loadedConfig.Node.Name),
 		slog.String("role", loadedConfig.Node.Role.String()),
+		slog.Bool("admin_auth_enabled", loadedConfig.Security.AdminAuthEnabled()),
 	}
 	if path != "" {
 		attributes = append(attributes, slog.String("path", path))
