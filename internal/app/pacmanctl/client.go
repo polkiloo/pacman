@@ -13,10 +13,11 @@ import (
 
 type apiClient struct {
 	baseURL    *url.URL
+	apiToken   string
 	httpClient *http.Client
 }
 
-func newAPIClient(rawBaseURL string, httpClient *http.Client) (*apiClient, error) {
+func newAPIClient(rawBaseURL, apiToken string, httpClient *http.Client) (*apiClient, error) {
 	trimmed := strings.TrimSpace(rawBaseURL)
 	if trimmed == "" {
 		return nil, errAPIURLRequired
@@ -37,6 +38,7 @@ func newAPIClient(rawBaseURL string, httpClient *http.Client) (*apiClient, error
 
 	return &apiClient{
 		baseURL:    baseURL,
+		apiToken:   strings.TrimSpace(apiToken),
 		httpClient: httpClient,
 	}, nil
 }
@@ -159,6 +161,9 @@ func (client *apiClient) doJSON(ctx context.Context, method, path string, body a
 	request, err := http.NewRequestWithContext(ctx, method, requestURL.String(), requestBody)
 	if err != nil {
 		return fmt.Errorf("build request %s %s: %w", method, path, err)
+	}
+	if client.apiToken != "" {
+		request.Header.Set("Authorization", "Bearer "+client.apiToken)
 	}
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")

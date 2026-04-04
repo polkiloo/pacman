@@ -67,6 +67,7 @@ func (a *App) Run(ctx context.Context, args []string) error {
 
 	showVersion := fs.Bool("version", false, "print version and exit")
 	apiURL := fs.String("api-url", defaultCLIAPIURL(), "PACMAN API base URL")
+	apiToken := fs.String("api-token", defaultCLIAPIToken(), "PACMAN API bearer token")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -90,7 +91,7 @@ func (a *App) Run(ctx context.Context, args []string) error {
 		return a.printCommandHelp()
 	}
 
-	client, err := newAPIClient(strings.TrimSpace(*apiURL), &http.Client{Timeout: httpRequestTimeout})
+	client, err := newAPIClient(strings.TrimSpace(*apiURL), strings.TrimSpace(*apiToken), &http.Client{Timeout: httpRequestTimeout})
 	if err != nil {
 		return err
 	}
@@ -937,6 +938,16 @@ func defaultCLIAPIURL() string {
 	}
 
 	return defaultAPIURL
+}
+
+func defaultCLIAPIToken() string {
+	for _, key := range []string{"PACMANCTL_API_TOKEN", "PACMAN_API_TOKEN"} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+
+	return ""
 }
 
 func formatMaintenance(status maintenanceModeStatusJSON) string {

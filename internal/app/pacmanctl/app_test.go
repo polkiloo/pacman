@@ -156,6 +156,37 @@ func TestRunClusterStatusJSONFromEnvironment(t *testing.T) {
 	}
 }
 
+func TestRunClusterStatusUsesAPITokenFromEnvironment(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if got := request.Header.Get("Authorization"); got != "Bearer secret-token" {
+			t.Fatalf("authorization header: got %q, want %q", got, "Bearer secret-token")
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(clusterStatusResponse{
+			ClusterName: "alpha",
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("PACMANCTL_API_URL", server.URL)
+	t.Setenv("PACMANCTL_API_TOKEN", "secret-token")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New(Params{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+
+	if err := app.Run(context.Background(), []string{"cluster", "status", "-o", "json"}); err != nil {
+		t.Fatalf("run cluster status json with api token: %v", err)
+	}
+}
+
 func TestRunMembersListText(t *testing.T) {
 	t.Parallel()
 
