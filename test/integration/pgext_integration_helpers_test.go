@@ -48,6 +48,7 @@ func startPostgresExtensionNode(t *testing.T, cfg pgextNodeConfig) postgresExten
 
 	env := testenv.New(t)
 	name := sanitizeIntegrationName(t.Name())
+	testenv.RequireLocalImage(t, pgextTestImage())
 
 	service := env.StartService(t, testenv.ServiceConfig{
 		Name:         name + "-pgext",

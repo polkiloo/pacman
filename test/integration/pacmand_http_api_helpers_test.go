@@ -57,6 +57,7 @@ func startSingleNodeDaemon(t *testing.T, nodeName string) singleNodeDaemon {
 	env := testenv.New(t)
 	prefix := sanitizeIntegrationName(t.Name())
 	pg := env.StartPostgres(t, prefix, prefix+"-postgres")
+	testenv.RequireLocalImage(t, pacmanTestImage())
 
 	configBody := fmt.Sprintf(daemonNodeConfig, nodeName, pg.Alias(), nodeName, nodeName)
 

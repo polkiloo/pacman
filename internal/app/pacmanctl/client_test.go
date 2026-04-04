@@ -52,10 +52,10 @@ func TestClientMaintenanceStatus(t *testing.T) {
 func TestClientNewAPIClientNoHost(t *testing.T) {
 	t.Parallel()
 
-	// URL with scheme but no host (path-only relative URL)
+	// "//" parses as a URL with empty scheme and empty host — both required fields are absent.
 	_, err := newAPIClient("//", nil)
 	if err == nil {
-		t.Fatal("expected error for URL with no host")
+		t.Fatal("expected error for URL missing scheme and host")
 	}
 }
 

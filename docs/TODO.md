@@ -280,7 +280,7 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] implement `cluster spec show`
 - [x] implement `node status`
 - [x] implement diagnostics commands
-- [ ] add `patronictl`-compatible command aliases, flags, and output modes for automation scripts
+- [x] add `patronictl`-compatible command aliases, flags, and output modes for automation scripts
 
 ---
 
