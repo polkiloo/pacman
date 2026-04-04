@@ -11,7 +11,7 @@ endif
 
 GOLANGCI_LINT ?= $(GOBIN)/golangci-lint
 COVERAGE_OUT ?= coverage.out
-COVERAGE_MIN ?= 80.0
+COVERAGE_MIN ?= 90.0
 COVERAGE_PACKAGES ?= $(shell $(GO) list ./... | grep -v '/test/')
 PACMAN_TEST_IMAGE ?= pacman-test:local
 PACMAN_TEST_PGEXT_IMAGE ?= pacman-pgext-postgres:local
