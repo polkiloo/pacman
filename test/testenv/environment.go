@@ -14,6 +14,7 @@ import (
 	"github.com/docker/go-connections/nat"
 	testcontainers "github.com/testcontainers/testcontainers-go"
 	tcexec "github.com/testcontainers/testcontainers-go/exec"
+	tclog "github.com/testcontainers/testcontainers-go/log"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/network"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -206,6 +207,10 @@ func (e *Environment) StartPostgres(t *testing.T, name, alias string) *Postgres 
 		tcpostgres.BasicWaitStrategies(),
 		testcontainers.WithName(fmt.Sprintf("%s-%s-%d", e.namePrefix, sanitizeName(alias), time.Now().UnixNano())),
 		network.WithNetwork([]string{alias}, e.network),
+		testcontainers.WithLogger(tclog.TestLogger(t)),
+		testcontainers.WithLogConsumerConfig(&testcontainers.LogConsumerConfig{
+			Consumers: []testcontainers.LogConsumer{&testLogConsumer{t: t, name: alias}},
+		}),
 	)
 	if err != nil {
 		t.Fatalf("start postgres fixture %q: %v", name, err)
@@ -254,6 +259,10 @@ func (e *Environment) StartRunner(t *testing.T, cfg RunnerConfig) *Runner {
 			"/bin/sh", "-lc", "test -x /usr/local/bin/pacmand && test -x /usr/local/bin/pacmanctl",
 		}).WithStartupTimeout(30 * time.Second)),
 		network.WithNetwork(aliases, e.network),
+		testcontainers.WithLogger(tclog.TestLogger(t)),
+		testcontainers.WithLogConsumerConfig(&testcontainers.LogConsumerConfig{
+			Consumers: []testcontainers.LogConsumer{&testLogConsumer{t: t, name: cfg.Name}},
+		}),
 	}
 
 	if len(cfg.Entrypoint) > 0 {
@@ -527,6 +536,17 @@ func requireDockerDaemon(t *testing.T) {
 	if strings.TrimSpace(string(output)) == "" {
 		t.Fatal("docker daemon is reachable but did not report a server version")
 	}
+}
+
+// testLogConsumer streams container stdout/stderr lines to t.Log so they appear
+// in `go test -v` output alongside the test that owns the container.
+type testLogConsumer struct {
+	t    testing.TB
+	name string
+}
+
+func (c *testLogConsumer) Accept(l testcontainers.Log) {
+	c.t.Logf("[%s %s] %s", c.name, l.LogType, strings.TrimRight(string(l.Content), "\n"))
 }
 
 func sanitizeName(value string) string {

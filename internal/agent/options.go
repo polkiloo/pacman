@@ -14,6 +14,14 @@ type Option func(*Daemon)
 type postgresAvailabilityProbe func(context.Context, string) error
 type postgresStateProbe func(context.Context, string) (postgres.Observation, error)
 
+// WithNoAPIServer disables the HTTP API server for the daemon. Use this in
+// tests that verify control-plane state without needing a bound network address.
+func WithNoAPIServer() Option {
+	return func(daemon *Daemon) {
+		daemon.apiServer = nil
+	}
+}
+
 // WithControlPlanePublisher overrides the control-plane publisher used by the
 // daemon to publish local observed state.
 func WithControlPlanePublisher(publisher controlplane.NodeStatePublisher) Option {
