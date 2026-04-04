@@ -736,3 +736,69 @@ func (promoter *recordingPromoter) Promote(_ context.Context, request PromotionR
 	promoter.requests = append(promoter.requests, request)
 	return nil
 }
+
+func TestFailoverIntentClone(t *testing.T) {
+	t.Parallel()
+
+	op := cluster.Operation{ID: "fo-1", Kind: "failover"}
+	intent := FailoverIntent{
+		Operation: op,
+		Candidate: "alpha-2",
+		Confirmation: PrimaryFailureConfirmation{
+			CurrentPrimary: "alpha-1",
+			Confirmed:      true,
+		},
+		Candidates: []FailoverCandidate{
+			{
+				Member:   cluster.MemberStatus{Name: "alpha-2"},
+				Eligible: true,
+				Rank:     1,
+				Reasons:  []string{"healthy"},
+			},
+		},
+	}
+
+	clone := intent.Clone()
+
+	if clone.Candidate != intent.Candidate {
+		t.Fatalf("candidate: got %q, want %q", clone.Candidate, intent.Candidate)
+	}
+	if clone.Confirmation.CurrentPrimary != intent.Confirmation.CurrentPrimary {
+		t.Fatalf("confirmation primary: got %q, want %q", clone.Confirmation.CurrentPrimary, intent.Confirmation.CurrentPrimary)
+	}
+	if len(clone.Candidates) != len(intent.Candidates) {
+		t.Fatalf("candidates count: got %d, want %d", len(clone.Candidates), len(intent.Candidates))
+	}
+
+	// Verify clone is independent
+	clone.Candidates[0].Reasons[0] = "mutated"
+	if intent.Candidates[0].Reasons[0] != "healthy" {
+		t.Fatal("expected original reasons to be unaffected by clone mutation")
+	}
+}
+
+func TestFailoverExecutionClone(t *testing.T) {
+	t.Parallel()
+
+	execution := FailoverExecution{
+		Operation:      cluster.Operation{ID: "fo-exec-1", Kind: "failover"},
+		CurrentPrimary: "alpha-1",
+		Candidate:      "alpha-2",
+		PreviousEpoch:  3,
+		CurrentEpoch:   4,
+		Fenced:         true,
+		Promoted:       true,
+	}
+
+	clone := execution.Clone()
+
+	if clone.CurrentPrimary != execution.CurrentPrimary {
+		t.Fatalf("primary: got %q, want %q", clone.CurrentPrimary, execution.CurrentPrimary)
+	}
+	if clone.Candidate != execution.Candidate {
+		t.Fatalf("candidate: got %q, want %q", clone.Candidate, execution.Candidate)
+	}
+	if clone.CurrentEpoch != execution.CurrentEpoch {
+		t.Fatalf("epoch: got %v, want %v", clone.CurrentEpoch, execution.CurrentEpoch)
+	}
+}
