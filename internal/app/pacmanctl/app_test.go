@@ -1027,3 +1027,719 @@ func assertContains(t *testing.T, got, want string) {
 		t.Fatalf("expected %q to contain %q", got, want)
 	}
 }
+
+func TestRunClusterStatusWithActiveOperationAndScheduledSwitchover(t *testing.T) {
+	t.Parallel()
+
+	scheduledAt := time.Date(2026, time.April, 10, 9, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(clusterStatusResponse{
+			ClusterName:    "alpha",
+			Phase:          "healthy",
+			CurrentPrimary: "alpha-1",
+			Maintenance:    maintenanceModeStatusJSON{Enabled: true, Reason: "upgrade"},
+			ActiveOperation: &operationJSON{
+				ID:       "op-active",
+				Kind:     "switchover",
+				State:    "running",
+				ToMember: "alpha-2",
+			},
+			ScheduledSwitchover: &scheduledSwitchoverJSON{
+				At:   scheduledAt,
+				From: "alpha-1",
+				To:   "alpha-2",
+			},
+			Members: []memberStatusJSON{
+				{Name: "alpha-1", Role: "primary", State: "running", Healthy: true, Leader: true},
+			},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "cluster", "status"}); err != nil {
+		t.Fatalf("run cluster status: %v", err)
+	}
+
+	output := stdout.String()
+	assertContains(t, output, "enabled (upgrade)")
+	assertContains(t, output, "switchover")
+	assertContains(t, output, "alpha-2")
+	assertContains(t, output, "2026-04-10T09:00:00Z")
+}
+
+func TestFormatMaintenance(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		status maintenanceModeStatusJSON
+		want   string
+	}{
+		{name: "disabled", status: maintenanceModeStatusJSON{Enabled: false}, want: "disabled"},
+		{name: "enabled no reason", status: maintenanceModeStatusJSON{Enabled: true}, want: "enabled"},
+		{name: "enabled with reason", status: maintenanceModeStatusJSON{Enabled: true, Reason: "upgrade"}, want: "enabled (upgrade)"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := formatMaintenance(tc.status)
+			if got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFormatOperation(t *testing.T) {
+	t.Parallel()
+
+	if got := formatOperation(nil); got != "-" {
+		t.Fatalf("nil: got %q, want %q", got, "-")
+	}
+
+	op := &operationJSON{Kind: "switchover", State: "running", ToMember: "alpha-2", FromMember: "alpha-1"}
+	got := formatOperation(op)
+	assertContains(t, got, "switchover")
+	assertContains(t, got, "running")
+	assertContains(t, got, "to=alpha-2")
+	assertContains(t, got, "from=alpha-1")
+
+	opNoMembers := &operationJSON{Kind: "failover", State: "pending"}
+	got2 := formatOperation(opNoMembers)
+	assertContains(t, got2, "failover")
+	if strings.Contains(got2, "to=") {
+		t.Fatalf("unexpected to= in operation without ToMember: %q", got2)
+	}
+}
+
+func TestFormatScheduledSwitchover(t *testing.T) {
+	t.Parallel()
+
+	if got := formatScheduledSwitchover(nil); got != "-" {
+		t.Fatalf("nil: got %q, want %q", got, "-")
+	}
+
+	at := time.Date(2026, time.May, 1, 9, 0, 0, 0, time.UTC)
+	sw := &scheduledSwitchoverJSON{At: at, From: "alpha-1", To: "alpha-2"}
+	got := formatScheduledSwitchover(sw)
+	assertContains(t, got, "2026-05-01T09:00:00Z")
+	assertContains(t, got, "from=alpha-1")
+	assertContains(t, got, "to=alpha-2")
+
+	swNoTo := &scheduledSwitchoverJSON{At: at, From: "alpha-1"}
+	got2 := formatScheduledSwitchover(swNoTo)
+	assertContains(t, got2, "from=alpha-1")
+	if strings.Contains(got2, "to=") {
+		t.Fatalf("unexpected to= for no-to switchover: %q", got2)
+	}
+}
+
+func TestRunMembersListEmpty(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(membersResponse{Items: nil}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "members", "list"}); err != nil {
+		t.Fatalf("run members list empty: %v", err)
+	}
+	assertContains(t, stdout.String(), "No members.")
+}
+
+func TestRunMembersListYAML(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(membersResponse{
+			Items: []memberStatusJSON{{Name: "alpha-1", Role: "primary", State: "running", Healthy: true}},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "members", "list", "-o", "yaml"}); err != nil {
+		t.Fatalf("run members list yaml: %v", err)
+	}
+	assertContains(t, stdout.String(), "alpha-1")
+}
+
+func TestRunClusterSpecShowJSON(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(clusterSpecResponse{
+			ClusterName: "gamma",
+			Postgres:    postgresPolicyJSON{SynchronousMode: "quorum"},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "cluster", "spec", "show", "-o", "json"}); err != nil {
+		t.Fatalf("run cluster spec show json: %v", err)
+	}
+
+	var payload clusterSpecResponse
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode spec json: %v", err)
+	}
+	if payload.ClusterName != "gamma" {
+		t.Fatalf("cluster name: got %q, want gamma", payload.ClusterName)
+	}
+}
+
+func TestRunNodeStatusJSON(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(nodeStatusResponse{
+			NodeName:   "alpha-1",
+			MemberName: "alpha-1",
+			Role:       "primary",
+			State:      "running",
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "node", "status", "-node", "alpha-1", "-o", "json"}); err != nil {
+		t.Fatalf("run node status json: %v", err)
+	}
+
+	var payload nodeStatusResponse
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode node status json: %v", err)
+	}
+	if payload.NodeName != "alpha-1" {
+		t.Fatalf("node name: got %q, want alpha-1", payload.NodeName)
+	}
+}
+
+func TestRunNodeStatusExtraArgs(t *testing.T) {
+	t.Parallel()
+
+	app := New(Params{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	err := app.Run(context.Background(), []string{"node", "status", "alpha-1", "extra"})
+	if err == nil {
+		t.Fatal("expected error for extra args")
+	}
+}
+
+func TestRunNodeStatusBothFlagAndArg(t *testing.T) {
+	t.Parallel()
+
+	app := New(Params{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	err := app.Run(context.Background(), []string{"node", "status", "-node", "alpha-1", "positional"})
+	if err == nil {
+		t.Fatal("expected error for both flag and positional arg")
+	}
+}
+
+func TestRunDiagnosticsShowJSON(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(diagnosticsSummaryJSON{
+			ClusterName:        "alpha",
+			ControlPlaneLeader: "alpha-1",
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "diagnostics", "show", "-o", "json"}); err != nil {
+		t.Fatalf("run diagnostics show json: %v", err)
+	}
+
+	var payload diagnosticsSummaryJSON
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode diagnostics json: %v", err)
+	}
+	if payload.ClusterName != "alpha" {
+		t.Fatalf("cluster name: got %q, want alpha", payload.ClusterName)
+	}
+}
+
+func TestRunUnsupportedSubcommands(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		args []string
+	}{
+		{args: []string{"cluster"}},
+		{args: []string{"cluster", "unknown"}},
+		{args: []string{"cluster", "spec"}},
+		{args: []string{"cluster", "spec", "unknown"}},
+		{args: []string{"cluster", "maintenance"}},
+		{args: []string{"cluster", "maintenance", "unknown"}},
+		{args: []string{"members"}},
+		{args: []string{"members", "unknown"}},
+		{args: []string{"history", "unknown"}},
+		{args: []string{"node"}},
+		{args: []string{"node", "unknown"}},
+		{args: []string{"diagnostics"}},
+		{args: []string{"diagnostics", "unknown"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(strings.Join(tc.args, "_"), func(t *testing.T) {
+			t.Parallel()
+			app := New(Params{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+			if err := app.Run(context.Background(), tc.args); err == nil {
+				t.Fatalf("expected error for args %v", tc.args)
+			}
+		})
+	}
+}
+
+func TestRunHistoryListJSON(t *testing.T) {
+	t.Parallel()
+
+	finishedAt := time.Date(2026, time.April, 5, 9, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(historyResponse{
+			Items: []historyEntryJSON{
+				{OperationID: "op-json-1", Kind: "failover", Result: "succeeded", FinishedAt: finishedAt},
+			},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "history", "list", "-o", "json"}); err != nil {
+		t.Fatalf("run history list json: %v", err)
+	}
+
+	var payload historyResponse
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode history json: %v", err)
+	}
+	if len(payload.Items) != 1 || payload.Items[0].OperationID != "op-json-1" {
+		t.Fatalf("unexpected history payload: %+v", payload)
+	}
+}
+
+func TestRunReturnsErrorForEmptyAPIErrorBody(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusInternalServerError)
+		// empty body
+	}))
+	defer server.Close()
+
+	app := New(Params{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	err := app.Run(context.Background(), []string{"-api-url", server.URL, "cluster", "status"})
+	if err == nil {
+		t.Fatal("expected error for 500 response")
+	}
+	assertContains(t, err.Error(), "500")
+}
+
+func TestRunReturnsErrorForPlainTextAPIError(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusBadGateway)
+		if _, err := writer.Write([]byte("upstream connection failed")); err != nil {
+			t.Fatalf("write response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	app := New(Params{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	err := app.Run(context.Background(), []string{"-api-url", server.URL, "cluster", "status"})
+	if err == nil {
+		t.Fatal("expected error for 502 response")
+	}
+	assertContains(t, err.Error(), "upstream connection failed")
+}
+
+func TestRunInvalidAPIURL(t *testing.T) {
+	t.Parallel()
+
+	app := New(Params{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	err := app.Run(context.Background(), []string{"-api-url", "not-a-url", "cluster", "status"})
+	if err == nil {
+		t.Fatal("expected error for invalid API URL")
+	}
+}
+
+func TestRunMissingAPIURL(t *testing.T) {
+	t.Parallel()
+
+	app := New(Params{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	// Override default by passing empty string
+	err := app.Run(context.Background(), []string{"-api-url", "  ", "cluster", "status"})
+	if !errors.Is(err, errAPIURLRequired) {
+		t.Fatalf("expected errAPIURLRequired, got %v", err)
+	}
+}
+
+func TestRunClusterStatusYAML(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(clusterStatusResponse{
+			ClusterName:    "alpha",
+			Phase:          "healthy",
+			CurrentPrimary: "alpha-1",
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "cluster", "status", "-o", "yaml"}); err != nil {
+		t.Fatalf("run cluster status yaml: %v", err)
+	}
+	// YAML encoding uses lowercase field names (no yaml struct tags)
+	assertContains(t, stdout.String(), "alpha")
+}
+
+func TestRunClusterMaintenanceEnableJSON(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(maintenanceModeStatusJSON{Enabled: true, Reason: "test"}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "cluster", "maintenance", "enable", "-o", "json"}); err != nil {
+		t.Fatalf("run cluster maintenance enable json: %v", err)
+	}
+
+	var payload maintenanceModeStatusJSON
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode maintenance json: %v", err)
+	}
+	if !payload.Enabled {
+		t.Fatal("expected enabled=true in payload")
+	}
+}
+
+func TestRunClusterSwitchoverYAML(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusAccepted)
+		if err := json.NewEncoder(writer).Encode(operationAcceptedResponse{
+			Operation: operationJSON{ID: "sw-yaml", Kind: "switchover"},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "cluster", "switchover", "-candidate", "alpha-2", "-o", "yaml"}); err != nil {
+		t.Fatalf("run cluster switchover yaml: %v", err)
+	}
+	assertContains(t, stdout.String(), "sw-yaml")
+}
+
+func TestRunClusterFailoverJSON(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusAccepted)
+		if err := json.NewEncoder(writer).Encode(operationAcceptedResponse{
+			Operation: operationJSON{ID: "fo-json", Kind: "failover"},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "cluster", "failover", "-o", "json"}); err != nil {
+		t.Fatalf("run cluster failover json: %v", err)
+	}
+
+	var payload operationAcceptedResponse
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode failover json: %v", err)
+	}
+	if payload.Operation.ID != "fo-json" {
+		t.Fatalf("operation id: got %q, want fo-json", payload.Operation.ID)
+	}
+}
+
+func TestRunClusterFailoverWithCandidate(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body failoverRequestJSON
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body.Candidate != "alpha-2" {
+			t.Fatalf("candidate: got %q, want alpha-2", body.Candidate)
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusAccepted)
+		if err := json.NewEncoder(writer).Encode(operationAcceptedResponse{
+			Operation: operationJSON{ID: "fo-candidate", Kind: "failover"},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "cluster", "failover", "-candidate", "alpha-2"}); err != nil {
+		t.Fatalf("run cluster failover with candidate: %v", err)
+	}
+}
+
+func TestRunClusterStatusUnexpectedArgs(t *testing.T) {
+	t.Parallel()
+
+	app := New(Params{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	err := app.Run(context.Background(), []string{"cluster", "status", "unexpected-arg"})
+	if err == nil {
+		t.Fatal("expected error for unexpected argument")
+	}
+}
+
+func TestFormatAny(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{name: "nil", value: nil, want: "-"},
+		{name: "empty string", value: "", want: "-"},
+		{name: "non-empty string", value: "hello", want: "hello"},
+		{name: "bool true", value: true, want: "true"},
+		{name: "bool false", value: false, want: "false"},
+		{name: "int", value: 42, want: "42"},
+		{name: "float64", value: float64(3.14), want: "3.14"},
+		{name: "map", value: map[string]any{"k": "v"}, want: `{"k":"v"}`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := formatAny(tc.value)
+			if got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFormatOptionalInt(t *testing.T) {
+	t.Parallel()
+
+	if got := formatOptionalInt(0); got != "-" {
+		t.Fatalf("zero: got %q, want %q", got, "-")
+	}
+	if got := formatOptionalInt(42); got != "42" {
+		t.Fatalf("non-zero: got %q, want %q", got, "42")
+	}
+}
+
+func TestNormalizeOutputFormat(t *testing.T) {
+	t.Parallel()
+
+	if got := normalizeOutputFormat(""); got != defaultOutputFormat {
+		t.Fatalf("empty: got %q, want %q", got, defaultOutputFormat)
+	}
+	if got := normalizeOutputFormat("  "); got != defaultOutputFormat {
+		t.Fatalf("whitespace: got %q, want %q", got, defaultOutputFormat)
+	}
+	if got := normalizeOutputFormat("JSON"); got != "json" {
+		t.Fatalf("uppercase: got %q, want %q", got, "json")
+	}
+}
+
+func TestRunClusterSpecShowUnknown(t *testing.T) {
+	t.Parallel()
+
+	app := New(Params{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	err := app.Run(context.Background(), []string{"cluster", "spec", "unknown"})
+	if err == nil {
+		t.Fatal("expected error for unknown cluster spec subcommand")
+	}
+}
+
+func TestRunDiagnosticsShowWithMembersAndWarnings(t *testing.T) {
+	t.Parallel()
+
+	lastSeenAt := time.Date(2026, time.April, 5, 8, 0, 0, 0, time.UTC)
+	quorumReachable := false
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(diagnosticsSummaryJSON{
+			ClusterName:        "alpha",
+			ControlPlaneLeader: "alpha-1",
+			QuorumReachable:    &quorumReachable,
+			Warnings:           []string{"quorum lost"},
+			Members: []memberDiagnosticSummaryJSON{
+				{
+					Name:       "alpha-1",
+					Role:       "primary",
+					State:      "running",
+					LastSeenAt: &lastSeenAt,
+				},
+			},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "diagnostics", "show"}); err != nil {
+		t.Fatalf("run diagnostics show: %v", err)
+	}
+
+	output := stdout.String()
+	assertContains(t, output, "quorum lost")
+	assertContains(t, output, "alpha-1")
+}
+
+func TestRunClusterSpecShowWithNoParameters(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(clusterSpecResponse{
+			ClusterName: "alpha",
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "cluster", "spec", "show"}); err != nil {
+		t.Fatalf("run cluster spec show no params: %v", err)
+	}
+	assertContains(t, stdout.String(), "Cluster Name:")
+}
+
+func TestRunClusterStatusWithNoMembers(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(clusterStatusResponse{
+			ClusterName: "alpha",
+			Phase:       "initializing",
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "cluster", "status"}); err != nil {
+		t.Fatalf("run cluster status no members: %v", err)
+	}
+	assertContains(t, stdout.String(), "Members:")
+}
+
+func TestRunClusterSpecShowWithZeroPriorityMember(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(clusterSpecResponse{
+			ClusterName: "alpha",
+			Members: []memberSpecJSON{
+				{Name: "alpha-1", Priority: 0},
+			},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	if err := app.Run(context.Background(), []string{"-api-url", server.URL, "cluster", "spec", "show"}); err != nil {
+		t.Fatalf("run cluster spec zero priority: %v", err)
+	}
+	assertContains(t, stdout.String(), "alpha-1")
+}
+
+func TestRunDiagnosticsShowExtraArgs(t *testing.T) {
+	t.Parallel()
+
+	app := New(Params{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	err := app.Run(context.Background(), []string{"diagnostics", "show", "extra"})
+	if err == nil {
+		t.Fatal("expected error for extra args")
+	}
+}
