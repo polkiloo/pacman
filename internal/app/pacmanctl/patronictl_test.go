@@ -49,19 +49,27 @@ func TestParsePatronictlListOptionsExtendedAndTimestamp(t *testing.T) {
 func TestParsePatronictlListOptionsFormatFlag(t *testing.T) {
 	t.Parallel()
 
-	for _, args := range [][]string{
-		{"-f", "json"},
-		{"--format", "json"},
-		{"-f=json"},
-		{"--format=json"},
-	} {
-		opts, err := parsePatronictlListOptions(args)
-		if err != nil {
-			t.Fatalf("%v: unexpected error: %v", args, err)
-		}
-		if opts.format != outputFormatJSON {
-			t.Fatalf("%v: format: got %q, want %q", args, opts.format, outputFormatJSON)
-		}
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{name: "short flag", args: []string{"-f", "json"}},
+		{name: "long flag", args: []string{"--format", "json"}},
+		{name: "short inline", args: []string{"-f=json"}},
+		{name: "long inline", args: []string{"--format=json"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			opts, err := parsePatronictlListOptions(tc.args)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if opts.format != outputFormatJSON {
+				t.Fatalf("format: got %q, want %q", opts.format, outputFormatJSON)
+			}
+		})
 	}
 }
 
@@ -1970,18 +1978,18 @@ func TestRunPatronictlShowConfigInvalidOptions(t *testing.T) {
 func TestRunPatronictlPauseWithWait(t *testing.T) {
 	t.Parallel()
 
-	// Return enabled=true immediately so the wait loop converges on first poll.
+	// The PUT acknowledges the request. The wait loop polls GET until
+	// enabled=true is confirmed — here the state has already converged.
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		switch {
 		case request.Method == http.MethodPut && request.URL.Path == "/api/v1/maintenance":
-			if err := json.NewEncoder(writer).Encode(maintenanceModeStatusJSON{Enabled: false}); err != nil {
-				t.Fatalf("encode: %v", err)
+			if err := json.NewEncoder(writer).Encode(maintenanceModeStatusJSON{Enabled: true}); err != nil {
+				t.Fatalf("encode PUT: %v", err)
 			}
 		case request.Method == http.MethodGet && request.URL.Path == "/api/v1/maintenance":
-			// waitForPatronictlMaintenanceState polls this; return enabled=true to converge.
 			if err := json.NewEncoder(writer).Encode(maintenanceModeStatusJSON{Enabled: true}); err != nil {
-				t.Fatalf("encode: %v", err)
+				t.Fatalf("encode GET: %v", err)
 			}
 		default:
 			t.Fatalf("unexpected: %s %s", request.Method, request.URL.Path)
@@ -1996,21 +2004,24 @@ func TestRunPatronictlPauseWithWait(t *testing.T) {
 		t.Fatalf("run pause --wait: %v", err)
 	}
 	assertContains(t, stdout.String(), "Enabled:")
+	assertContains(t, stdout.String(), "true")
 }
 
 func TestRunPatronictlResumeWithWait(t *testing.T) {
 	t.Parallel()
 
+	// The PUT acknowledges the request. The wait loop polls GET until
+	// enabled=false is confirmed — here the state has already converged.
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		switch {
 		case request.Method == http.MethodPut && request.URL.Path == "/api/v1/maintenance":
-			if err := json.NewEncoder(writer).Encode(maintenanceModeStatusJSON{Enabled: true}); err != nil {
-				t.Fatalf("encode: %v", err)
+			if err := json.NewEncoder(writer).Encode(maintenanceModeStatusJSON{Enabled: false}); err != nil {
+				t.Fatalf("encode PUT: %v", err)
 			}
 		case request.Method == http.MethodGet && request.URL.Path == "/api/v1/maintenance":
 			if err := json.NewEncoder(writer).Encode(maintenanceModeStatusJSON{Enabled: false}); err != nil {
-				t.Fatalf("encode: %v", err)
+				t.Fatalf("encode GET: %v", err)
 			}
 		default:
 			t.Fatalf("unexpected: %s %s", request.Method, request.URL.Path)
@@ -2025,6 +2036,7 @@ func TestRunPatronictlResumeWithWait(t *testing.T) {
 		t.Fatalf("run resume --wait: %v", err)
 	}
 	assertContains(t, stdout.String(), "Enabled:")
+	assertContains(t, stdout.String(), "false")
 }
 
 func TestRunPatronictlPauseWithScope(t *testing.T) {
