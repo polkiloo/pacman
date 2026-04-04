@@ -517,7 +517,29 @@ func requireLocalImage(ctx context.Context, t *testing.T, image string) {
 
 	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", image)
 	if err := cmd.Run(); err != nil {
-		t.Fatalf("required local test image %q is missing; run `make docker-build-test-image` first: %v", image, err)
+		t.Fatalf("required local test image %q is missing; run `%s` first: %v", image, localImageBuildHint(image), err)
+	}
+}
+
+// RequireLocalImage fails the test with setup guidance when a locally built
+// test image is required but missing from the Docker daemon.
+func RequireLocalImage(t *testing.T, image string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), dockerOperationTimeout)
+	defer cancel()
+
+	requireLocalImage(ctx, t, image)
+}
+
+func localImageBuildHint(image string) string {
+	switch strings.TrimSpace(image) {
+	case defaultRunnerImage:
+		return "make docker-build-test-image"
+	case "pacman-pgext-postgres:local":
+		return "make docker-build-pgext-image"
+	default:
+		return "docker build <your-image>"
 	}
 }
 

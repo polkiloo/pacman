@@ -22,6 +22,7 @@ func TestPACMANClusterEnvironment(t *testing.T) {
 	}
 
 	env := testenv.New(t)
+	testenv.RequireLocalImage(t, pacmanTestImage())
 
 	nodes := []*testenv.Node{
 		env.StartNode(t, "pacmand-1"),
