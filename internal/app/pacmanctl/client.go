@@ -118,15 +118,6 @@ func (client *apiClient) updateMaintenance(ctx context.Context, request maintena
 	return response, nil
 }
 
-func (client *apiClient) cancelSwitchover(ctx context.Context) (operationAcceptedResponse, error) {
-	var response operationAcceptedResponse
-	if err := client.doJSON(ctx, http.MethodDelete, "/api/v1/operations/switchover", nil, &response); err != nil {
-		return operationAcceptedResponse{}, err
-	}
-
-	return response, nil
-}
-
 func (client *apiClient) switchover(ctx context.Context, request switchoverRequestJSON) (operationAcceptedResponse, error) {
 	var response operationAcceptedResponse
 	if err := client.doJSON(ctx, http.MethodPost, "/api/v1/operations/switchover", request, &response); err != nil {
