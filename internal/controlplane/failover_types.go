@@ -57,6 +57,7 @@ func (confirmation PrimaryFailureConfirmation) Clone() PrimaryFailureConfirmatio
 // FailoverIntentRequest captures operator metadata attached to a newly created
 // automatic failover intent.
 type FailoverIntentRequest struct {
+	Candidate   string
 	RequestedBy string
 	Reason      string
 }
