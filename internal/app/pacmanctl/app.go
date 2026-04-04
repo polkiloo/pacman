@@ -110,7 +110,7 @@ func (a *App) Run(ctx context.Context, args []string) error {
 	case "diagnostics":
 		return a.runDiagnostics(ctx, client, remaining[1:])
 	case "list", "topology":
-		return a.runPatronictlList(ctx, client, remaining)
+		return a.runPatronictlList(ctx, client, remaining[1:])
 	case "show-config":
 		return a.runPatronictlShowConfig(ctx, client, remaining[1:])
 	case "pause":
