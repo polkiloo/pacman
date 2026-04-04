@@ -53,7 +53,7 @@ func TestRunWithoutCommandPrintsHelp(t *testing.T) {
 		t.Fatalf("run pacmanctl help: %v", err)
 	}
 
-	const want = "pacmanctl commands: cluster status, cluster spec show, cluster switchover, cluster failover, cluster maintenance enable, cluster maintenance disable, members list, history list, node status, diagnostics show\n"
+	const want = "pacmanctl commands: cluster status, cluster spec show, cluster switchover, cluster failover, cluster maintenance enable, cluster maintenance disable, members list, history list, node status, diagnostics show, patronictl-compatible: list, topology, history, show-config, pause, resume, switchover, failover\n"
 	if got := stdout.String(); got != want {
 		t.Fatalf("unexpected help output: got %q, want %q", got, want)
 	}
@@ -250,8 +250,6 @@ func TestRunClusterSwitchoverText(t *testing.T) {
 
 	scheduledAt := time.Date(2026, time.April, 3, 9, 30, 0, 0, time.UTC)
 	requestedAt := time.Date(2026, time.April, 3, 9, 0, 0, 0, time.UTC)
-	requestedAtPtr := &requestedAt
-
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost {
 			t.Fatalf("unexpected method: %s", request.Method)
@@ -287,7 +285,7 @@ func TestRunClusterSwitchoverText(t *testing.T) {
 				Kind:        "switchover",
 				State:       "pending",
 				RequestedBy: "ops-bot",
-				RequestedAt: requestedAtPtr,
+				RequestedAt: requestedAt,
 				Reason:      "rotate primary",
 				FromMember:  "alpha-1",
 				ToMember:    "alpha-2",
@@ -403,8 +401,6 @@ func TestRunClusterFailoverText(t *testing.T) {
 	t.Parallel()
 
 	requestedAt := time.Date(2026, time.April, 3, 11, 0, 0, 0, time.UTC)
-	requestedAtPtr := &requestedAt
-
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost {
 			t.Fatalf("unexpected method: %s", request.Method)
@@ -434,7 +430,7 @@ func TestRunClusterFailoverText(t *testing.T) {
 				Kind:        "failover",
 				State:       "pending",
 				RequestedBy: "ops-bot",
-				RequestedAt: requestedAtPtr,
+				RequestedAt: requestedAt,
 				Reason:      "primary lost",
 			},
 		}); err != nil {
@@ -961,7 +957,7 @@ func TestRunReturnsUnsupportedOutputFormatError(t *testing.T) {
 		Stderr: &bytes.Buffer{},
 	})
 
-	err := app.Run(context.Background(), []string{"members", "list", "-o", "yaml"})
+	err := app.Run(context.Background(), []string{"members", "list", "-o", "xml"})
 	if err == nil {
 		t.Fatal("expected unsupported output format error")
 	}

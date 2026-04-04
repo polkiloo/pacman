@@ -17,7 +17,7 @@ func TestRunReturnsSuccessForHelp(t *testing.T) {
 		t.Fatalf("expected exit code 0, got %d", exitCode)
 	}
 
-	if got, want := stdout, "pacmanctl commands: cluster status, cluster spec show, cluster switchover, cluster failover, cluster maintenance enable, cluster maintenance disable, members list, history list, node status, diagnostics show\n"; got != want {
+	if got, want := stdout, "pacmanctl commands: cluster status, cluster spec show, cluster switchover, cluster failover, cluster maintenance enable, cluster maintenance disable, members list, history list, node status, diagnostics show, patronictl-compatible: list, topology, history, show-config, pause, resume, switchover, failover\n"; got != want {
 		t.Fatalf("unexpected stdout output: got %q, want %q", got, want)
 	}
 

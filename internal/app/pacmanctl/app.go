@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"go.uber.org/dig"
+	"gopkg.in/yaml.v3"
 
 	"github.com/polkiloo/pacman/internal/version"
 )
@@ -24,7 +25,10 @@ const (
 	defaultOutputFormat = "text"
 	httpRequestTimeout  = 5 * time.Second
 	outputFormatText    = "text"
+	outputFormatPretty  = "pretty"
+	outputFormatTSV     = "tsv"
 	outputFormatJSON    = "json"
+	outputFormatYAML    = "yaml"
 )
 
 var (
@@ -97,18 +101,33 @@ func (a *App) Run(ctx context.Context, args []string) error {
 	case "members":
 		return a.runMembers(ctx, client, remaining[1:])
 	case "history":
-		return a.runHistory(ctx, client, remaining[1:])
+		if len(remaining) > 1 && remaining[1] == "list" {
+			return a.runHistory(ctx, client, remaining[1:])
+		}
+		return a.runPatronictlHistory(ctx, client, remaining[1:])
 	case "node":
 		return a.runNode(ctx, client, remaining[1:])
 	case "diagnostics":
 		return a.runDiagnostics(ctx, client, remaining[1:])
+	case "list", "topology":
+		return a.runPatronictlList(ctx, client, remaining)
+	case "show-config":
+		return a.runPatronictlShowConfig(ctx, client, remaining[1:])
+	case "pause":
+		return a.runPatronictlPause(ctx, client, remaining[1:])
+	case "resume":
+		return a.runPatronictlResume(ctx, client, remaining[1:])
+	case "switchover":
+		return a.runPatronictlSwitchover(ctx, client, remaining[1:])
+	case "failover":
+		return a.runPatronictlFailover(ctx, client, remaining[1:])
 	default:
 		return fmt.Errorf("unsupported pacmanctl command: %s", strings.Join(remaining, " "))
 	}
 }
 
 func (a *App) printCommandHelp() error {
-	_, err := fmt.Fprintln(a.stdout, "pacmanctl commands: cluster status, cluster spec show, cluster switchover, cluster failover, cluster maintenance enable, cluster maintenance disable, members list, history list, node status, diagnostics show")
+	_, err := fmt.Fprintln(a.stdout, "pacmanctl commands: cluster status, cluster spec show, cluster switchover, cluster failover, cluster maintenance enable, cluster maintenance disable, members list, history list, node status, diagnostics show, patronictl-compatible: list, topology, history, show-config, pause, resume, switchover, failover")
 	return err
 }
 
@@ -156,6 +175,7 @@ func (a *App) runCluster(ctx context.Context, client *apiClient, args []string) 
 		}
 
 		response, err := client.failover(ctx, failoverRequestJSON{
+			Candidate:   options.candidate,
 			Reason:      options.reason,
 			RequestedBy: options.requestedBy,
 		})
@@ -366,6 +386,7 @@ type switchoverCommandOptions struct {
 
 type failoverCommandOptions struct {
 	format      string
+	candidate   string
 	reason      string
 	requestedBy string
 }
@@ -442,10 +463,12 @@ func parseFailoverCommandOptions(args []string, stderr io.Writer) (failoverComma
 	fs := flag.NewFlagSet("cluster failover", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
+	var candidate string
 	var reason string
 	var requestedBy string
 	format := defaultOutputFormat
 
+	fs.StringVar(&candidate, "candidate", "", "preferred failover target member")
 	fs.StringVar(&reason, "reason", "", "operator reason for the failover")
 	fs.StringVar(&requestedBy, "requested-by", "", "operator identity")
 	addOutputFormatFlags(fs, &format)
@@ -464,6 +487,7 @@ func parseFailoverCommandOptions(args []string, stderr io.Writer) (failoverComma
 
 	return failoverCommandOptions{
 		format:      normalizedFormat,
+		candidate:   strings.TrimSpace(candidate),
 		reason:      strings.TrimSpace(reason),
 		requestedBy: strings.TrimSpace(requestedBy),
 	}, nil
@@ -567,14 +591,14 @@ func parseDiagnosticsOptions(args []string, stderr io.Writer) (diagnosticsOption
 }
 
 func addOutputFormatFlags(fs *flag.FlagSet, format *string) {
-	fs.StringVar(format, "format", defaultOutputFormat, "output format: text|json")
-	fs.StringVar(format, "o", defaultOutputFormat, "output format: text|json")
+	fs.StringVar(format, "format", defaultOutputFormat, "output format: text|pretty|json|yaml")
+	fs.StringVar(format, "o", defaultOutputFormat, "output format: text|pretty|json|yaml")
 }
 
 func validateOutputFormat(format string) (string, error) {
 	normalized := normalizeOutputFormat(format)
 	switch normalized {
-	case outputFormatText, outputFormatJSON:
+	case outputFormatText, outputFormatPretty, outputFormatJSON, outputFormatYAML:
 		return normalized, nil
 	default:
 		return "", fmt.Errorf("%w: %s", errUnsupportedOutputFormat, format)
@@ -583,11 +607,16 @@ func validateOutputFormat(format string) (string, error) {
 
 func renderOutput[T any](writer io.Writer, format string, payload T, renderText func(io.Writer, T) error) error {
 	switch format {
-	case outputFormatText:
+	case outputFormatText, outputFormatPretty:
 		return renderText(writer, payload)
 	case outputFormatJSON:
 		encoder := json.NewEncoder(writer)
 		encoder.SetIndent("", "  ")
+		return encoder.Encode(payload)
+	case outputFormatYAML:
+		encoder := yaml.NewEncoder(writer)
+		encoder.SetIndent(2)
+		defer encoder.Close()
 		return encoder.Encode(payload)
 	default:
 		return fmt.Errorf("%w: %s", errUnsupportedOutputFormat, format)
@@ -644,7 +673,7 @@ func renderOperationAcceptedText(writer io.Writer, response operationAcceptedRes
 	fmt.Fprintf(tab, "Kind:\t%s\n", orDash(response.Operation.Kind))
 	fmt.Fprintf(tab, "State:\t%s\n", orDash(response.Operation.State))
 	fmt.Fprintf(tab, "Requested By:\t%s\n", orDash(response.Operation.RequestedBy))
-	fmt.Fprintf(tab, "Requested At:\t%s\n", formatOptionalTime(response.Operation.RequestedAt))
+	fmt.Fprintf(tab, "Requested At:\t%s\n", formatTime(response.Operation.RequestedAt))
 	fmt.Fprintf(tab, "Reason:\t%s\n", orDash(response.Operation.Reason))
 	fmt.Fprintf(tab, "From Member:\t%s\n", orDash(response.Operation.FromMember))
 	fmt.Fprintf(tab, "To Member:\t%s\n", orDash(response.Operation.ToMember))
