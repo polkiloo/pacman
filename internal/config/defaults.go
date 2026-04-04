@@ -29,6 +29,11 @@ func (config Config) WithDefaults() Config {
 		defaulted.TLS = &tls
 	}
 
+	if defaulted.Security != nil {
+		security := defaulted.Security.WithDefaults()
+		defaulted.Security = &security
+	}
+
 	if defaulted.Postgres != nil {
 		postgres := defaulted.Postgres.WithDefaults()
 		defaulted.Postgres = &postgres
@@ -66,6 +71,12 @@ func (node NodeConfig) WithDefaults() NodeConfig {
 // using PACMAN defaults.
 func (tls TLSConfig) WithDefaults() TLSConfig {
 	return tls
+}
+
+// WithDefaults returns a copy of the security config with omitted fields filled
+// using PACMAN defaults.
+func (security SecurityConfig) WithDefaults() SecurityConfig {
+	return security
 }
 
 // WithDefaults returns a copy of the postgres local config with omitted fields

@@ -14,6 +14,8 @@ var (
 	ErrNodeControlAddressInvalid        = errors.New("config node controlAddress is invalid")
 	ErrTLSCertFileRequired              = errors.New("config tls certFile is required")
 	ErrTLSKeyFileRequired               = errors.New("config tls keyFile is required")
+	ErrSecurityAdminBearerTokenRequired = errors.New("config security adminBearerToken or adminBearerTokenFile is required")
+	ErrSecurityAdminBearerTokenConflict = errors.New("config security adminBearerToken and adminBearerTokenFile are mutually exclusive")
 	ErrPostgresDataDirRequired          = errors.New("config postgres dataDir is required")
 	ErrPostgresListenAddressRequired    = errors.New("config postgres listenAddress is required")
 	ErrPostgresListenAddressInvalid     = errors.New("config postgres listenAddress is invalid")
