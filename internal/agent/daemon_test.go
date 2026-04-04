@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -66,6 +68,23 @@ func TestNewDaemonAllowsWitnessWithoutPostgresConfig(t *testing.T) {
 	if !startup.StartedAt.IsZero() {
 		t.Fatalf("expected zero startup state before start, got %+v", startup)
 	}
+}
+
+func TestNewDaemonRejectsUnreadableAdminBearerTokenFile(t *testing.T) {
+	t.Parallel()
+
+	cfg := validDataConfig()
+	cfg.Security = &config.SecurityConfig{
+		AdminBearerTokenFile: filepath.Join(t.TempDir(), "missing.token"),
+	}
+
+	_, err := NewDaemon(cfg, logging.New("pacmand", &bytes.Buffer{}))
+	if err == nil {
+		t.Fatal("expected token file resolution error")
+	}
+
+	assertContains(t, err.Error(), "resolve api admin bearer token")
+	assertContains(t, err.Error(), "read admin bearer token file")
 }
 
 func TestDaemonStartRecordsStartupStateAndHeartbeat(t *testing.T) {
@@ -221,6 +240,60 @@ func TestDaemonStartRecordsStartupStateAndHeartbeat(t *testing.T) {
 
 	cancel()
 	daemon.Wait()
+}
+
+func TestDaemonStartProtectsAPIRoutesWhenAdminAuthConfigured(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	cfg := validDataConfig()
+	cfg.Security = &config.SecurityConfig{
+		AdminBearerToken: "secret-token",
+	}
+
+	daemon, err := NewDaemon(
+		cfg,
+		logging.New("pacmand", &logs),
+		withHeartbeatInterval(time.Hour),
+		withPostgresProbe(func(context.Context, string) error { return nil }),
+		withPostgresStateProbe(func(context.Context, string) (postgres.Observation, error) {
+			return postgres.Observation{Role: cluster.MemberRolePrimary}, nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("new daemon: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() {
+		cancel()
+		daemon.Wait()
+	}()
+
+	if err := daemon.Start(ctx); err != nil {
+		t.Fatalf("start daemon: %v", err)
+	}
+
+	client := &http.Client{Timeout: time.Second}
+	waitForHTTPServer(t, client, "http://"+cfg.Node.APIAddress+"/health")
+
+	noAuthResponse := mustGET(t, client, "http://"+cfg.Node.APIAddress+"/api/v1/cluster", "")
+	defer noAuthResponse.Body.Close()
+
+	if noAuthResponse.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unexpected unauthorized status: got %d, want %d", noAuthResponse.StatusCode, http.StatusUnauthorized)
+	}
+
+	if got := noAuthResponse.Header.Get("WWW-Authenticate"); got != "Bearer" {
+		t.Fatalf("www-authenticate: got %q, want %q", got, "Bearer")
+	}
+
+	authedResponse := mustGET(t, client, "http://"+cfg.Node.APIAddress+"/api/v1/cluster", "Bearer secret-token")
+	defer authedResponse.Body.Close()
+
+	if authedResponse.StatusCode == http.StatusUnauthorized {
+		t.Fatal("expected authorized request to pass middleware")
+	}
 }
 
 func TestDaemonStartRecordsWitnessHeartbeatWithoutLocalPostgres(t *testing.T) {
@@ -860,6 +933,43 @@ func reserveLoopbackAddress() string {
 	}
 
 	return address
+}
+
+func waitForHTTPServer(t *testing.T, client *http.Client, rawURL string) {
+	t.Helper()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		response, err := client.Get(rawURL)
+		if err == nil {
+			response.Body.Close()
+			return
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("http server at %q did not become ready", rawURL)
+}
+
+func mustGET(t *testing.T, client *http.Client, rawURL, authorization string) *http.Response {
+	t.Helper()
+
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, rawURL, nil)
+	if err != nil {
+		t.Fatalf("build GET request %q: %v", rawURL, err)
+	}
+
+	if authorization != "" {
+		request.Header.Set("Authorization", authorization)
+	}
+
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("perform GET request %q: %v", rawURL, err)
+	}
+
+	return response
 }
 
 func waitForHeartbeat(t *testing.T, daemon *Daemon, predicate func(agentmodel.Heartbeat) bool) {

@@ -61,6 +61,10 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 	}
 
 	store := controlplane.NewMemoryStateStore()
+	apiAuthorizer, err := buildAPIAuthorizer(defaulted)
+	if err != nil {
+		return nil, err
+	}
 
 	daemon := &Daemon{
 		config:             defaulted,
@@ -70,8 +74,10 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 		postgresProbe:      dialPostgresAvailability,
 		postgresStateProbe: postgres.QueryObservation,
 		statePublisher:     store,
-		apiServer:          httpapi.New(defaulted.Node.Name, store, logger, httpapi.Config{}),
-		probeTimeout:       defaultPostgresProbeTimeout,
+		apiServer: httpapi.New(defaulted.Node.Name, store, logger, httpapi.Config{
+			Authorizer: apiAuthorizer,
+		}),
+		probeTimeout: defaultPostgresProbeTimeout,
 	}
 
 	for _, option := range options {
@@ -81,6 +87,19 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 	}
 
 	return daemon, nil
+}
+
+func buildAPIAuthorizer(cfg config.Config) (httpapi.Authorizer, error) {
+	if cfg.Security == nil || !cfg.Security.AdminAuthEnabled() {
+		return nil, nil
+	}
+
+	token, err := cfg.Security.ResolveAdminBearerToken(nil)
+	if err != nil {
+		return nil, fmt.Errorf("resolve api admin bearer token: %w", err)
+	}
+
+	return httpapi.NewAdminBearerTokenAuthorizer(token), nil
 }
 
 // Start records daemon startup state and emits the first lifecycle log entry.
