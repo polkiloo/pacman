@@ -74,6 +74,7 @@ func TestControlPlaneAggregatesSharedDaemonStateWithRealPostgres(t *testing.T) {
 		},
 		logging.New("pacmand", dataLogs),
 		agent.WithControlPlanePublisher(store),
+		agent.WithNoAPIServer(),
 	)
 	if err != nil {
 		t.Fatalf("new data daemon: %v", err)
@@ -92,6 +93,7 @@ func TestControlPlaneAggregatesSharedDaemonStateWithRealPostgres(t *testing.T) {
 		},
 		logging.New("pacmand", witnessLogs),
 		agent.WithControlPlanePublisher(store),
+		agent.WithNoAPIServer(),
 	)
 	if err != nil {
 		t.Fatalf("new witness daemon: %v", err)

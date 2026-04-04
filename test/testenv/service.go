@@ -12,6 +12,7 @@ import (
 	"github.com/docker/go-connections/nat"
 	testcontainers "github.com/testcontainers/testcontainers-go"
 	tcexec "github.com/testcontainers/testcontainers-go/exec"
+	tclog "github.com/testcontainers/testcontainers-go/log"
 	"github.com/testcontainers/testcontainers-go/network"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
@@ -58,6 +59,10 @@ func (e *Environment) StartService(t *testing.T, cfg ServiceConfig) *Service {
 		testcontainers.WithEnv(cfg.Env),
 		testcontainers.WithFiles(cfg.Files...),
 		network.WithNetwork(aliases, e.network),
+		testcontainers.WithLogger(tclog.TestLogger(t)),
+		testcontainers.WithLogConsumerConfig(&testcontainers.LogConsumerConfig{
+			Consumers: []testcontainers.LogConsumer{&testLogConsumer{t: t, name: cfg.Name}},
+		}),
 	}
 
 	if len(cfg.ExposedPorts) > 0 {

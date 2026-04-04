@@ -270,16 +270,17 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 
 ## 13. CLI (`pacmanctl`)
 
-- [ ] implement `cluster status`
-- [ ] implement `members list`
-- [ ] implement `cluster switchover`
-- [ ] implement `cluster failover`
-- [ ] implement `cluster maintenance enable`
-- [ ] implement `cluster maintenance disable`
-- [ ] implement `history list`
-- [ ] implement `cluster spec show`
-- [ ] implement `node status`
-- [ ] implement diagnostics commands
+- [x] implement `cluster status`
+- [x] implement `members list`
+- [x] implement `cluster switchover`
+- [x] implement `cluster failover`
+- [x] implement `cluster maintenance enable`
+- [x] implement `cluster maintenance disable`
+- [x] implement `history list`
+- [x] implement `cluster spec show`
+- [x] implement `node status`
+- [x] implement diagnostics commands
+- [ ] add `patronictl`-compatible command aliases, flags, and output modes for automation scripts
 
 ---
 

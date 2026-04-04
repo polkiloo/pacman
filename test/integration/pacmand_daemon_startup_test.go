@@ -63,8 +63,8 @@ kind: NodeConfig
 node:
   name: alpha-2
   role: data
-  apiAddress: 10.0.0.12:8081
-  controlAddress: 10.0.0.12:9091
+  apiAddress: 0.0.0.0:8081
+  controlAddress: 0.0.0.0:9091
 tls:
   enabled: true
   certFile: /etc/pacman/tls/server.crt
@@ -93,8 +93,8 @@ bootstrap:
 				`"msg":"started local agent daemon"`,
 				`"node":"alpha-2"`,
 				`"role":"data"`,
-				`"api_address":"10.0.0.12:8081"`,
-				`"control_address":"10.0.0.12:9091"`,
+				`"api_address":"0.0.0.0:8081"`,
+				`"control_address":"0.0.0.0:9091"`,
 				`"msg":"observed PostgreSQL availability"`,
 				`"msg":"published local state to control plane"`,
 				`"cluster_reachable":true`,

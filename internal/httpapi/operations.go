@@ -2,31 +2,14 @@ package httpapi
 
 import (
 	"errors"
+	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/polkiloo/pacman/internal/cluster"
 	"github.com/polkiloo/pacman/internal/controlplane"
 )
-
-type switchoverRequestJSON struct {
-	Candidate   string     `json:"candidate"`
-	ScheduledAt *time.Time `json:"scheduledAt,omitempty"`
-	Reason      string     `json:"reason,omitempty"`
-	RequestedBy string     `json:"requestedBy,omitempty"`
-}
-
-type failoverRequestJSON struct {
-	Reason      string `json:"reason,omitempty"`
-	RequestedBy string `json:"requestedBy,omitempty"`
-}
-
-type operationAcceptedResponse struct {
-	Message   string        `json:"message,omitempty"`
-	Operation operationJSON `json:"operation"`
-}
 
 func (srv *Server) handleSwitchoverCreate(c *fiber.Ctx) error {
 	if len(c.Body()) == 0 {
@@ -88,9 +71,9 @@ func (srv *Server) handleOpenAPIDocument(c *fiber.Ctx) error {
 		if srv.logger != nil {
 			srv.logger.Error(
 				"published openapi document unavailable",
-				"component", "httpapi",
-				"path", c.Path(),
-				"error", err.Error(),
+				slog.String("component", "httpapi"),
+				slog.String("path", c.Path()),
+				slog.String("error", err.Error()),
 			)
 		}
 
@@ -135,6 +118,7 @@ func buildOperationAcceptedResponse(operation cluster.Operation) operationAccept
 
 func normalizeFailoverRequest(body failoverRequestJSON) controlplane.FailoverIntentRequest {
 	request := controlplane.FailoverIntentRequest{
+		Candidate:   strings.TrimSpace(body.Candidate),
 		Reason:      strings.TrimSpace(body.Reason),
 		RequestedBy: strings.TrimSpace(body.RequestedBy),
 	}

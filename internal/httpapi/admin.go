@@ -13,46 +13,6 @@ import (
 	"github.com/polkiloo/pacman/internal/cluster"
 )
 
-type historyResponse struct {
-	Items []historyEntryJSON `json:"items"`
-}
-
-type historyEntryJSON struct {
-	OperationID string    `json:"operationId"`
-	Kind        string    `json:"kind"`
-	Timeline    int64     `json:"timeline,omitempty"`
-	WALLSN      string    `json:"walLsn,omitempty"`
-	FromMember  string    `json:"fromMember,omitempty"`
-	ToMember    string    `json:"toMember,omitempty"`
-	Reason      string    `json:"reason,omitempty"`
-	Result      string    `json:"result"`
-	FinishedAt  time.Time `json:"finishedAt"`
-}
-
-type maintenanceModeUpdateRequestJSON struct {
-	Enabled     bool   `json:"enabled"`
-	Reason      string `json:"reason,omitempty"`
-	RequestedBy string `json:"requestedBy,omitempty"`
-}
-
-type diagnosticsSummaryJSON struct {
-	ClusterName        string                        `json:"clusterName"`
-	GeneratedAt        time.Time                     `json:"generatedAt"`
-	ControlPlaneLeader string                        `json:"controlPlaneLeader,omitempty"`
-	QuorumReachable    *bool                         `json:"quorumReachable,omitempty"`
-	Warnings           []string                      `json:"warnings,omitempty"`
-	Members            []memberDiagnosticSummaryJSON `json:"members"`
-}
-
-type memberDiagnosticSummaryJSON struct {
-	Name        string     `json:"name"`
-	Role        string     `json:"role"`
-	State       string     `json:"state"`
-	LagBytes    int64      `json:"lagBytes,omitempty"`
-	LastSeenAt  *time.Time `json:"lastSeenAt,omitempty"`
-	NeedsRejoin bool       `json:"needsRejoin,omitempty"`
-}
-
 func (srv *Server) handleHistory(c *fiber.Ctx) error {
 	return c.JSON(historyResponse{
 		Items: buildHistoryEntryList(srv.store.History()),

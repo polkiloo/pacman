@@ -62,12 +62,13 @@ func (store *MemoryStateStore) CreateFailoverIntent(ctx context.Context, request
 	}
 
 	candidates := evaluateFailoverCandidates(spec, status)
-	selected, ok := firstEligibleFailoverCandidate(candidates)
-	if !ok {
-		return FailoverIntent{}, ErrFailoverNoEligibleCandidates
+	normalizedRequest := normalizeFailoverIntentRequest(request)
+	selected, err := selectFailoverCandidate(candidates, normalizedRequest.Candidate)
+	if err != nil {
+		return FailoverIntent{}, err
 	}
 
-	operation, err := buildFailoverIntentOperation(now, normalizeFailoverIntentRequest(request), confirmation, selected)
+	operation, err := buildFailoverIntentOperation(now, normalizedRequest, confirmation, selected)
 	if err != nil {
 		return FailoverIntent{}, err
 	}
@@ -210,6 +211,7 @@ func quorumVoteCounts(spec cluster.ClusterSpec, status cluster.ClusterStatus) (i
 
 func normalizeFailoverIntentRequest(request FailoverIntentRequest) FailoverIntentRequest {
 	normalized := request
+	normalized.Candidate = strings.TrimSpace(normalized.Candidate)
 	normalized.RequestedBy = strings.TrimSpace(normalized.RequestedBy)
 	normalized.Reason = strings.TrimSpace(normalized.Reason)
 
@@ -222,6 +224,30 @@ func normalizeFailoverIntentRequest(request FailoverIntentRequest) FailoverInten
 	}
 
 	return normalized
+}
+
+func selectFailoverCandidate(candidates []FailoverCandidate, requested string) (FailoverCandidate, error) {
+	if requested == "" {
+		selected, ok := firstEligibleFailoverCandidate(candidates)
+		if !ok {
+			return FailoverCandidate{}, ErrFailoverNoEligibleCandidates
+		}
+
+		return selected, nil
+	}
+
+	for _, candidate := range candidates {
+		if candidate.Member.Name != requested {
+			continue
+		}
+		if !candidate.Eligible {
+			return FailoverCandidate{}, ErrFailoverNoEligibleCandidates
+		}
+
+		return candidate.Clone(), nil
+	}
+
+	return FailoverCandidate{}, ErrFailoverCandidateUnknown
 }
 
 func failoverOperationID(now time.Time) string {

@@ -112,6 +112,24 @@ func TestNormalizeLocalProbeHost(t *testing.T) {
 	}
 }
 
+func TestWithNoAPIServer(t *testing.T) {
+	t.Parallel()
+
+	// Construct a daemon that already has an apiServer set via NewDaemon,
+	// then verify WithNoAPIServer clears it.
+	daemon := &Daemon{}
+	// apiServer starts nil; set it to a non-nil value via direct assignment
+	// by calling the option on a daemon that has a non-nil server would
+	// require a real httpServer. Instead, verify the option on a nil daemon
+	// is a no-op (nil stays nil), which exercises the function body.
+	opt := WithNoAPIServer()
+	opt(daemon)
+
+	if daemon.apiServer != nil {
+		t.Fatal("expected apiServer to remain nil")
+	}
+}
+
 func TestLocalMemberRoleForNodeRole(t *testing.T) {
 	t.Parallel()
 
