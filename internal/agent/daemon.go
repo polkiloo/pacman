@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -30,6 +31,9 @@ type Daemon struct {
 	postgresStateProbe postgresStateProbe
 	statePublisher     controlplane.NodeStatePublisher
 	apiServer          httpServer
+	apiTLSConfig       *tls.Config
+	apiAuthorizer      httpapi.Authorizer
+	apiServerDisabled  bool
 	probeTimeout       time.Duration
 	startedFlag        atomic.Bool
 
@@ -74,16 +78,21 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 		postgresProbe:      dialPostgresAvailability,
 		postgresStateProbe: postgres.QueryObservation,
 		statePublisher:     store,
-		apiServer: httpapi.New(defaulted.Node.Name, store, logger, httpapi.Config{
-			Authorizer: apiAuthorizer,
-		}),
-		probeTimeout: defaultPostgresProbeTimeout,
+		apiAuthorizer:      apiAuthorizer,
+		probeTimeout:       defaultPostgresProbeTimeout,
 	}
 
 	for _, option := range options {
 		if option != nil {
 			option(daemon)
 		}
+	}
+
+	if !daemon.apiServerDisabled && daemon.apiServer == nil {
+		daemon.apiServer = httpapi.New(defaulted.Node.Name, store, logger, httpapi.Config{
+			TLSConfig:  daemon.apiTLSConfig,
+			Authorizer: daemon.apiAuthorizer,
+		})
 	}
 
 	return daemon, nil
@@ -169,6 +178,7 @@ func (daemon *Daemon) logStartup(ctx context.Context, startup agentmodel.Startup
 		slog.String("node", startup.NodeName),
 		slog.String("role", startup.NodeRole.String()),
 		slog.Bool("manages_postgres", startup.ManagesPostgres),
+		slog.Bool("api_tls_enabled", daemon.config.TLS != nil && daemon.config.TLS.Enabled),
 		slog.String("api_address", startup.APIAddress),
 		slog.String("control_address", startup.ControlAddress),
 	)

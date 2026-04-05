@@ -87,6 +87,26 @@ func TestNewDaemonRejectsUnreadableAdminBearerTokenFile(t *testing.T) {
 	assertContains(t, err.Error(), "read admin bearer token file")
 }
 
+func TestNewDaemonRejectsUnreadableAPITLSFiles(t *testing.T) {
+	t.Parallel()
+
+	cfg := validDataConfig()
+	cfg.TLS = &config.TLSConfig{
+		Enabled:  true,
+		CertFile: filepath.Join(t.TempDir(), "missing.crt"),
+		KeyFile:  filepath.Join(t.TempDir(), "missing.key"),
+	}
+
+	daemon, err := NewDaemon(cfg, logging.New("pacmand", &bytes.Buffer{}))
+	if err != nil {
+		t.Fatalf("new daemon: %v", err)
+	}
+
+	if daemon == nil {
+		t.Fatal("expected daemon to be constructed without loading tls files")
+	}
+}
+
 func TestDaemonStartRecordsStartupStateAndHeartbeat(t *testing.T) {
 	t.Parallel()
 

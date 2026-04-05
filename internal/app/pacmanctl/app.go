@@ -14,7 +14,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"go.uber.org/dig"
+	"go.uber.org/fx"
 	"gopkg.in/yaml.v3"
 
 	"github.com/polkiloo/pacman/internal/version"
@@ -46,7 +46,7 @@ type App struct {
 
 // Params defines pacmanctl constructor dependencies.
 type Params struct {
-	dig.In
+	fx.In
 
 	Stdout io.Writer `name:"stdout"`
 	Stderr io.Writer `name:"stderr"`

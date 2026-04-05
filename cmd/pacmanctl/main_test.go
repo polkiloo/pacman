@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -8,6 +9,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"go.uber.org/fx"
+
+	pacmanctlcmd "github.com/polkiloo/pacman/internal/app/pacmanctl"
+	"github.com/polkiloo/pacman/internal/fxrun"
 )
 
 func TestRunReturnsSuccessForHelp(t *testing.T) {
@@ -204,7 +210,16 @@ func runWithCapturedIO(t *testing.T, args []string) (int, string, string) {
 		os.Stderr = oldStderr
 	}()
 
-	exitCode := run()
+	ctx := context.Background()
+	app := fx.New(
+		fx.NopLogger,
+		fx.Provide(func() context.Context { return ctx }),
+		pacmanctlcmd.Module(processName, os.Args[1:], os.Stdout, os.Stderr),
+	)
+	exitCode := 0
+	if err := fxrun.Run(ctx, app); err != nil {
+		exitCode = 1
+	}
 
 	if err := stdoutW.Close(); err != nil {
 		t.Fatalf("close stdout writer: %v", err)

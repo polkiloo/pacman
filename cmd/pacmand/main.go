@@ -2,65 +2,39 @@ package main
 
 import (
 	"context"
-	"log/slog"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"go.uber.org/dig"
+	"go.uber.org/fx"
 
 	pacmandcmd "github.com/polkiloo/pacman/internal/app/pacmand"
-	"github.com/polkiloo/pacman/internal/di"
-	"github.com/polkiloo/pacman/internal/logging"
+	"github.com/polkiloo/pacman/internal/buildinfo"
+	"github.com/polkiloo/pacman/internal/fxrun"
+	"github.com/polkiloo/pacman/internal/version"
 )
 
 const processName = "pacmand"
 
-type invokeParams struct {
-	dig.In
-
-	App  *pacmandcmd.App
-	Args []string `name:"args"`
-}
-
 func main() {
-	os.Exit(run())
-}
+	buildinfo.Print(os.Stdout, buildinfo.Info{
+		Version: version.Version,
+		Date:    version.BuildDate,
+		Commit:  version.Commit,
+	})
 
-func run() int {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
-	return runContext(ctx)
-}
+	app := fx.New(
+		fx.NopLogger,
+		fx.Provide(func() context.Context { return ctx }),
+		pacmandcmd.Module(processName, os.Args[1:], os.Stdout, os.Stderr),
+	)
 
-func runContext(ctx context.Context) int {
-	logger := logging.New(processName, os.Stderr)
-	container := dig.New()
-
-	if err := di.ProvideBase(container, processName, os.Args[1:], os.Stdout, os.Stderr); err != nil {
-		logger.Error("failed to bootstrap DI container", slog.Any("error", err))
-		return 1
+	if err := fxrun.Run(ctx, app); err != nil {
+		log.Printf("server stopped with error: %v", err)
+		os.Exit(1)
 	}
-
-	if err := container.Provide(pacmandcmd.New); err != nil {
-		logger.Error("failed to register app dependencies", slog.Any("error", err))
-		return 1
-	}
-
-	var runErr error
-
-	if err := container.Invoke(func(params invokeParams) {
-		runErr = params.App.Run(ctx, params.Args)
-	}); err != nil {
-		logger.Error("failed to invoke app", slog.Any("error", err))
-		return 1
-	}
-
-	if runErr != nil {
-		logger.Error("app run failed", slog.Any("error", runErr))
-		return 1
-	}
-
-	return 0
 }
