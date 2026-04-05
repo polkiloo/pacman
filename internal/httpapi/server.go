@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"log/slog"
 	"net"
@@ -41,6 +42,9 @@ type Config struct {
 	// LivenessWindow is the maximum allowed age of the last heartbeat before
 	// GET /liveness returns 503. Defaults to 30 seconds.
 	LivenessWindow time.Duration
+	// TLSConfig optionally enables TLS for the external PACMAN HTTP API.
+	// When nil, the server listens in plaintext.
+	TLSConfig *tls.Config
 	// Authorizer optionally enforces authenticated access for administrative
 	// control-plane endpoints. When nil, authentication is disabled.
 	Authorizer Authorizer
@@ -58,6 +62,7 @@ type Server struct {
 	store          NodeStatusReader
 	logger         *slog.Logger
 	livenessWindow time.Duration
+	tlsConfig      *tls.Config
 	authorizer     Authorizer
 	openAPIDoc     OpenAPIDocumentProvider
 	requestSeq     atomic.Uint64
@@ -84,6 +89,7 @@ func New(nodeName string, store NodeStatusReader, logger *slog.Logger, cfg Confi
 		store:          store,
 		logger:         logger,
 		livenessWindow: lw,
+		tlsConfig:      cfg.TLSConfig,
 		authorizer:     cfg.Authorizer,
 		openAPIDoc:     cfg.OpenAPIDocument,
 	}
@@ -181,7 +187,12 @@ func (srv *Server) Start(ctx context.Context, addr string) error {
 	}()
 
 	go func() {
-		err := srv.app.Listener(listener)
+		serveListener := listener
+		if srv.tlsConfig != nil {
+			serveListener = tls.NewListener(listener, srv.tlsConfig.Clone())
+		}
+
+		err := srv.app.Listener(serveListener)
 
 		srv.mu.Lock()
 		srv.listener = nil
