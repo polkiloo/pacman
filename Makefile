@@ -12,7 +12,7 @@ endif
 GOLANGCI_LINT ?= $(GOBIN)/golangci-lint
 COVERAGE_OUT ?= coverage.out
 COVERAGE_MIN ?= 90.0
-COVERAGE_PACKAGES ?= $(shell $(GO) list ./... | grep -v '/test/')
+PACKAGE_LIST_CMD = $(GO) list ./... | grep -v '/test/'
 PACMAN_TEST_IMAGE ?= pacman-test:local
 PACMAN_TEST_PGEXT_IMAGE ?= pacman-pgext-postgres:local
 DOCKER_BUILD_PROGRESS ?= plain
@@ -64,7 +64,12 @@ test-integration: docker-build-test-image docker-build-pgext-image
 	PACMAN_TEST_IMAGE=$(PACMAN_TEST_IMAGE) PACMAN_TEST_PGEXT_IMAGE=$(PACMAN_TEST_PGEXT_IMAGE) $(GO) test $(GO_TEST_INTEGRATION_FLAGS) -tags=integration ./test/...
 
 coverage:
-	$(GO) test -coverprofile=$(COVERAGE_OUT) $(COVERAGE_PACKAGES)
+	@packages="$$( $(PACKAGE_LIST_CMD) )"; \
+	if [ -z "$$packages" ]; then \
+		echo "failed to resolve coverage package list" >&2; \
+		exit 1; \
+	fi; \
+	$(GO) test -coverprofile=$(COVERAGE_OUT) $$packages
 
 coverage-check: coverage
 	@coverage=$$($(GO) tool cover -func=$(COVERAGE_OUT) | awk '/^total:/ { gsub("%", "", $$3); print $$3 }'); \
