@@ -41,6 +41,30 @@ bootstrap:
     - %s
 `
 
+const daemonNodeTLSConfig = `
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: %s
+  role: data
+  apiAddress: 0.0.0.0:8080
+tls:
+  enabled: true
+  certFile: /etc/pacman/tls/server.crt
+  keyFile: /etc/pacman/tls/server.key
+postgres:
+  dataDir: /var/lib/postgresql/data
+  listenAddress: %s
+  port: 5432
+bootstrap:
+  clusterName: alpha
+  initialPrimary: %s
+  seedAddresses:
+    - 0.0.0.0:9090
+  expectedMembers:
+    - %s
+`
+
 // singleNodeDaemon holds runtime handles for a single-node pacmand integration environment.
 type singleNodeDaemon struct {
 	Base     string
@@ -80,6 +104,41 @@ func startSingleNodeDaemon(t *testing.T, nodeName string) singleNodeDaemon {
 		Base:     "http://" + service.Address(t, "8080"),
 		Postgres: pg,
 		Client:   &http.Client{Timeout: 2 * time.Second},
+	}
+}
+
+func startSingleNodeDaemonTLS(t *testing.T, nodeName string) singleNodeDaemon {
+	t.Helper()
+
+	env := testenv.New(t)
+	prefix := sanitizeIntegrationName(t.Name())
+	pg := env.StartPostgres(t, prefix, prefix+"-postgres")
+	testenv.RequireLocalImage(t, pacmanTestImage())
+
+	tlsFixture := writeIntegrationTLSFixture(t)
+	configBody := fmt.Sprintf(daemonNodeTLSConfig, nodeName, pg.Alias(), nodeName, nodeName)
+	files := []testcontainers.ContainerFile{writeDaemonConfigFile(t, configBody)}
+	files = append(files, tlsFixture.containerFiles("/etc/pacman/tls/server.crt", "/etc/pacman/tls/server.key")...)
+
+	service := env.StartService(t, testenv.ServiceConfig{
+		Name:         prefix + "-service",
+		Image:        pacmanTestImage(),
+		Aliases:      []string{prefix + "-service"},
+		Env:          postgresConnectionEnv(pg),
+		Files:        files,
+		ExposedPorts: []string{"8080/tcp"},
+		Cmd: []string{
+			"/bin/sh",
+			"-lc",
+			fmt.Sprintf("pacmand -config %s", daemonConfigPath),
+		},
+		WaitStrategy: wait.ForListeningPort("8080/tcp").WithStartupTimeout(pacmandStartupTimeout),
+	})
+
+	return singleNodeDaemon{
+		Base:     "https://" + service.Address(t, "8080"),
+		Postgres: pg,
+		Client:   tlsFixture.client(t, "localhost"),
 	}
 }
 
