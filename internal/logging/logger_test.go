@@ -3,8 +3,11 @@ package logging
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"testing"
+
+	"go.uber.org/fx"
 
 	"github.com/polkiloo/pacman/internal/version"
 )
@@ -43,6 +46,71 @@ func TestNewDefaultsServiceName(t *testing.T) {
 	entry := decodeEntry(t, buffer.Bytes())
 
 	assertField(t, entry, "service", defaultService)
+}
+
+func TestModuleProvidesLoggerUsingRegisteredStderr(t *testing.T) {
+	t.Parallel()
+
+	var stderr bytes.Buffer
+	type resolved struct {
+		fx.In
+
+		Logger *slog.Logger
+	}
+
+	var deps resolved
+	app := fx.New(
+		fx.NopLogger,
+		fx.Provide(func() io.Writer { return io.Discard }),
+		fx.Provide(func() struct {
+			fx.Out
+
+			Stderr io.Writer `name:"stderr"`
+		} {
+			return struct {
+				fx.Out
+
+				Stderr io.Writer `name:"stderr"`
+			}{Stderr: &stderr}
+		}),
+		Module("pacmand"),
+		fx.Populate(&deps),
+	)
+	if err := app.Err(); err != nil {
+		t.Fatalf("build fx app: %v", err)
+	}
+
+	deps.Logger.Info("module logger ready")
+
+	entry := decodeEntry(t, stderr.Bytes())
+	assertField(t, entry, "service", "pacmand")
+	assertField(t, entry, "msg", "module logger ready")
+}
+
+func TestModuleReturnsLoggerRegistrationError(t *testing.T) {
+	t.Parallel()
+
+	app := fx.New(
+		fx.NopLogger,
+		fx.Provide(func() struct {
+			fx.Out
+
+			Stderr io.Writer `name:"stderr"`
+		} {
+			return struct {
+				fx.Out
+
+				Stderr io.Writer `name:"stderr"`
+			}{Stderr: io.Discard}
+		}),
+		fx.Provide(func() *slog.Logger {
+			return slog.New(slog.NewTextHandler(io.Discard, nil))
+		}),
+		Module("pacmand"),
+	)
+	if err := app.Err(); err == nil {
+		t.Fatal("expected logger registration error")
+	}
 }
 
 func decodeEntry(t *testing.T, payload []byte) map[string]any {
