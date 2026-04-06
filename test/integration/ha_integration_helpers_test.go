@@ -426,7 +426,12 @@ func (executor containerPGRewindExecutor) Rewind(_ context.Context, request cont
 	}
 
 	command := fmt.Sprintf(
-		"pg_rewind --version >/dev/null && printf 'member=%s primary=%s\\n' > %s",
+		"pg_rewind_bin=$(command -v pg_rewind || true); "+
+			"if [ -z \"$pg_rewind_bin\" ]; then "+
+			"for candidate in /usr/lib/postgresql/*/bin/pg_rewind /usr/local/bin/pg_rewind; do "+
+			"if [ -x \"$candidate\" ]; then pg_rewind_bin=\"$candidate\"; break; fi; "+
+			"done; fi; "+
+			"[ -n \"$pg_rewind_bin\" ] && \"$pg_rewind_bin\" --version >/dev/null && printf 'member=%s primary=%s\\n' > %s",
 		request.Decision.Member.Name,
 		request.Decision.CurrentPrimary.Name,
 		executor.markerPath,
