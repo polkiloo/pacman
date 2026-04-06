@@ -3,6 +3,8 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -17,7 +19,10 @@ import (
 	"github.com/polkiloo/pacman/internal/config"
 	"github.com/polkiloo/pacman/internal/controlplane"
 	"github.com/polkiloo/pacman/internal/logging"
+	"github.com/polkiloo/pacman/internal/peerapi"
 	"github.com/polkiloo/pacman/internal/postgres"
+	"github.com/polkiloo/pacman/internal/security"
+	"github.com/polkiloo/pacman/internal/security/tlstesting"
 )
 
 func TestNewDaemonRejectsNilLogger(t *testing.T) {
@@ -100,6 +105,47 @@ func TestNewDaemonRejectsUnreadableAPITLSFiles(t *testing.T) {
 	_, err := NewDaemon(cfg, logging.New("pacmand", &bytes.Buffer{}))
 	if !errors.Is(err, ErrAPIServerTLSRequired) {
 		t.Fatalf("expected tls dependency error, got %v", err)
+	}
+}
+
+func TestNewDaemonRejectsMissingPeerServerTLSConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := validWitnessMemberMTLSConfig()
+
+	_, err := NewDaemon(
+		cfg,
+		logging.New("pacmand", &bytes.Buffer{}),
+		WithNoAPIServer(),
+	)
+	if !errors.Is(err, ErrPeerServerTLSRequired) {
+		t.Fatalf("expected peer server tls dependency error, got %v", err)
+	}
+}
+
+func TestNewDaemonRejectsMissingPeerClientTLSConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := validWitnessMemberMTLSConfig()
+	fixture := tlstesting.WriteMutual(t, "alpha-1", "beta-1")
+	serverTLSConfig, err := security.LoadServerTLSConfig(config.TLSConfig{
+		Enabled:  true,
+		CAFile:   fixture.CAFile,
+		CertFile: fixture.Server.CertFile,
+		KeyFile:  fixture.Server.KeyFile,
+	}, tls.RequireAndVerifyClientCert)
+	if err != nil {
+		t.Fatalf("load peer server tls config: %v", err)
+	}
+
+	_, err = NewDaemon(
+		cfg,
+		logging.New("pacmand", &bytes.Buffer{}),
+		WithNoAPIServer(),
+		WithPeerServerTLSConfig(serverTLSConfig),
+	)
+	if !errors.Is(err, ErrPeerClientTLSRequired) {
+		t.Fatalf("expected peer client tls dependency error, got %v", err)
 	}
 }
 
@@ -922,6 +968,227 @@ func TestDaemonStartReturnsContextError(t *testing.T) {
 	}
 }
 
+func TestDaemonStartServesPeerIdentityOverMTLS(t *testing.T) {
+	t.Parallel()
+
+	fixture := tlstesting.WriteMutual(t, "alpha-1", "beta-1")
+	serverTLSConfig, err := security.LoadServerTLSConfig(config.TLSConfig{
+		Enabled:  true,
+		CAFile:   fixture.CAFile,
+		CertFile: fixture.Server.CertFile,
+		KeyFile:  fixture.Server.KeyFile,
+	}, tls.RequireAndVerifyClientCert)
+	if err != nil {
+		t.Fatalf("load peer server tls config: %v", err)
+	}
+
+	clientTLSConfig, err := security.LoadClientTLSConfig(config.TLSConfig{
+		CAFile:     fixture.CAFile,
+		CertFile:   fixture.Client.CertFile,
+		KeyFile:    fixture.Client.KeyFile,
+		ServerName: "localhost",
+	})
+	if err != nil {
+		t.Fatalf("load peer client tls config: %v", err)
+	}
+
+	cfg := validWitnessMemberMTLSConfig()
+	cfg.TLS = &config.TLSConfig{
+		Enabled:  true,
+		CAFile:   fixture.CAFile,
+		CertFile: fixture.Server.CertFile,
+		KeyFile:  fixture.Server.KeyFile,
+	}
+	cfg.Bootstrap = &config.ClusterBootstrapConfig{
+		ClusterName:     "alpha",
+		InitialPrimary:  "alpha-1",
+		SeedAddresses:   []string{cfg.Node.ControlAddress},
+		ExpectedMembers: []string{"alpha-1", "beta-1"},
+	}
+
+	daemon, err := NewDaemon(
+		cfg,
+		logging.New("pacmand", &bytes.Buffer{}),
+		WithNoAPIServer(),
+		WithPeerServerTLSConfig(serverTLSConfig),
+		WithPeerClientTLSConfig(clientTLSConfig),
+	)
+	if err != nil {
+		t.Fatalf("new daemon: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := daemon.Start(ctx); err != nil {
+		t.Fatalf("start daemon: %v", err)
+	}
+
+	client := &http.Client{
+		Timeout: time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: clientTLSConfig,
+		},
+	}
+
+	waitForHTTPServer(t, client, "https://"+cfg.Node.ControlAddress+"/peer/v1/identity")
+
+	response := mustGET(t, client, "https://"+cfg.Node.ControlAddress+"/peer/v1/identity", "")
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected peer identity status: got %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	var payload peerapi.IdentityResponse
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode peer identity response: %v", err)
+	}
+
+	if payload.NodeName != "alpha-1" {
+		t.Fatalf("nodeName: got %q, want %q", payload.NodeName, "alpha-1")
+	}
+
+	if payload.Peer.Subject != "beta-1" {
+		t.Fatalf("peer subject: got %q, want %q", payload.Peer.Subject, "beta-1")
+	}
+
+	cancel()
+	daemon.Wait()
+}
+
+func TestDaemonProbeSeedPeersLogsValidatedPeerMTLSConnection(t *testing.T) {
+	t.Parallel()
+
+	fixture := tlstesting.WriteMutual(t, "alpha-1", "beta-1")
+	serverTLSConfig, err := security.LoadServerTLSConfig(config.TLSConfig{
+		Enabled:  true,
+		CAFile:   fixture.CAFile,
+		CertFile: fixture.Server.CertFile,
+		KeyFile:  fixture.Server.KeyFile,
+	}, tls.RequireAndVerifyClientCert)
+	if err != nil {
+		t.Fatalf("load peer server tls config: %v", err)
+	}
+
+	clientTLSConfig, err := security.LoadClientTLSConfig(config.TLSConfig{
+		CAFile:     fixture.CAFile,
+		CertFile:   fixture.Client.CertFile,
+		KeyFile:    fixture.Client.KeyFile,
+		ServerName: "localhost",
+	})
+	if err != nil {
+		t.Fatalf("load peer client tls config: %v", err)
+	}
+
+	serverCtx, cancelServer := context.WithCancel(context.Background())
+	defer cancelServer()
+
+	server := peerapi.New("alpha-1", logging.New("peerapi", &bytes.Buffer{}), peerapi.Config{
+		TLSConfig:    serverTLSConfig,
+		AllowedPeers: []string{"beta-1"},
+	})
+	seedAddress := reserveLoopbackAddress()
+	if err := server.Start(serverCtx, seedAddress); err != nil {
+		t.Fatalf("start peer server: %v", err)
+	}
+
+	client := &http.Client{
+		Timeout: time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: clientTLSConfig,
+		},
+	}
+	waitForHTTPServer(t, client, "https://"+seedAddress+"/peer/v1/identity")
+
+	var logs bytes.Buffer
+	daemon := &Daemon{
+		logger:              logging.New("pacmand", &logs),
+		peerClientTLSConfig: clientTLSConfig,
+		peerProbeTimeout:    time.Second,
+		config: config.Config{
+			Node: config.NodeConfig{
+				ControlAddress: reserveLoopbackAddress(),
+			},
+			Bootstrap: &config.ClusterBootstrapConfig{
+				SeedAddresses: []string{seedAddress},
+			},
+		},
+	}
+
+	daemon.probeSeedPeers(context.Background())
+
+	assertContains(t, logs.String(), `"msg":"validated peer mTLS connection"`)
+	assertContains(t, logs.String(), `"seed_address":"`+seedAddress+`"`)
+
+	cancelServer()
+	if err := server.Wait(); err != nil {
+		t.Fatalf("wait for peer server shutdown: %v", err)
+	}
+}
+
+func TestShouldProbeSeedAddress(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name             string
+		seedAddress      string
+		localControlAddr string
+		want             bool
+	}{
+		{name: "blank", seedAddress: "", localControlAddr: "127.0.0.1:9090", want: false},
+		{name: "local address", seedAddress: "127.0.0.1:9090", localControlAddr: "127.0.0.1:9090", want: false},
+		{name: "unspecified ip", seedAddress: "0.0.0.0:9090", localControlAddr: "127.0.0.1:9090", want: false},
+		{name: "remote ip", seedAddress: "127.0.0.2:9090", localControlAddr: "127.0.0.1:9090", want: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := shouldProbeSeedAddress(tc.seedAddress, tc.localControlAddr); got != tc.want {
+				t.Fatalf("shouldProbeSeedAddress(%q, %q): got %t, want %t", tc.seedAddress, tc.localControlAddr, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMemberPeerSubjects(t *testing.T) {
+	t.Parallel()
+
+	if subjects := memberPeerSubjects(config.Config{}); subjects != nil {
+		t.Fatalf("expected nil subjects without bootstrap config, got %v", subjects)
+	}
+
+	cfg := config.Config{
+		Bootstrap: &config.ClusterBootstrapConfig{
+			ExpectedMembers: []string{"alpha-1", "beta-1"},
+		},
+	}
+	subjects := memberPeerSubjects(cfg)
+	if len(subjects) != 2 {
+		t.Fatalf("unexpected subject count: got %d, want %d", len(subjects), 2)
+	}
+
+	subjects[0] = "mutated"
+	if cfg.Bootstrap.ExpectedMembers[0] != "alpha-1" {
+		t.Fatal("expected member peer subjects to return a copy")
+	}
+}
+
+func TestWithAPIServerTLSConfig(t *testing.T) {
+	t.Parallel()
+
+	expected := &tls.Config{MinVersion: tls.VersionTLS12}
+	daemon := &Daemon{}
+
+	WithAPIServerTLSConfig(expected)(daemon)
+
+	if daemon.apiTLSConfig != expected {
+		t.Fatal("expected api tls config option to store the provided config")
+	}
+}
+
 func validDataConfig() config.Config {
 	return config.Config{
 		APIVersion: config.APIVersionV1Alpha1,
@@ -933,6 +1200,34 @@ func validDataConfig() config.Config {
 		},
 		Postgres: &config.PostgresLocalConfig{
 			DataDir: "/var/lib/postgresql/data",
+		},
+	}
+}
+
+func validWitnessMemberMTLSConfig() config.Config {
+	return config.Config{
+		APIVersion: config.APIVersionV1Alpha1,
+		Kind:       config.KindNodeConfig,
+		Node: config.NodeConfig{
+			Name:           "alpha-1",
+			Role:           cluster.NodeRoleWitness,
+			APIAddress:     reserveLoopbackAddress(),
+			ControlAddress: reserveLoopbackAddress(),
+		},
+		TLS: &config.TLSConfig{
+			Enabled:  true,
+			CAFile:   "tls/ca.crt",
+			CertFile: "tls/server.crt",
+			KeyFile:  "tls/server.key",
+		},
+		Security: &config.SecurityConfig{
+			MemberMTLSEnabled: true,
+		},
+		Bootstrap: &config.ClusterBootstrapConfig{
+			ClusterName:     "alpha",
+			InitialPrimary:  "alpha-1",
+			SeedAddresses:   []string{"127.0.0.1:9090"},
+			ExpectedMembers: []string{"alpha-1", "beta-1"},
 		},
 	}
 }

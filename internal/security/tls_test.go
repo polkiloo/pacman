@@ -92,3 +92,35 @@ func TestLoadClientTLSConfigLoadsRootsAndServerName(t *testing.T) {
 		t.Fatalf("minVersion: got %v, want %v", tlsConfig.MinVersion, tls.VersionTLS12)
 	}
 }
+
+func TestLoadClientTLSConfigLoadsClientCertificateAndInsecureSkipVerify(t *testing.T) {
+	t.Parallel()
+
+	fixture := tlstesting.Write(t)
+
+	tlsConfig, err := LoadClientTLSConfig(config.TLSConfig{
+		CAFile:             fixture.CAFile,
+		CertFile:           fixture.CertFile,
+		KeyFile:            fixture.KeyFile,
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		t.Fatalf("load client tls config with certificate: %v", err)
+	}
+
+	if len(tlsConfig.Certificates) != 1 {
+		t.Fatalf("certificates: got %d, want %d", len(tlsConfig.Certificates), 1)
+	}
+
+	if !tlsConfig.InsecureSkipVerify {
+		t.Fatal("expected insecure skip verify to be enabled")
+	}
+}
+
+func TestLoadCertPoolRejectsEmptyPath(t *testing.T) {
+	t.Parallel()
+
+	if _, err := LoadCertPool(""); err == nil {
+		t.Fatal("expected empty path error")
+	}
+}

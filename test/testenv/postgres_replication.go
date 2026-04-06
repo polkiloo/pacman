@@ -95,6 +95,10 @@ type postgresContainerConfig struct {
 func (e *Environment) startCustomPostgres(t *testing.T, cfg postgresContainerConfig) *Postgres {
 	t.Helper()
 
+	if e.localPostgres {
+		requireLocalImage(e.ctx, t, e.postgresImage)
+	}
+
 	if strings.TrimSpace(cfg.Name) == "" {
 		t.Fatal("postgres fixture name must be provided")
 	}

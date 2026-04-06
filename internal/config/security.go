@@ -16,6 +16,16 @@ func (security *SecurityConfig) AdminAuthEnabled() bool {
 	return strings.TrimSpace(security.AdminBearerToken) != "" || strings.TrimSpace(security.AdminBearerTokenFile) != ""
 }
 
+// PeerMTLSEnabled reports whether peer mTLS is enabled for cluster-member
+// traffic on the control-plane listener.
+func (security *SecurityConfig) PeerMTLSEnabled() bool {
+	if security == nil {
+		return false
+	}
+
+	return security.MemberMTLSEnabled
+}
+
 // ResolveAdminBearerToken returns the configured admin bearer token, loading it
 // from disk when a token file is configured. File-backed secrets are trimmed so
 // newline-terminated secret mounts work without extra configuration.

@@ -21,7 +21,7 @@ import (
 )
 
 const defaultRunnerImage = "pacman-test:local"
-const defaultPostgresImage = "postgres:17-alpine"
+const defaultPostgresImage = "pacman-pgext-postgres:local"
 const dockerOperationTimeout = 30 * time.Second
 const dockerProbeTimeout = 5 * time.Second
 
@@ -40,6 +40,7 @@ type Environment struct {
 	ctx           context.Context
 	image         string
 	postgresImage string
+	localPostgres bool
 	network       *testcontainers.DockerNetwork
 	namePrefix    string
 }
@@ -86,10 +87,7 @@ func New(t *testing.T) *Environment {
 		image = defaultRunnerImage
 	}
 
-	postgresImage := os.Getenv("PACMAN_TEST_POSTGRES_IMAGE")
-	if strings.TrimSpace(postgresImage) == "" {
-		postgresImage = defaultPostgresImage
-	}
+	postgresImage, localPostgres := resolvePostgresImage()
 
 	requireDockerDaemon(t)
 
@@ -114,6 +112,7 @@ func New(t *testing.T) *Environment {
 		ctx:           ctx,
 		image:         image,
 		postgresImage: postgresImage,
+		localPostgres: localPostgres,
 		network:       nw,
 		namePrefix:    sanitizeName(t.Name()),
 	}
@@ -182,6 +181,10 @@ func (e *Environment) StartPacmanctl(t *testing.T, name string, aliases ...strin
 // StartPostgres starts a PostgreSQL fixture container on the shared network.
 func (e *Environment) StartPostgres(t *testing.T, name, alias string) *Postgres {
 	t.Helper()
+
+	if e.localPostgres {
+		requireLocalImage(e.ctx, t, e.postgresImage)
+	}
 
 	if strings.TrimSpace(name) == "" {
 		t.Fatal("postgres fixture name must be provided")
@@ -574,6 +577,18 @@ func (c *testLogConsumer) Accept(l testcontainers.Log) {
 func sanitizeName(value string) string {
 	replacer := strings.NewReplacer("/", "-", "_", "-", " ", "-", ":", "-")
 	return strings.ToLower(replacer.Replace(value))
+}
+
+func resolvePostgresImage() (string, bool) {
+	if image := strings.TrimSpace(os.Getenv("PACMAN_TEST_POSTGRES_IMAGE")); image != "" {
+		return image, false
+	}
+
+	if image := strings.TrimSpace(os.Getenv("PACMAN_TEST_PGEXT_IMAGE")); image != "" {
+		return image, true
+	}
+
+	return defaultPostgresImage, true
 }
 
 func readContainerLogs(t *testing.T, ctx context.Context, container testcontainers.Container, name string) string {

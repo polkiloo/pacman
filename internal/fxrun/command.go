@@ -8,6 +8,13 @@ import (
 	"go.uber.org/fx"
 )
 
+// isExpectedShutdown returns true when err is a context cancellation caused by
+// the runner's own context being cancelled — i.e. the app is shutting down
+// cleanly and the error is not a real failure.
+func isExpectedShutdown(err error, runCtx context.Context) bool {
+	return errors.Is(err, context.Canceled) && runCtx.Err() != nil
+}
+
 // RegisterCommand hooks a command runner into the Fx lifecycle and drives a
 // clean application shutdown when the command finishes.
 func RegisterCommand(lifecycle fx.Lifecycle, shutdowner fx.Shutdowner, logger *slog.Logger, baseContext context.Context, run func(context.Context) error) {
@@ -20,7 +27,7 @@ func RegisterCommand(lifecycle fx.Lifecycle, shutdowner fx.Shutdowner, logger *s
 				defer close(done)
 
 				err := run(runContext)
-				if err != nil && !(errors.Is(err, context.Canceled) && runContext.Err() != nil) {
+				if err != nil && !isExpectedShutdown(err, runContext) {
 					if logger != nil {
 						logger.Error("app run failed", slog.Any("error", err))
 					}

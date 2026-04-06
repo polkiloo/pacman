@@ -28,6 +28,8 @@ type App struct {
 	options       commandOptions
 	runtimeConfig *runtimeConfig
 	apiTLSConfig  *tls.Config
+	peerServerTLS *tls.Config
+	peerClientTLS *tls.Config
 }
 
 // Params defines pacmand constructor dependencies.
@@ -39,6 +41,8 @@ type Params struct {
 	Options       commandOptions
 	RuntimeConfig *runtimeConfig
 	APITLSConfig  *tls.Config `name:"api_server_tls" optional:"true"`
+	PeerServerTLS *tls.Config `name:"member_peer_server_tls" optional:"true"`
+	PeerClientTLS *tls.Config `name:"member_peer_client_tls" optional:"true"`
 }
 
 // New constructs a pacmand application.
@@ -49,6 +53,8 @@ func New(params Params) *App {
 		options:       params.Options,
 		runtimeConfig: params.RuntimeConfig,
 		apiTLSConfig:  params.APITLSConfig,
+		peerServerTLS: params.PeerServerTLS,
+		peerClientTLS: params.PeerClientTLS,
 	}
 }
 
@@ -77,7 +83,14 @@ func (a *App) Run(ctx context.Context) error {
 
 	a.logLoadedConfig(ctx, a.runtimeConfig.Config, a.runtimeConfig.Source, a.runtimeConfig.Path)
 
-	return localagent.Run(ctx, a.logger, a.runtimeConfig.Config, agent.WithAPIServerTLSConfig(a.apiTLSConfig))
+	return localagent.Run(
+		ctx,
+		a.logger,
+		a.runtimeConfig.Config,
+		agent.WithAPIServerTLSConfig(a.apiTLSConfig),
+		agent.WithPeerServerTLSConfig(a.peerServerTLS),
+		agent.WithPeerClientTLSConfig(a.peerClientTLS),
+	)
 }
 
 func (a *App) logLoadedConfig(ctx context.Context, loadedConfig config.Config, source, path string) {
@@ -88,6 +101,7 @@ func (a *App) logLoadedConfig(ctx context.Context, loadedConfig config.Config, s
 		slog.String("role", loadedConfig.Node.Role.String()),
 		slog.Bool("api_tls_enabled", loadedConfig.TLS != nil && loadedConfig.TLS.Enabled),
 		slog.Bool("admin_auth_enabled", loadedConfig.Security.AdminAuthEnabled()),
+		slog.Bool("member_mtls_enabled", loadedConfig.Security.PeerMTLSEnabled()),
 	}
 	if path != "" {
 		attributes = append(attributes, slog.String("path", path))

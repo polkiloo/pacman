@@ -48,6 +48,32 @@ func (config Config) Validate() error {
 		if err := config.Security.Validate(); err != nil {
 			return err
 		}
+
+		if config.Security.PeerMTLSEnabled() {
+			if config.TLS == nil || !config.TLS.Enabled {
+				return ErrSecurityMemberMTLSRequiresTLS
+			}
+
+			if strings.TrimSpace(config.TLS.CAFile) == "" {
+				return ErrSecurityMemberMTLSCAFileRequired
+			}
+
+			if config.Bootstrap == nil || len(config.Bootstrap.ExpectedMembers) == 0 {
+				return ErrSecurityMemberMTLSBootstrapRequired
+			}
+
+			nodeListed := false
+			for _, member := range config.Bootstrap.ExpectedMembers {
+				if strings.TrimSpace(member) == strings.TrimSpace(config.Node.Name) {
+					nodeListed = true
+					break
+				}
+			}
+
+			if !nodeListed {
+				return ErrSecurityMemberMTLSNodeUnknown
+			}
+		}
 	}
 
 	if config.Postgres != nil {
@@ -131,7 +157,7 @@ func (security SecurityConfig) Validate() error {
 		return ErrSecurityAdminBearerTokenConflict
 	}
 
-	if !hasInlineToken && !hasTokenFile {
+	if !hasInlineToken && !hasTokenFile && !security.MemberMTLSEnabled {
 		return ErrSecurityAdminBearerTokenRequired
 	}
 

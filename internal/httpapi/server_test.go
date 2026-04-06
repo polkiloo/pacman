@@ -374,6 +374,33 @@ func TestAdminBearerTokenAuthorizerRejectsUnsupportedScheme(t *testing.T) {
 	}
 }
 
+func TestAdminBearerTokenAuthorizerRejectsBearerSchemeWithNoCredentials(t *testing.T) {
+	t.Parallel()
+
+	// "Bearer" with no space and no token — scheme is recognised but credentials
+	// are absent.  The error must say "missing bearer token", not "authorization
+	// scheme must be Bearer".
+	response := performRequestWithHeaders(t, New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{
+		Authorizer: NewAdminBearerTokenAuthorizer("secret-token"),
+	}), http.MethodGet, "/api/v1/cluster", map[string]string{
+		fiber.HeaderAuthorization: "Bearer",
+	})
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusUnauthorized)
+	}
+
+	var body errorResponseJSON
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+
+	if body.Message != "missing bearer token" {
+		t.Fatalf("message: got %q, want %q", body.Message, "missing bearer token")
+	}
+}
+
 func TestAdminBearerTokenAuthorizerRejectsMalformedToken(t *testing.T) {
 	t.Parallel()
 
