@@ -88,6 +88,10 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 		}
 	}
 
+	if !daemon.apiServerDisabled && defaulted.TLS != nil && defaulted.TLS.Enabled && daemon.apiTLSConfig == nil {
+		return nil, ErrAPIServerTLSRequired
+	}
+
 	if !daemon.apiServerDisabled && daemon.apiServer == nil {
 		daemon.apiServer = httpapi.New(defaulted.Node.Name, store, logger, httpapi.Config{
 			TLSConfig:  daemon.apiTLSConfig,

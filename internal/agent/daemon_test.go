@@ -97,13 +97,9 @@ func TestNewDaemonRejectsUnreadableAPITLSFiles(t *testing.T) {
 		KeyFile:  filepath.Join(t.TempDir(), "missing.key"),
 	}
 
-	daemon, err := NewDaemon(cfg, logging.New("pacmand", &bytes.Buffer{}))
-	if err != nil {
-		t.Fatalf("new daemon: %v", err)
-	}
-
-	if daemon == nil {
-		t.Fatal("expected daemon to be constructed without loading tls files")
+	_, err := NewDaemon(cfg, logging.New("pacmand", &bytes.Buffer{}))
+	if !errors.Is(err, ErrAPIServerTLSRequired) {
+		t.Fatalf("expected tls dependency error, got %v", err)
 	}
 }
 

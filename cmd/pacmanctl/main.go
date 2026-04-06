@@ -10,20 +10,12 @@ import (
 	"go.uber.org/fx"
 
 	pacmanctlcmd "github.com/polkiloo/pacman/internal/app/pacmanctl"
-	"github.com/polkiloo/pacman/internal/buildinfo"
 	"github.com/polkiloo/pacman/internal/fxrun"
-	"github.com/polkiloo/pacman/internal/version"
 )
 
 const processName = "pacmanctl"
 
 func main() {
-	buildinfo.Print(os.Stdout, buildinfo.Info{
-		Version: version.Version,
-		Date:    version.BuildDate,
-		Commit:  version.Commit,
-	})
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
