@@ -30,6 +30,7 @@ func TestPacmandDaemonStartupMatrix(t *testing.T) {
 		withPostgres bool
 		wantExitCode int
 		extraEnv     map[string]string
+		prepareFiles func(*testing.T) []testcontainers.ContainerFile
 		wantContains []string
 	}{
 		{
@@ -88,11 +89,15 @@ bootstrap:
 `,
 			runAsDaemon:  true,
 			withPostgres: true,
+			prepareFiles: func(t *testing.T) []testcontainers.ContainerFile {
+				return writeIntegrationTLSFixture(t).containerFiles("/etc/pacman/tls/server.crt", "/etc/pacman/tls/server.key")
+			},
 			wantExitCode: 0,
 			wantContains: []string{
 				`"msg":"started local agent daemon"`,
 				`"node":"alpha-2"`,
 				`"role":"data"`,
+				`"api_tls_enabled":true`,
 				`"api_address":"0.0.0.0:8081"`,
 				`"control_address":"0.0.0.0:9091"`,
 				`"msg":"observed PostgreSQL availability"`,
@@ -145,11 +150,15 @@ tls:
   certFile: /etc/pacman/tls/witness.crt
   keyFile: /etc/pacman/tls/witness.key
 `,
-			runAsDaemon:  true,
+			runAsDaemon: true,
+			prepareFiles: func(t *testing.T) []testcontainers.ContainerFile {
+				return writeIntegrationTLSFixture(t).containerFiles("/etc/pacman/tls/witness.crt", "/etc/pacman/tls/witness.key")
+			},
 			wantExitCode: 0,
 			wantContains: []string{
 				`"msg":"started local agent daemon"`,
 				`"node":"witness-2"`,
+				`"api_tls_enabled":true`,
 				`"api_address":"0.0.0.0:8181"`,
 				`"control_address":"0.0.0.0:9191"`,
 				`"msg":"observed heartbeat without local PostgreSQL"`,
@@ -266,7 +275,12 @@ postgres:
 				}
 			}
 
-			runner := startDaemonRunner(t, env, testCase.name, configBody, testCase.extraEnv)
+			var extraFiles []testcontainers.ContainerFile
+			if testCase.prepareFiles != nil {
+				extraFiles = testCase.prepareFiles(t)
+			}
+
+			runner := startDaemonRunner(t, env, testCase.name, configBody, extraFiles, testCase.extraEnv)
 
 			var result testenv.ExecResult
 			switch {
@@ -297,7 +311,7 @@ postgres:
 
 const daemonConfigPath = "/tmp/pacmand.yaml"
 
-func startDaemonRunner(t *testing.T, env *testenv.Environment, name, configBody string, extraEnv map[string]string) *testenv.Runner {
+func startDaemonRunner(t *testing.T, env *testenv.Environment, name, configBody string, extraFiles []testcontainers.ContainerFile, extraEnv map[string]string) *testenv.Runner {
 	t.Helper()
 
 	runnerEnv := map[string]string{
@@ -315,8 +329,9 @@ func startDaemonRunner(t *testing.T, env *testenv.Environment, name, configBody 
 	}
 
 	if strings.TrimSpace(configBody) != "" {
-		cfg.Files = []testcontainers.ContainerFile{writeDaemonConfigFile(t, configBody)}
+		cfg.Files = append(cfg.Files, writeDaemonConfigFile(t, configBody))
 	}
+	cfg.Files = append(cfg.Files, extraFiles...)
 
 	return env.StartRunner(t, cfg)
 }

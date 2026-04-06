@@ -10,6 +10,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"go.uber.org/fx"
+
+	pacmandcmd "github.com/polkiloo/pacman/internal/app/pacmand"
+	"github.com/polkiloo/pacman/internal/fxrun"
 )
 
 func TestRunReturnsErrorWhenConfigPathIsMissing(t *testing.T) {
@@ -102,7 +107,15 @@ func runWithCapturedIO(t *testing.T, ctx context.Context, args []string) (int, s
 		os.Stderr = oldStderr
 	}()
 
-	exitCode := runContext(ctx)
+	app := fx.New(
+		fx.NopLogger,
+		fx.Provide(func() context.Context { return ctx }),
+		pacmandcmd.Module(processName, os.Args[1:], os.Stdout, os.Stderr),
+	)
+	exitCode := 0
+	if err := fxrun.Run(ctx, app); err != nil {
+		exitCode = 1
+	}
 
 	if err := stdoutW.Close(); err != nil {
 		t.Fatalf("close stdout writer: %v", err)

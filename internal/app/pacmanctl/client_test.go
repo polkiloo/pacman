@@ -32,7 +32,7 @@ func TestClientMaintenanceStatus(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := newAPIClient(server.URL, server.Client())
+	client, err := newAPIClient(server.URL, "", server.Client())
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestClientNewAPIClientNoHost(t *testing.T) {
 	t.Parallel()
 
 	// "//" parses as a URL with empty scheme and empty host — both required fields are absent.
-	_, err := newAPIClient("//", nil)
+	_, err := newAPIClient("//", "", nil)
 	if err == nil {
 		t.Fatal("expected error for URL missing scheme and host")
 	}
@@ -62,7 +62,7 @@ func TestClientNewAPIClientNoHost(t *testing.T) {
 func TestClientNewAPIClientNoScheme(t *testing.T) {
 	t.Parallel()
 
-	_, err := newAPIClient("example.com/path", nil)
+	_, err := newAPIClient("example.com/path", "", nil)
 	if err == nil {
 		t.Fatal("expected error for missing scheme")
 	}
@@ -71,7 +71,7 @@ func TestClientNewAPIClientNoScheme(t *testing.T) {
 func TestClientNewAPIClientWithNilHTTPClient(t *testing.T) {
 	t.Parallel()
 
-	client, err := newAPIClient("http://example.com", nil)
+	client, err := newAPIClient("http://example.com", "", nil)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -94,7 +94,7 @@ func TestClientDecodeAPIErrorWithOnlyErrorField(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := newAPIClient(server.URL, server.Client())
+	client, err := newAPIClient(server.URL, "", server.Client())
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
@@ -104,4 +104,29 @@ func TestClientDecodeAPIErrorWithOnlyErrorField(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	assertContains(t, err.Error(), "invalid_request")
+}
+
+func TestClientAddsBearerAuthorizationHeader(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if got := request.Header.Get("Authorization"); got != "Bearer secret-token" {
+			t.Fatalf("authorization header: got %q, want %q", got, "Bearer secret-token")
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(clusterStatusResponse{}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client, err := newAPIClient(server.URL, " secret-token ", server.Client())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	if _, err := client.clusterStatus(context.Background()); err != nil {
+		t.Fatalf("cluster status: %v", err)
+	}
 }

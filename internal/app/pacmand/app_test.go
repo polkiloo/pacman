@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -12,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"go.uber.org/fx"
 
 	"github.com/polkiloo/pacman/internal/logging"
 	"github.com/polkiloo/pacman/internal/pgext"
@@ -25,13 +29,9 @@ func TestRunVersion(t *testing.T) {
 	var stderr bytes.Buffer
 	var logs bytes.Buffer
 
-	app := New(Params{
-		Stdout: &stdout,
-		Stderr: &stderr,
-		Logger: logging.New("pacmand", &logs),
-	})
+	app := newTestApp(t, []string{"-version"}, &stdout, &stderr, &logs)
 
-	if err := app.Run(context.Background(), []string{"-version"}); err != nil {
+	if err := app.Run(context.Background()); err != nil {
 		t.Fatalf("run pacmand version: %v", err)
 	}
 
@@ -55,13 +55,9 @@ func TestRunRequiresConfigPath(t *testing.T) {
 	var stderr bytes.Buffer
 	var logs bytes.Buffer
 
-	app := New(Params{
-		Stdout: &stdout,
-		Stderr: &stderr,
-		Logger: logging.New("pacmand", &logs),
-	})
+	app := newTestApp(t, nil, &stdout, &stderr, &logs)
 
-	err := app.Run(context.Background(), nil)
+	err := app.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected config path error")
 	}
@@ -109,16 +105,12 @@ func TestRunStartsLocalDaemonFromPostgresExtensionEnvironment(t *testing.T) {
 	var stderr bytes.Buffer
 	var logs bytes.Buffer
 
-	app := New(Params{
-		Stdout: &stdout,
-		Stderr: &stderr,
-		Logger: logging.New("pacmand", &logs),
-	})
+	app := newTestApp(t, []string{"-pgext-env"}, &stdout, &stderr, &logs)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	if err := app.Run(ctx, []string{"-pgext-env"}); err != nil {
+	if err := app.Run(ctx); err != nil {
 		t.Fatalf("run pacmand from pgext env: %v", err)
 	}
 
@@ -136,13 +128,9 @@ func TestRunRejectsConfigPathAndPostgresExtensionEnvironmentTogether(t *testing.
 	var stderr bytes.Buffer
 	var logs bytes.Buffer
 
-	app := New(Params{
-		Stdout: &stdout,
-		Stderr: &stderr,
-		Logger: logging.New("pacmand", &logs),
-	})
+	app := newTestApp(t, []string{"-config", "node.yaml", "-pgext-env"}, &stdout, &stderr, &logs)
 
-	err := app.Run(context.Background(), []string{"-config", "node.yaml", "-pgext-env"})
+	err := app.Run(context.Background())
 	if !errors.Is(err, errConfigSourceConflict) {
 		t.Fatalf("unexpected error: got %v want %v", err, errConfigSourceConflict)
 	}
@@ -157,13 +145,9 @@ func TestRunReturnsPostgresExtensionEnvironmentError(t *testing.T) {
 	var stderr bytes.Buffer
 	var logs bytes.Buffer
 
-	app := New(Params{
-		Stdout: &stdout,
-		Stderr: &stderr,
-		Logger: logging.New("pacmand", &logs),
-	})
+	app := newTestApp(t, []string{"-pgext-env"}, &stdout, &stderr, &logs)
 
-	err := app.Run(context.Background(), []string{"-pgext-env"})
+	err := app.Run(context.Background())
 	if !errors.Is(err, pgext.ErrPostgresManagedNodeRequired) {
 		t.Fatalf("expected ErrPostgresManagedNodeRequired, got %v", err)
 	}
@@ -193,16 +177,12 @@ postgres:
 	var stderr bytes.Buffer
 	var logs bytes.Buffer
 
-	app := New(Params{
-		Stdout: &stdout,
-		Stderr: &stderr,
-		Logger: logging.New("pacmand", &logs),
-	})
+	app := newTestApp(t, []string{"-config", path}, &stdout, &stderr, &logs)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	if err := app.Run(ctx, []string{"-config", path}); err != nil {
+	if err := app.Run(ctx); err != nil {
 		t.Fatalf("run pacmand with config: %v", err)
 	}
 
@@ -219,6 +199,47 @@ postgres:
 	assertContains(t, logs.String(), `"postgres_up":false`)
 }
 
+func TestRunLogsAdminAuthStateWithoutLeakingToken(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pacmand.yaml")
+	payload := fmt.Sprintf(`
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: alpha-1
+  role: data
+  apiAddress: "%s"
+security:
+  adminBearerToken: super-secret-token
+postgres:
+  dataDir: /var/lib/postgresql/data
+`, reserveLoopbackAddress(t))
+
+	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var logs bytes.Buffer
+
+	app := newTestApp(t, []string{"-config", path}, &stdout, &stderr, &logs)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	if err := app.Run(ctx); err != nil {
+		t.Fatalf("run pacmand with authenticated config: %v", err)
+	}
+
+	assertContains(t, logs.String(), `"admin_auth_enabled":true`)
+	if strings.Contains(logs.String(), "super-secret-token") {
+		t.Fatalf("expected logs to avoid token leakage, got %q", logs.String())
+	}
+}
+
 func TestRunReturnsConfigLoadError(t *testing.T) {
 	t.Parallel()
 
@@ -226,13 +247,9 @@ func TestRunReturnsConfigLoadError(t *testing.T) {
 	var stderr bytes.Buffer
 	var logs bytes.Buffer
 
-	app := New(Params{
-		Stdout: &stdout,
-		Stderr: &stderr,
-		Logger: logging.New("pacmand", &logs),
-	})
+	app := newTestApp(t, []string{"-config", filepath.Join(t.TempDir(), "missing.yaml")}, &stdout, &stderr, &logs)
 
-	err := app.Run(context.Background(), []string{"-config", filepath.Join(t.TempDir(), "missing.yaml")})
+	err := app.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected config load error")
 	}
@@ -261,13 +278,9 @@ node:
 	var stderr bytes.Buffer
 	var logs bytes.Buffer
 
-	app := New(Params{
-		Stdout: &stdout,
-		Stderr: &stderr,
-		Logger: logging.New("pacmand", &logs),
-	})
+	app := newTestApp(t, []string{"-config", path}, &stdout, &stderr, &logs)
 
-	err := app.Run(context.Background(), []string{"-config", path})
+	err := app.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected daemon construction error")
 	}
@@ -283,13 +296,9 @@ func TestRunReturnsFlagError(t *testing.T) {
 	var stderr bytes.Buffer
 	var logs bytes.Buffer
 
-	app := New(Params{
-		Stdout: &stdout,
-		Stderr: &stderr,
-		Logger: logging.New("pacmand", &logs),
-	})
+	app := newTestApp(t, []string{"-invalid"}, &stdout, &stderr, &logs)
 
-	err := app.Run(context.Background(), []string{"-invalid"})
+	err := app.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected invalid flag error")
 	}
@@ -304,16 +313,39 @@ func TestRunReturnsContextError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	app := New(Params{
-		Stdout: &bytes.Buffer{},
-		Stderr: &bytes.Buffer{},
-		Logger: logging.New("pacmand", &bytes.Buffer{}),
-	})
+	app := newTestApp(t, nil, &bytes.Buffer{}, &bytes.Buffer{}, &bytes.Buffer{})
 
-	err := app.Run(ctx, nil)
+	err := app.Run(ctx)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context cancellation, got %v", err)
 	}
+}
+
+type resolvedTestApp struct {
+	fx.In
+
+	App *App
+}
+
+func newTestApp(t *testing.T, args []string, stdout, stderr, logs io.Writer) *App {
+	t.Helper()
+
+	var resolved resolvedTestApp
+
+	app := fx.New(
+		fx.NopLogger,
+		fx.Provide(func() context.Context { return context.Background() }),
+		Module("pacmand", args, stdout, stderr),
+		fx.Decorate(func(_ *slog.Logger) *slog.Logger {
+			return logging.New("pacmand", logs)
+		}),
+		fx.Populate(&resolved),
+	)
+	if err := app.Err(); err != nil {
+		t.Fatalf("build pacmand fx app: %v", err)
+	}
+
+	return resolved.App
 }
 
 func assertContains(t *testing.T, got, want string) {

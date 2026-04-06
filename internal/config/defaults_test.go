@@ -60,6 +60,9 @@ func TestConfigWithDefaultsPreservesExplicitValues(t *testing.T) {
 			CertFile: "tls/server.crt",
 			KeyFile:  "tls/server.key",
 		},
+		Security: &SecurityConfig{
+			AdminBearerTokenFile: "/run/secrets/pacman-admin-token",
+		},
 		Postgres: &PostgresLocalConfig{
 			DataDir:       "/var/lib/postgresql/data",
 			BinDir:        "/usr/lib/postgresql/17/bin",

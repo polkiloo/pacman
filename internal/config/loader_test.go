@@ -25,6 +25,8 @@ tls:
   enabled: true
   certFile: tls/server.crt
   keyFile: tls/server.key
+security:
+  adminBearerTokenFile: /run/secrets/pacman-admin-token
 postgres:
   dataDir: /var/lib/postgresql/data
   binDir: /usr/lib/postgresql/17/bin
@@ -60,6 +62,9 @@ bootstrap:
 			Enabled:  true,
 			CertFile: "tls/server.crt",
 			KeyFile:  "tls/server.key",
+		},
+		Security: &SecurityConfig{
+			AdminBearerTokenFile: "/run/secrets/pacman-admin-token",
 		},
 		Postgres: &PostgresLocalConfig{
 			DataDir:       "/var/lib/postgresql/data",

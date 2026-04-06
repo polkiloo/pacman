@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -30,6 +31,9 @@ type Daemon struct {
 	postgresStateProbe postgresStateProbe
 	statePublisher     controlplane.NodeStatePublisher
 	apiServer          httpServer
+	apiTLSConfig       *tls.Config
+	apiAuthorizer      httpapi.Authorizer
+	apiServerDisabled  bool
 	probeTimeout       time.Duration
 	startedFlag        atomic.Bool
 
@@ -61,6 +65,10 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 	}
 
 	store := controlplane.NewMemoryStateStore()
+	apiAuthorizer, err := buildAPIAuthorizer(defaulted)
+	if err != nil {
+		return nil, err
+	}
 
 	daemon := &Daemon{
 		config:             defaulted,
@@ -70,7 +78,7 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 		postgresProbe:      dialPostgresAvailability,
 		postgresStateProbe: postgres.QueryObservation,
 		statePublisher:     store,
-		apiServer:          httpapi.New(defaulted.Node.Name, store, logger, httpapi.Config{}),
+		apiAuthorizer:      apiAuthorizer,
 		probeTimeout:       defaultPostgresProbeTimeout,
 	}
 
@@ -80,7 +88,31 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 		}
 	}
 
+	if !daemon.apiServerDisabled && defaulted.TLS != nil && defaulted.TLS.Enabled && daemon.apiTLSConfig == nil {
+		return nil, ErrAPIServerTLSRequired
+	}
+
+	if !daemon.apiServerDisabled && daemon.apiServer == nil {
+		daemon.apiServer = httpapi.New(defaulted.Node.Name, store, logger, httpapi.Config{
+			TLSConfig:  daemon.apiTLSConfig,
+			Authorizer: daemon.apiAuthorizer,
+		})
+	}
+
 	return daemon, nil
+}
+
+func buildAPIAuthorizer(cfg config.Config) (httpapi.Authorizer, error) {
+	if cfg.Security == nil || !cfg.Security.AdminAuthEnabled() {
+		return nil, nil
+	}
+
+	token, err := cfg.Security.ResolveAdminBearerToken(nil)
+	if err != nil {
+		return nil, fmt.Errorf("resolve api admin bearer token: %w", err)
+	}
+
+	return httpapi.NewAdminBearerTokenAuthorizer(token), nil
 }
 
 // Start records daemon startup state and emits the first lifecycle log entry.
@@ -150,6 +182,7 @@ func (daemon *Daemon) logStartup(ctx context.Context, startup agentmodel.Startup
 		slog.String("node", startup.NodeName),
 		slog.String("role", startup.NodeRole.String()),
 		slog.Bool("manages_postgres", startup.ManagesPostgres),
+		slog.Bool("api_tls_enabled", daemon.config.TLS != nil && daemon.config.TLS.Enabled),
 		slog.String("api_address", startup.APIAddress),
 		slog.String("control_address", startup.ControlAddress),
 	)

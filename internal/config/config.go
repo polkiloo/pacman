@@ -19,6 +19,7 @@ type Config struct {
 	Kind       string                  `yaml:"kind" json:"kind"`
 	Node       NodeConfig              `yaml:"node" json:"node"`
 	TLS        *TLSConfig              `yaml:"tls,omitempty" json:"tls,omitempty"`
+	Security   *SecurityConfig         `yaml:"security,omitempty" json:"security,omitempty"`
 	Postgres   *PostgresLocalConfig    `yaml:"postgres,omitempty" json:"postgres,omitempty"`
 	Bootstrap  *ClusterBootstrapConfig `yaml:"bootstrap,omitempty" json:"bootstrap,omitempty"`
 }
@@ -41,6 +42,13 @@ type TLSConfig struct {
 	KeyFile            string `yaml:"keyFile,omitempty" json:"keyFile,omitempty"`
 	ServerName         string `yaml:"serverName,omitempty" json:"serverName,omitempty"`
 	InsecureSkipVerify bool   `yaml:"insecureSkipVerify,omitempty" json:"insecureSkipVerify,omitempty"`
+}
+
+// SecurityConfig captures node-local API authentication controls for
+// administrative endpoints.
+type SecurityConfig struct {
+	AdminBearerToken     string `yaml:"adminBearerToken,omitempty" json:"adminBearerToken,omitempty"`
+	AdminBearerTokenFile string `yaml:"adminBearerTokenFile,omitempty" json:"adminBearerTokenFile,omitempty"`
 }
 
 // PostgresLocalConfig captures node-local PostgreSQL process settings that are

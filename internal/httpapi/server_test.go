@@ -350,6 +350,149 @@ func TestAuthMiddlewareStoresPrincipalInRequestContext(t *testing.T) {
 	}
 }
 
+func TestAdminBearerTokenAuthorizerRejectsUnsupportedScheme(t *testing.T) {
+	t.Parallel()
+
+	response := performRequestWithHeaders(t, New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{
+		Authorizer: NewAdminBearerTokenAuthorizer("secret-token"),
+	}), http.MethodGet, "/api/v1/cluster", map[string]string{
+		fiber.HeaderAuthorization: "Basic abc123",
+	})
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusUnauthorized)
+	}
+
+	var body errorResponseJSON
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+
+	if body.Message != "authorization scheme must be Bearer" {
+		t.Fatalf("message: got %q, want %q", body.Message, "authorization scheme must be Bearer")
+	}
+}
+
+func TestAdminBearerTokenAuthorizerRejectsMalformedToken(t *testing.T) {
+	t.Parallel()
+
+	response := performRequestWithHeaders(t, New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{
+		Authorizer: NewAdminBearerTokenAuthorizer("secret-token"),
+	}), http.MethodGet, "/api/v1/cluster", map[string]string{
+		fiber.HeaderAuthorization: "Bearer abc 123",
+	})
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusUnauthorized)
+	}
+
+	var body errorResponseJSON
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+
+	if body.Message != "bearer token is malformed" {
+		t.Fatalf("message: got %q, want %q", body.Message, "bearer token is malformed")
+	}
+}
+
+func TestAdminBearerTokenAuthorizerStoresAdminPrincipal(t *testing.T) {
+	t.Parallel()
+
+	srv := &Server{
+		nodeName:   "alpha-1",
+		authorizer: NewAdminBearerTokenAuthorizer("secret-token"),
+	}
+
+	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app.Use(srv.requestIDMiddleware())
+	app.Use(srv.apiCommonMiddleware())
+	app.Use(srv.authMiddleware(AccessScopeClusterWrite))
+	app.Get("/api/v1/test-admin-principal", func(c *fiber.Ctx) error {
+		principal, ok := CurrentPrincipal(c)
+		if !ok {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "principal_missing",
+			})
+		}
+
+		return c.JSON(fiber.Map{
+			"subject":   principal.Subject,
+			"mechanism": principal.Mechanism,
+		})
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/test-admin-principal", nil)
+	request.Header.Set(fiber.HeaderAuthorization, "Bearer secret-token")
+
+	response, err := app.Test(request, int(time.Second.Milliseconds()))
+	if err != nil {
+		t.Fatalf("perform GET %q: %v", "/api/v1/test-admin-principal", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	var body struct {
+		Subject   string `json:"subject"`
+		Mechanism string `json:"mechanism"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+
+	if body.Subject != adminPrincipalSubject {
+		t.Fatalf("subject: got %q, want %q", body.Subject, adminPrincipalSubject)
+	}
+
+	if body.Mechanism != "bearer" {
+		t.Fatalf("mechanism: got %q, want %q", body.Mechanism, "bearer")
+	}
+}
+
+func TestAdminBearerTokenAuthorizerRejectsWrongToken(t *testing.T) {
+	t.Parallel()
+
+	response := performRequestWithHeaders(t, New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{
+		Authorizer: NewAdminBearerTokenAuthorizer("secret-token"),
+	}), http.MethodGet, "/api/v1/cluster", map[string]string{
+		fiber.HeaderAuthorization: "Bearer wrong-token",
+	})
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusUnauthorized)
+	}
+}
+
+func TestAdminBearerTokenAuthorizerRejectsMissingAuthorizationHeader(t *testing.T) {
+	t.Parallel()
+
+	// No Authorization header at all — parseBearerAuthorizationHeader receives
+	// an empty string and should return "missing bearer token".
+	response := performRequestWithHeaders(t, New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{
+		Authorizer: NewAdminBearerTokenAuthorizer("secret-token"),
+	}), http.MethodGet, "/api/v1/cluster", map[string]string{})
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusUnauthorized)
+	}
+
+	var body errorResponseJSON
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+
+	if body.Message != "missing bearer token" {
+		t.Fatalf("message: got %q, want %q", body.Message, "missing bearer token")
+	}
+}
+
 func TestWriteAPIRoutesRequireJSONContentType(t *testing.T) {
 	t.Parallel()
 

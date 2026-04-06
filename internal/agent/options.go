@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"time"
 
 	"github.com/polkiloo/pacman/internal/controlplane"
@@ -18,7 +19,16 @@ type postgresStateProbe func(context.Context, string) (postgres.Observation, err
 // tests that verify control-plane state without needing a bound network address.
 func WithNoAPIServer() Option {
 	return func(daemon *Daemon) {
+		daemon.apiServerDisabled = true
 		daemon.apiServer = nil
+	}
+}
+
+// WithAPIServerTLSConfig overrides the TLS configuration used by the daemon's
+// external HTTP API server.
+func WithAPIServerTLSConfig(tlsConfig *tls.Config) Option {
+	return func(daemon *Daemon) {
+		daemon.apiTLSConfig = tlsConfig
 	}
 }
 

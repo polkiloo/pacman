@@ -44,6 +44,12 @@ func (config Config) Validate() error {
 		}
 	}
 
+	if config.Security != nil {
+		if err := config.Security.Validate(); err != nil {
+			return err
+		}
+	}
+
 	if config.Postgres != nil {
 		if err := config.Postgres.Validate(); err != nil {
 			return err
@@ -110,6 +116,23 @@ func (tls TLSConfig) Validate() error {
 
 	if tls.Enabled && strings.TrimSpace(tls.KeyFile) == "" {
 		return ErrTLSKeyFileRequired
+	}
+
+	return nil
+}
+
+// Validate reports whether the node-local security configuration is coherent
+// enough for pacmand to consume safely.
+func (security SecurityConfig) Validate() error {
+	hasInlineToken := strings.TrimSpace(security.AdminBearerToken) != ""
+	hasTokenFile := strings.TrimSpace(security.AdminBearerTokenFile) != ""
+
+	if hasInlineToken && hasTokenFile {
+		return ErrSecurityAdminBearerTokenConflict
+	}
+
+	if !hasInlineToken && !hasTokenFile {
+		return ErrSecurityAdminBearerTokenRequired
 	}
 
 	return nil

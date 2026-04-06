@@ -31,6 +31,9 @@ func TestConfigValidate(t *testing.T) {
 					CertFile: "tls/server.crt",
 					KeyFile:  "tls/server.key",
 				},
+				Security: &SecurityConfig{
+					AdminBearerTokenFile: "/run/secrets/pacman-admin-token",
+				},
 				Postgres: &PostgresLocalConfig{
 					DataDir:       "/var/lib/postgresql/data",
 					BinDir:        "/usr/lib/postgresql/17/bin",
@@ -205,6 +208,39 @@ func TestConfigValidate(t *testing.T) {
 				},
 			},
 			wantErr: ErrTLSKeyFileRequired,
+		},
+		{
+			name: "security requires token source",
+			config: Config{
+				APIVersion: APIVersionV1Alpha1,
+				Kind:       KindNodeConfig,
+				Node: NodeConfig{
+					Name:           "alpha-1",
+					Role:           cluster.NodeRoleData,
+					APIAddress:     "0.0.0.0:8080",
+					ControlAddress: "0.0.0.0:9090",
+				},
+				Security: &SecurityConfig{},
+			},
+			wantErr: ErrSecurityAdminBearerTokenRequired,
+		},
+		{
+			name: "security rejects inline token and token file together",
+			config: Config{
+				APIVersion: APIVersionV1Alpha1,
+				Kind:       KindNodeConfig,
+				Node: NodeConfig{
+					Name:           "alpha-1",
+					Role:           cluster.NodeRoleData,
+					APIAddress:     "0.0.0.0:8080",
+					ControlAddress: "0.0.0.0:9090",
+				},
+				Security: &SecurityConfig{
+					AdminBearerToken:     "secret-token",
+					AdminBearerTokenFile: "/run/secrets/pacman-admin-token",
+				},
+			},
+			wantErr: ErrSecurityAdminBearerTokenConflict,
 		},
 		{
 			name: "postgres data dir required",
