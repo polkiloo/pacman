@@ -296,7 +296,7 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 
 ## 15. Structured Logging (`slog`)
 
-- [ ] expand `pacmand` runtime `slog` coverage and field consistency
+- [x] expand `pacmand` runtime `slog` coverage and field consistency
 - [ ] expand `pacmanctl` runtime `slog` coverage and field consistency
 - [ ] add `slog`-backed HTTP access logging
 - [ ] add structured event logs for cluster lifecycle and state transitions

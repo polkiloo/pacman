@@ -52,6 +52,7 @@ func (daemon *Daemon) campaignLeader(ctx context.Context, nodeName string) {
 		"failed to campaign for control-plane leadership",
 		slog.String("component", "controlplane"),
 		slog.String("node", nodeName),
+		slog.String("node_role", daemon.config.Node.Role.String()),
 		slog.String("campaign_error", err.Error()),
 	)
 }
@@ -66,8 +67,9 @@ func (daemon *Daemon) logControlPlaneSync(current, previous agentmodel.Heartbeat
 
 	args := []any{
 		slog.String("component", "controlplane"),
-		slog.Uint64("heartbeat_sequence", current.Sequence),
 		slog.String("node", node.NodeName),
+		slog.String("node_role", daemon.config.Node.Role.String()),
+		slog.Uint64("heartbeat_sequence", current.Sequence),
 		slog.String("member_role", node.Role.String()),
 		slog.String("member_state", node.State.String()),
 		slog.Bool("cluster_reachable", current.ControlPlane.ClusterReachable),

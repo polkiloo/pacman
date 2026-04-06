@@ -289,6 +289,8 @@ func TestDaemonStartRecordsStartupStateAndHeartbeat(t *testing.T) {
 	assertContains(t, logs.String(), `"msg":"started local agent daemon"`)
 	assertContains(t, logs.String(), `"msg":"observed PostgreSQL availability"`)
 	assertContains(t, logs.String(), `"msg":"published local state to control plane"`)
+	assertContains(t, logs.String(), `"node":"alpha-1"`)
+	assertContains(t, logs.String(), `"node_role":"data"`)
 	assertContains(t, logs.String(), `"heartbeat_sequence":1`)
 	assertContains(t, logs.String(), `"postgres_up":true`)
 	assertContains(t, logs.String(), `"member_role":"primary"`)
@@ -407,6 +409,8 @@ func TestDaemonStartRecordsWitnessHeartbeatWithoutLocalPostgres(t *testing.T) {
 	}
 
 	assertContains(t, logs.String(), `"msg":"observed heartbeat without local PostgreSQL"`)
+	assertContains(t, logs.String(), `"node":"witness-1"`)
+	assertContains(t, logs.String(), `"node_role":"witness"`)
 	assertContains(t, logs.String(), `"postgres_managed":false`)
 	assertContains(t, logs.String(), `"msg":"published local state to control plane"`)
 
@@ -623,6 +627,8 @@ func TestDaemonStartReportsRoleDetectionFailureWhileAvailabilityIsUp(t *testing.
 	}
 
 	assertContains(t, logs.String(), `"msg":"observed PostgreSQL availability without role state"`)
+	assertContains(t, logs.String(), `"node":"alpha-1"`)
+	assertContains(t, logs.String(), `"node_role":"data"`)
 	assertContains(t, logs.String(), `"postgres_state_error":"pq: password authentication failed"`)
 
 	cancel()
@@ -701,6 +707,8 @@ func TestDaemonHeartbeatLoopTicksAndTracksAvailabilityChanges(t *testing.T) {
 
 	assertContains(t, logs.String(), `"msg":"observed PostgreSQL unavailability"`)
 	assertContains(t, logs.String(), `"msg":"observed PostgreSQL availability"`)
+	assertContains(t, logs.String(), `"node":"alpha-1"`)
+	assertContains(t, logs.String(), `"node_role":"data"`)
 	assertContains(t, logs.String(), `"postgres_up":false`)
 	assertContains(t, logs.String(), `"postgres_up":true`)
 	assertContains(t, logs.String(), `"member_role":"primary"`)

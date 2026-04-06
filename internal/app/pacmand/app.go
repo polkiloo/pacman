@@ -99,7 +99,7 @@ func (a *App) logLoadedConfig(ctx context.Context, loadedConfig config.Config, s
 		slog.String("component", "config"),
 		slog.String("source", source),
 		slog.String("node", redactedConfig.Node.Name),
-		slog.String("role", redactedConfig.Node.Role.String()),
+		slog.String("node_role", redactedConfig.Node.Role.String()),
 		slog.Bool("api_tls_enabled", redactedConfig.TLS != nil && redactedConfig.TLS.Enabled),
 		slog.Bool("admin_auth_enabled", redactedConfig.Security.AdminAuthEnabled()),
 		slog.Bool("member_mtls_enabled", redactedConfig.Security.PeerMTLSEnabled()),

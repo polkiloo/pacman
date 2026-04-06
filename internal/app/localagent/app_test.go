@@ -50,10 +50,11 @@ func TestRunStartsAndWaitsForWitnessDaemon(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
+	var logs bytes.Buffer
 
 	err := Run(
 		ctx,
-		logging.New("pacmand", &bytes.Buffer{}),
+		logging.New("pacmand", &logs),
 		config.Config{
 			APIVersion: config.APIVersionV1Alpha1,
 			Kind:       config.KindNodeConfig,
@@ -66,6 +67,18 @@ func TestRunStartsAndWaitsForWitnessDaemon(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("run witness daemon: %v", err)
+	}
+
+	if !strings.Contains(logs.String(), `"msg":"stopped local agent daemon"`) {
+		t.Fatalf("expected stop log entry, got %q", logs.String())
+	}
+
+	if !strings.Contains(logs.String(), `"node":"alpha-witness"`) {
+		t.Fatalf("expected stop log to include node identity, got %q", logs.String())
+	}
+
+	if !strings.Contains(logs.String(), `"node_role":"witness"`) {
+		t.Fatalf("expected stop log to include node role, got %q", logs.String())
 	}
 }
 
