@@ -49,6 +49,7 @@ type TLSConfig struct {
 type SecurityConfig struct {
 	AdminBearerToken     string `yaml:"adminBearerToken,omitempty" json:"adminBearerToken,omitempty"`
 	AdminBearerTokenFile string `yaml:"adminBearerTokenFile,omitempty" json:"adminBearerTokenFile,omitempty"`
+	MemberMTLSEnabled    bool   `yaml:"memberMTLSEnabled,omitempty" json:"memberMTLSEnabled,omitempty"`
 }
 
 // PostgresLocalConfig captures node-local PostgreSQL process settings that are

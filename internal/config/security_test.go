@@ -26,6 +26,23 @@ func TestSecurityAdminAuthEnabled(t *testing.T) {
 	}
 }
 
+func TestSecurityPeerMTLSEnabled(t *testing.T) {
+	t.Parallel()
+
+	var nilSecurity *SecurityConfig
+	if nilSecurity.PeerMTLSEnabled() {
+		t.Fatal("expected nil security config to report member mTLS disabled")
+	}
+
+	if (&SecurityConfig{}).PeerMTLSEnabled() {
+		t.Fatal("expected empty security config to report member mTLS disabled")
+	}
+
+	if !(&SecurityConfig{MemberMTLSEnabled: true}).PeerMTLSEnabled() {
+		t.Fatal("expected member mTLS flag to report enabled")
+	}
+}
+
 func TestSecurityResolveAdminBearerToken(t *testing.T) {
 	t.Parallel()
 

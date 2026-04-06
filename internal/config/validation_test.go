@@ -243,6 +243,154 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: ErrSecurityAdminBearerTokenConflict,
 		},
 		{
+			name: "security allows member mtls without admin token",
+			config: Config{
+				APIVersion: APIVersionV1Alpha1,
+				Kind:       KindNodeConfig,
+				Node: NodeConfig{
+					Name:           "alpha-1",
+					Role:           cluster.NodeRoleData,
+					APIAddress:     "0.0.0.0:8080",
+					ControlAddress: "0.0.0.0:9090",
+				},
+				TLS: &TLSConfig{
+					Enabled:  true,
+					CAFile:   "tls/ca.crt",
+					CertFile: "tls/server.crt",
+					KeyFile:  "tls/server.key",
+				},
+				Security: &SecurityConfig{
+					MemberMTLSEnabled: true,
+				},
+				Bootstrap: &ClusterBootstrapConfig{
+					ClusterName:     "alpha",
+					InitialPrimary:  "alpha-1",
+					SeedAddresses:   []string{"0.0.0.0:9090"},
+					ExpectedMembers: []string{"alpha-1"},
+				},
+			},
+		},
+		{
+			name: "security member mtls requires tls",
+			config: Config{
+				APIVersion: APIVersionV1Alpha1,
+				Kind:       KindNodeConfig,
+				Node: NodeConfig{
+					Name:           "alpha-1",
+					Role:           cluster.NodeRoleData,
+					APIAddress:     "0.0.0.0:8080",
+					ControlAddress: "0.0.0.0:9090",
+				},
+				Security: &SecurityConfig{
+					MemberMTLSEnabled: true,
+				},
+			},
+			wantErr: ErrSecurityMemberMTLSRequiresTLS,
+		},
+		{
+			name: "security member mtls requires tls ca file",
+			config: Config{
+				APIVersion: APIVersionV1Alpha1,
+				Kind:       KindNodeConfig,
+				Node: NodeConfig{
+					Name:           "alpha-1",
+					Role:           cluster.NodeRoleData,
+					APIAddress:     "0.0.0.0:8080",
+					ControlAddress: "0.0.0.0:9090",
+				},
+				TLS: &TLSConfig{
+					Enabled:  true,
+					CertFile: "tls/server.crt",
+					KeyFile:  "tls/server.key",
+				},
+				Security: &SecurityConfig{
+					MemberMTLSEnabled: true,
+				},
+			},
+			wantErr: ErrSecurityMemberMTLSCAFileRequired,
+		},
+		{
+			name: "security member mtls requires bootstrap config",
+			config: Config{
+				APIVersion: APIVersionV1Alpha1,
+				Kind:       KindNodeConfig,
+				Node: NodeConfig{
+					Name:           "alpha-1",
+					Role:           cluster.NodeRoleData,
+					APIAddress:     "0.0.0.0:8080",
+					ControlAddress: "0.0.0.0:9090",
+				},
+				TLS: &TLSConfig{
+					Enabled:  true,
+					CAFile:   "tls/ca.crt",
+					CertFile: "tls/server.crt",
+					KeyFile:  "tls/server.key",
+				},
+				Security: &SecurityConfig{
+					MemberMTLSEnabled: true,
+				},
+				// Bootstrap is nil
+			},
+			wantErr: ErrSecurityMemberMTLSBootstrapRequired,
+		},
+		{
+			name: "security member mtls requires non-empty bootstrap expected members",
+			config: Config{
+				APIVersion: APIVersionV1Alpha1,
+				Kind:       KindNodeConfig,
+				Node: NodeConfig{
+					Name:           "alpha-1",
+					Role:           cluster.NodeRoleData,
+					APIAddress:     "0.0.0.0:8080",
+					ControlAddress: "0.0.0.0:9090",
+				},
+				TLS: &TLSConfig{
+					Enabled:  true,
+					CAFile:   "tls/ca.crt",
+					CertFile: "tls/server.crt",
+					KeyFile:  "tls/server.key",
+				},
+				Security: &SecurityConfig{
+					MemberMTLSEnabled: true,
+				},
+				Bootstrap: &ClusterBootstrapConfig{
+					ClusterName:   "alpha",
+					SeedAddresses: []string{"0.0.0.0:9090"},
+					// ExpectedMembers intentionally empty
+				},
+			},
+			wantErr: ErrSecurityMemberMTLSBootstrapRequired,
+		},
+		{
+			name: "security member mtls requires local node in bootstrap expected members",
+			config: Config{
+				APIVersion: APIVersionV1Alpha1,
+				Kind:       KindNodeConfig,
+				Node: NodeConfig{
+					Name:           "alpha-1",
+					Role:           cluster.NodeRoleData,
+					APIAddress:     "0.0.0.0:8080",
+					ControlAddress: "0.0.0.0:9090",
+				},
+				TLS: &TLSConfig{
+					Enabled:  true,
+					CAFile:   "tls/ca.crt",
+					CertFile: "tls/server.crt",
+					KeyFile:  "tls/server.key",
+				},
+				Security: &SecurityConfig{
+					MemberMTLSEnabled: true,
+				},
+				Bootstrap: &ClusterBootstrapConfig{
+					ClusterName:     "alpha",
+					InitialPrimary:  "beta-1",
+					SeedAddresses:   []string{"0.0.0.0:9090"},
+					ExpectedMembers: []string{"beta-1"},
+				},
+			},
+			wantErr: ErrSecurityMemberMTLSNodeUnknown,
+		},
+		{
 			name: "postgres data dir required",
 			config: Config{
 				APIVersion: APIVersionV1Alpha1,
