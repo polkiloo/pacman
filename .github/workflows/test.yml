@@ -38,5 +38,20 @@ jobs:
           go-version: '1.26.1'
           cache: true
 
-      - name: Run integration tests
-        run: make test-integration
+      - name: Build integration images
+        run: make docker-build-test-image docker-build-pgext-image
+
+      - name: Run integration smoke suite
+        run: make test-integration-smoke
+
+      - name: Run integration security suite
+        run: make test-integration-security
+
+      - name: Run integration Patroni suite
+        run: make test-integration-patroni
+
+      - name: Run integration PostgreSQL extension suite
+        run: make test-integration-pgext
+
+      - name: Run integration HA suite
+        run: make test-integration-ha
