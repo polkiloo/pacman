@@ -32,6 +32,22 @@ func WithAPIServerTLSConfig(tlsConfig *tls.Config) Option {
 	}
 }
 
+// WithPeerServerTLSConfig overrides the TLS configuration used by the daemon's
+// internal control-plane peer listener.
+func WithPeerServerTLSConfig(tlsConfig *tls.Config) Option {
+	return func(daemon *Daemon) {
+		daemon.peerServerTLSConfig = tlsConfig
+	}
+}
+
+// WithPeerClientTLSConfig overrides the TLS configuration used by the daemon's
+// outbound control-plane peer client.
+func WithPeerClientTLSConfig(tlsConfig *tls.Config) Option {
+	return func(daemon *Daemon) {
+		daemon.peerClientTLSConfig = tlsConfig
+	}
+}
+
 // WithControlPlanePublisher overrides the control-plane publisher used by the
 // daemon to publish local observed state.
 func WithControlPlanePublisher(publisher controlplane.NodeStatePublisher) Option {

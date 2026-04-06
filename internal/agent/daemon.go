@@ -3,8 +3,12 @@ package agent
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,29 +17,35 @@ import (
 	"github.com/polkiloo/pacman/internal/config"
 	"github.com/polkiloo/pacman/internal/controlplane"
 	"github.com/polkiloo/pacman/internal/httpapi"
+	"github.com/polkiloo/pacman/internal/peerapi"
 	"github.com/polkiloo/pacman/internal/postgres"
 )
 
 const (
 	defaultHeartbeatInterval    = 1 * time.Second
 	defaultPostgresProbeTimeout = 500 * time.Millisecond
+	defaultPeerProbeTimeout     = 1 * time.Second
 )
 
 // Daemon runs the node-local PACMAN agent.
 type Daemon struct {
-	config             config.Config
-	logger             *slog.Logger
-	now                func() time.Time
-	heartbeatInterval  time.Duration
-	postgresProbe      postgresAvailabilityProbe
-	postgresStateProbe postgresStateProbe
-	statePublisher     controlplane.NodeStatePublisher
-	apiServer          httpServer
-	apiTLSConfig       *tls.Config
-	apiAuthorizer      httpapi.Authorizer
-	apiServerDisabled  bool
-	probeTimeout       time.Duration
-	startedFlag        atomic.Bool
+	config              config.Config
+	logger              *slog.Logger
+	now                 func() time.Time
+	heartbeatInterval   time.Duration
+	postgresProbe       postgresAvailabilityProbe
+	postgresStateProbe  postgresStateProbe
+	statePublisher      controlplane.NodeStatePublisher
+	apiServer           httpServer
+	apiTLSConfig        *tls.Config
+	apiAuthorizer       httpapi.Authorizer
+	apiServerDisabled   bool
+	peerServer          httpServer
+	peerServerTLSConfig *tls.Config
+	peerClientTLSConfig *tls.Config
+	probeTimeout        time.Duration
+	peerProbeTimeout    time.Duration
+	startedFlag         atomic.Bool
 
 	mu         sync.RWMutex
 	started    agentmodel.Startup
@@ -80,6 +90,7 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 		statePublisher:     store,
 		apiAuthorizer:      apiAuthorizer,
 		probeTimeout:       defaultPostgresProbeTimeout,
+		peerProbeTimeout:   defaultPeerProbeTimeout,
 	}
 
 	for _, option := range options {
@@ -90,6 +101,23 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 
 	if !daemon.apiServerDisabled && defaulted.TLS != nil && defaulted.TLS.Enabled && daemon.apiTLSConfig == nil {
 		return nil, ErrAPIServerTLSRequired
+	}
+
+	if defaulted.Security.PeerMTLSEnabled() {
+		if daemon.peerServerTLSConfig == nil {
+			return nil, ErrPeerServerTLSRequired
+		}
+
+		if daemon.peerClientTLSConfig == nil {
+			return nil, ErrPeerClientTLSRequired
+		}
+
+		if daemon.peerServer == nil {
+			daemon.peerServer = peerapi.New(defaulted.Node.Name, logger, peerapi.Config{
+				TLSConfig:    daemon.peerServerTLSConfig,
+				AllowedPeers: memberPeerSubjects(defaulted),
+			})
+		}
 	}
 
 	if !daemon.apiServerDisabled && daemon.apiServer == nil {
@@ -121,26 +149,42 @@ func (daemon *Daemon) Start(ctx context.Context) error {
 		return err
 	}
 
+	runCtx, cancel := context.WithCancel(ctx)
+	defer func() {
+		if daemon.Startup().StartedAt.IsZero() {
+			cancel()
+		}
+	}()
+
 	startup, err := daemon.beginStart()
 	if err != nil {
 		return err
 	}
 
-	if err := daemon.bootstrapClusterSpec(ctx); err != nil {
+	if err := daemon.bootstrapClusterSpec(runCtx); err != nil {
+		cancel()
 		daemon.rollbackStart()
 		return fmt.Errorf("store bootstrap cluster spec: %w", err)
 	}
 
-	if err := daemon.startAPIServer(ctx); err != nil {
+	if err := daemon.startAPIServer(runCtx); err != nil {
+		cancel()
 		daemon.rollbackStart()
 		return fmt.Errorf("start http api server: %w", err)
+	}
+
+	if err := daemon.startPeerServer(runCtx); err != nil {
+		cancel()
+		daemon.rollbackStart()
+		return fmt.Errorf("start peer api server: %w", err)
 	}
 
 	daemon.logStartup(ctx, startup)
 	daemon.registerMember(ctx, startup)
 	daemon.recordHeartbeat(ctx)
 	daemon.loopWG.Add(1)
-	go daemon.runHeartbeatLoop(ctx)
+	go daemon.runHeartbeatLoop(runCtx)
+	go daemon.probeSeedPeers(runCtx)
 
 	return nil
 }
@@ -183,6 +227,7 @@ func (daemon *Daemon) logStartup(ctx context.Context, startup agentmodel.Startup
 		slog.String("role", startup.NodeRole.String()),
 		slog.Bool("manages_postgres", startup.ManagesPostgres),
 		slog.Bool("api_tls_enabled", daemon.config.TLS != nil && daemon.config.TLS.Enabled),
+		slog.Bool("member_mtls_enabled", daemon.config.Security.PeerMTLSEnabled()),
 		slog.String("api_address", startup.APIAddress),
 		slog.String("control_address", startup.ControlAddress),
 	)
@@ -257,6 +302,16 @@ func (daemon *Daemon) NodeStatus() agentmodel.NodeStatus {
 func (daemon *Daemon) Wait() {
 	daemon.loopWG.Wait()
 
+	if daemon.peerServer != nil {
+		if err := daemon.peerServer.Wait(); err != nil {
+			daemon.logger.Error(
+				"peer api server stopped unexpectedly",
+				slog.String("component", "peerapi"),
+				slog.String("error", err.Error()),
+			)
+		}
+	}
+
 	if daemon.apiServer == nil {
 		return
 	}
@@ -276,4 +331,118 @@ func (daemon *Daemon) startAPIServer(ctx context.Context) error {
 	}
 
 	return daemon.apiServer.Start(ctx, daemon.config.Node.APIAddress)
+}
+
+func (daemon *Daemon) startPeerServer(ctx context.Context) error {
+	if daemon.peerServer == nil {
+		return nil
+	}
+
+	return daemon.peerServer.Start(ctx, daemon.config.Node.ControlAddress)
+}
+
+func (daemon *Daemon) probeSeedPeers(ctx context.Context) {
+	if daemon.peerClientTLSConfig == nil || daemon.config.Bootstrap == nil {
+		return
+	}
+
+	client := &http.Client{
+		Timeout: daemon.peerProbeTimeout,
+		Transport: &http.Transport{
+			TLSClientConfig: daemon.peerClientTLSConfig.Clone(),
+		},
+	}
+
+	for _, seedAddress := range daemon.config.Bootstrap.SeedAddresses {
+		if !shouldProbeSeedAddress(seedAddress, daemon.config.Node.ControlAddress) {
+			continue
+		}
+
+		daemon.probeSeedPeer(ctx, client, seedAddress)
+	}
+}
+
+func (daemon *Daemon) probeSeedPeer(ctx context.Context, client *http.Client, seedAddress string) {
+	probeCtx, cancel := context.WithTimeout(ctx, daemon.peerProbeTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, "https://"+seedAddress+"/peer/v1/identity", nil)
+	if err != nil {
+		daemon.logger.WarnContext(
+			ctx,
+			"failed to build peer probe request",
+			slog.String("component", "peerapi"),
+			slog.String("seed_address", seedAddress),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		daemon.logger.WarnContext(
+			ctx,
+			"failed to probe peer over mTLS",
+			slog.String("component", "peerapi"),
+			slog.String("seed_address", seedAddress),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		daemon.logger.WarnContext(
+			ctx,
+			"peer probe returned unexpected status",
+			slog.String("component", "peerapi"),
+			slog.String("seed_address", seedAddress),
+			slog.Int("status", resp.StatusCode),
+		)
+		return
+	}
+
+	var identity peerapi.IdentityResponse
+	if err := json.NewDecoder(resp.Body).Decode(&identity); err != nil {
+		daemon.logger.WarnContext(
+			ctx,
+			"failed to decode peer probe response",
+			slog.String("component", "peerapi"),
+			slog.String("seed_address", seedAddress),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+
+	daemon.logger.InfoContext(
+		ctx,
+		"validated peer mTLS connection",
+		slog.String("component", "peerapi"),
+		slog.String("seed_address", seedAddress),
+		slog.String("peer_node", identity.NodeName),
+		slog.String("client_subject", identity.Peer.Subject),
+	)
+}
+
+func shouldProbeSeedAddress(seedAddress, localControlAddress string) bool {
+	trimmed := strings.TrimSpace(seedAddress)
+	if trimmed == "" || trimmed == strings.TrimSpace(localControlAddress) {
+		return false
+	}
+
+	host, _, err := net.SplitHostPort(trimmed)
+	if err != nil {
+		return false
+	}
+
+	ip := net.ParseIP(strings.TrimSpace(host))
+	return ip == nil || !ip.IsUnspecified()
+}
+
+func memberPeerSubjects(cfg config.Config) []string {
+	if cfg.Bootstrap == nil {
+		return nil
+	}
+
+	return append([]string(nil), cfg.Bootstrap.ExpectedMembers...)
 }

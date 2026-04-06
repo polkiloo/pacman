@@ -287,7 +287,7 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 ## 14. Security
 
 - [x] add TLS for external endpoints
-- [ ] add mTLS between cluster members
+- [x] add mTLS between cluster members
 - [x] implement certificate loading
 - [x] define admin authorization model
 - [ ] secure sensitive config handling
