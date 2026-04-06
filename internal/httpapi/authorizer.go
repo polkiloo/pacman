@@ -7,7 +7,10 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-const adminPrincipalSubject = "admin"
+const (
+	adminPrincipalSubject = "admin"
+	errMissingBearerToken = "missing bearer token"
+)
 
 type adminBearerTokenAuthorizer struct {
 	expectedToken string
@@ -40,17 +43,21 @@ func (auth adminBearerTokenAuthorizer) Authorize(c *fiber.Ctx, _ AccessScope) (*
 func parseBearerAuthorizationHeader(header string) (string, error) {
 	trimmed := strings.TrimSpace(header)
 	if trimmed == "" {
-		return "", Unauthorized("missing bearer token")
+		return "", Unauthorized(errMissingBearerToken)
 	}
 
 	scheme, credentials, found := strings.Cut(trimmed, " ")
-	if !found || !strings.EqualFold(strings.TrimSpace(scheme), "Bearer") {
+	if !strings.EqualFold(strings.TrimSpace(scheme), "Bearer") {
 		return "", Unauthorized("authorization scheme must be Bearer")
+	}
+
+	if !found {
+		return "", Unauthorized(errMissingBearerToken)
 	}
 
 	token := strings.TrimSpace(credentials)
 	if token == "" {
-		return "", Unauthorized("missing bearer token")
+		return "", Unauthorized(errMissingBearerToken)
 	}
 
 	if strings.ContainsAny(token, " \t\r\n") {
