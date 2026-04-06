@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -232,6 +233,102 @@ bootstrap:
 
 	if got.Bootstrap == nil || got.Bootstrap.InitialPrimary != "alpha-1" {
 		t.Fatalf("expected bootstrap defaults on load, got %+v", got.Bootstrap)
+	}
+}
+
+func TestLoadRejectsPermissiveConfigFileWithInlineSecret(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pacmand.yaml")
+	payload := `
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: alpha-1
+postgres:
+  dataDir: /var/lib/postgresql/data
+security:
+  adminBearerToken: secret-token
+bootstrap:
+  clusterName: alpha
+`
+
+	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected sensitive config file permission error")
+	}
+
+	if !errors.Is(err, ErrSensitiveConfigFilePermissions) {
+		t.Fatalf("unexpected error: got %v, want %v", err, ErrSensitiveConfigFilePermissions)
+	}
+}
+
+func TestLoadAllowsRestrictedConfigFileWithInlineSecret(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pacmand.yaml")
+	payload := `
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: alpha-1
+postgres:
+  dataDir: /var/lib/postgresql/data
+security:
+  adminBearerToken: secret-token
+bootstrap:
+  clusterName: alpha
+`
+
+	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("load restricted sensitive config: %v", err)
+	}
+
+	if loaded.Security == nil || loaded.Security.AdminBearerToken != "secret-token" {
+		t.Fatalf("expected inline token to load from restricted config, got %+v", loaded.Security)
+	}
+}
+
+func TestLoadAllowsPermissiveConfigFileWhenSecretIsFileBacked(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pacmand.yaml")
+	payload := `
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: alpha-1
+postgres:
+  dataDir: /var/lib/postgresql/data
+security:
+  adminBearerTokenFile: /run/secrets/pacman-admin-token
+bootstrap:
+  clusterName: alpha
+`
+
+	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("load file-backed secret config: %v", err)
+	}
+
+	if loaded.Security == nil || loaded.Security.AdminBearerTokenFile != "/run/secrets/pacman-admin-token" {
+		t.Fatalf("expected token file config to load, got %+v", loaded.Security)
 	}
 }
 

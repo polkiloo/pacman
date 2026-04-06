@@ -290,7 +290,7 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] add mTLS between cluster members
 - [x] implement certificate loading
 - [x] define admin authorization model
-- [ ] secure sensitive config handling
+- [x] secure sensitive config handling
 
 ---
 

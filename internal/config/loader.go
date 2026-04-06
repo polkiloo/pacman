@@ -16,9 +16,20 @@ func Load(path string) (Config, error) {
 	}
 	defer file.Close()
 
+	info, err := file.Stat()
+	if err != nil {
+		return Config{}, fmt.Errorf("stat config file %q: %w", path, err)
+	}
+
 	config, err := Decode(file)
 	if err != nil {
 		return Config{}, fmt.Errorf("decode config file %q: %w", path, err)
+	}
+
+	if config.HasInlineSecrets() {
+		if err := validateSensitiveFileMode(info.Mode()); err != nil {
+			return Config{}, fmt.Errorf("validate sensitive config file %q: %w", path, err)
+		}
 	}
 
 	return config, nil

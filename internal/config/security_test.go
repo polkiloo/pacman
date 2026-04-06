@@ -1,7 +1,10 @@
 package config
 
 import (
+	"bytes"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -99,5 +102,93 @@ func TestSecurityResolveAdminBearerTokenPropagatesReadError(t *testing.T) {
 
 	if !errors.Is(err, readErr) {
 		t.Fatalf("expected wrapped read error, got %v", err)
+	}
+}
+
+func TestConfigRedactedMasksSecuritySecretsWithoutMutatingOriginal(t *testing.T) {
+	t.Parallel()
+
+	cfg := Config{
+		APIVersion: APIVersionV1Alpha1,
+		Kind:       KindNodeConfig,
+		Node: NodeConfig{
+			Name: "alpha-1",
+		},
+		Security: &SecurityConfig{
+			AdminBearerToken:     "secret-token",
+			AdminBearerTokenFile: "/run/secrets/pacman-admin-token",
+			MemberMTLSEnabled:    true,
+		},
+	}
+
+	redacted := cfg.Redacted()
+
+	if redacted.Security == nil {
+		t.Fatal("expected redacted security config")
+	}
+
+	if redacted.Security.AdminBearerToken != redactedSecretValue {
+		t.Fatalf("inline token redaction: got %q, want %q", redacted.Security.AdminBearerToken, redactedSecretValue)
+	}
+
+	if redacted.Security.AdminBearerTokenFile != redactedSecretValue {
+		t.Fatalf("token file redaction: got %q, want %q", redacted.Security.AdminBearerTokenFile, redactedSecretValue)
+	}
+
+	if !redacted.Security.MemberMTLSEnabled {
+		t.Fatal("expected non-secret security fields to be preserved")
+	}
+
+	if cfg.Security.AdminBearerToken != "secret-token" {
+		t.Fatalf("expected original inline token to remain unchanged, got %q", cfg.Security.AdminBearerToken)
+	}
+
+	if cfg.Security.AdminBearerTokenFile != "/run/secrets/pacman-admin-token" {
+		t.Fatalf("expected original token file to remain unchanged, got %q", cfg.Security.AdminBearerTokenFile)
+	}
+}
+
+func TestConfigStringAndLogValueRedactSecuritySecrets(t *testing.T) {
+	t.Parallel()
+
+	cfg := Config{
+		APIVersion: APIVersionV1Alpha1,
+		Kind:       KindNodeConfig,
+		Node: NodeConfig{
+			Name: "alpha-1",
+		},
+		Security: &SecurityConfig{
+			AdminBearerToken:     "secret-token",
+			AdminBearerTokenFile: "/run/secrets/pacman-admin-token",
+		},
+	}
+
+	formatted := cfg.String()
+	if strings.Contains(formatted, "secret-token") {
+		t.Fatalf("expected String output to redact inline token, got %q", formatted)
+	}
+
+	if strings.Contains(formatted, "/run/secrets/pacman-admin-token") {
+		t.Fatalf("expected String output to redact token file path, got %q", formatted)
+	}
+
+	if !strings.Contains(formatted, redactedSecretValue) {
+		t.Fatalf("expected String output to contain redaction marker, got %q", formatted)
+	}
+
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	logger.Info("loaded node configuration", slog.Any("config", cfg))
+
+	if strings.Contains(logs.String(), "secret-token") {
+		t.Fatalf("expected slog output to redact inline token, got %q", logs.String())
+	}
+
+	if strings.Contains(logs.String(), "/run/secrets/pacman-admin-token") {
+		t.Fatalf("expected slog output to redact token file path, got %q", logs.String())
+	}
+
+	if !strings.Contains(logs.String(), "redacted") {
+		t.Fatalf("expected slog output to contain redaction marker, got %q", logs.String())
 	}
 }
