@@ -8,9 +8,19 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type configFile interface {
+	io.Reader
+	Stat() (os.FileInfo, error)
+	Close() error
+}
+
+var openConfigFile = func(path string) (configFile, error) {
+	return os.Open(path)
+}
+
 // Load reads a PACMAN node configuration document from disk.
 func Load(path string) (Config, error) {
-	file, err := os.Open(path)
+	file, err := openConfigFile(path)
 	if err != nil {
 		return Config{}, fmt.Errorf("open config file %q: %w", path, err)
 	}

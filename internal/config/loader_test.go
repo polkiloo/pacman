@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -341,6 +342,43 @@ func TestLoadReturnsOpenError(t *testing.T) {
 	}
 
 	assertContains(t, err.Error(), "open config file")
+}
+
+func TestLoadReturnsStatError(t *testing.T) {
+	t.Parallel()
+
+	previousOpenConfigFile := openConfigFile
+	t.Cleanup(func() {
+		openConfigFile = previousOpenConfigFile
+	})
+
+	openConfigFile = func(string) (configFile, error) {
+		return stubConfigFile{
+			Reader:  strings.NewReader(""),
+			statErr: errors.New("stat failed"),
+		}, nil
+	}
+
+	_, err := Load("broken.yaml")
+	if err == nil {
+		t.Fatal("expected stat error")
+	}
+
+	assertContains(t, err.Error(), "stat config file")
+	assertContains(t, err.Error(), "stat failed")
+}
+
+type stubConfigFile struct {
+	io.Reader
+	statErr error
+}
+
+func (file stubConfigFile) Stat() (os.FileInfo, error) {
+	return nil, file.statErr
+}
+
+func (stubConfigFile) Close() error {
+	return nil
 }
 
 func assertContains(t *testing.T, got, want string) {

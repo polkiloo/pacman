@@ -192,3 +192,27 @@ func TestConfigStringAndLogValueRedactSecuritySecrets(t *testing.T) {
 		t.Fatalf("expected slog output to contain redaction marker, got %q", logs.String())
 	}
 }
+
+func TestConfigGoStringRedactsSecuritySecrets(t *testing.T) {
+	t.Parallel()
+
+	cfg := Config{
+		APIVersion: APIVersionV1Alpha1,
+		Kind:       KindNodeConfig,
+		Node: NodeConfig{
+			Name: "alpha-1",
+		},
+		Security: &SecurityConfig{
+			AdminBearerToken: "secret-token",
+		},
+	}
+
+	formatted := cfg.GoString()
+	if strings.Contains(formatted, "secret-token") {
+		t.Fatalf("expected GoString output to redact inline token, got %q", formatted)
+	}
+
+	if !strings.Contains(formatted, redactedSecretValue) {
+		t.Fatalf("expected GoString output to contain redaction marker, got %q", formatted)
+	}
+}

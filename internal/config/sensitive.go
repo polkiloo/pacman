@@ -3,7 +3,6 @@ package config
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io/fs"
 	"log/slog"
 	"strings"
@@ -45,10 +44,9 @@ func (config Config) String() string {
 	encoder := json.NewEncoder(&buffer)
 	encoder.SetEscapeHTML(false)
 
-	err := encoder.Encode(redactedConfig(config.Redacted()))
-	if err != nil {
-		return fmt.Sprintf("%+v", redactedConfig(config.Redacted()))
-	}
+	// Config has a fixed schema of JSON-encodable fields, so encoding failure is
+	// not expected here.
+	_ = encoder.Encode(redactedConfig(config.Redacted()))
 
 	return strings.TrimSpace(buffer.String())
 }
