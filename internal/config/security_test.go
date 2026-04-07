@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/polkiloo/pacman/internal/dcs"
 )
 
 func TestSecurityAdminAuthEnabled(t *testing.T) {
@@ -148,6 +150,47 @@ func TestConfigRedactedMasksSecuritySecretsWithoutMutatingOriginal(t *testing.T)
 	}
 }
 
+func TestConfigRedactedMasksDCSSecretsWithoutMutatingOriginal(t *testing.T) {
+	t.Parallel()
+
+	cfg := Config{
+		APIVersion: APIVersionV1Alpha1,
+		Kind:       KindNodeConfig,
+		Node: NodeConfig{
+			Name: "alpha-1",
+		},
+		DCS: &dcs.Config{
+			Backend:      dcs.BackendEtcd,
+			ClusterName:  "alpha",
+			TTL:          dcs.DefaultTTL,
+			RetryTimeout: dcs.DefaultRetryTimeout,
+			Etcd: &dcs.EtcdConfig{
+				Endpoints: []string{"https://127.0.0.1:2379"},
+				Username:  "pacman",
+				Password:  "secret-password",
+			},
+		},
+	}
+
+	redacted := cfg.Redacted()
+
+	if redacted.DCS == nil || redacted.DCS.Etcd == nil {
+		t.Fatal("expected redacted dcs config")
+	}
+
+	if redacted.DCS.Etcd.Password != redactedSecretValue {
+		t.Fatalf("unexpected dcs password redaction: got %q, want %q", redacted.DCS.Etcd.Password, redactedSecretValue)
+	}
+
+	if redacted.DCS.Etcd.Username != "pacman" {
+		t.Fatalf("expected non-secret dcs fields to be preserved, got %q", redacted.DCS.Etcd.Username)
+	}
+
+	if cfg.DCS == nil || cfg.DCS.Etcd == nil || cfg.DCS.Etcd.Password != "secret-password" {
+		t.Fatalf("expected original dcs password to remain unchanged, got %+v", cfg.DCS)
+	}
+}
+
 func TestConfigStringAndLogValueRedactSecuritySecrets(t *testing.T) {
 	t.Parallel()
 
@@ -214,5 +257,26 @@ func TestConfigGoStringRedactsSecuritySecrets(t *testing.T) {
 
 	if !strings.Contains(formatted, redactedSecretValue) {
 		t.Fatalf("expected GoString output to contain redaction marker, got %q", formatted)
+	}
+}
+
+func TestConfigHasInlineSecretsIncludesDCS(t *testing.T) {
+	t.Parallel()
+
+	cfg := Config{
+		DCS: &dcs.Config{
+			Backend:      dcs.BackendEtcd,
+			ClusterName:  "alpha",
+			TTL:          dcs.DefaultTTL,
+			RetryTimeout: dcs.DefaultRetryTimeout,
+			Etcd: &dcs.EtcdConfig{
+				Endpoints: []string{"https://127.0.0.1:2379"},
+				Password:  "secret-password",
+			},
+		},
+	}
+
+	if !cfg.HasInlineSecrets() {
+		t.Fatal("expected DCS inline password to count as a secret")
 	}
 }
