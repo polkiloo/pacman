@@ -164,12 +164,12 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 See [ARCHITECTURE_DCS.md](ARCHITECTURE_DCS.md) for full design.
 
 ### DCS Interface and Abstraction
-- [ ] define `DCS` interface in `internal/dcs/dcs.go` (Get, Set, CompareAndSet, Delete, List, Campaign, Leader, Resign, Touch, Alive, Watch, Initialize, Close)
-- [ ] define `KeyValue`, `LeaderLease`, `WatchEvent`, `SetOption` types
-- [ ] define DCS error types (`ErrKeyNotFound`, `ErrRevisionMismatch`, etc.)
-- [ ] define DCS configuration model (`backend`, `clusterName`, `ttl`, backend-specific blocks)
-- [ ] add DCS config section to `internal/config/config.go` and validation
-- [ ] define key space layout (`/pacman/<cluster>/config`, `members/`, `status/`, `operation`, `history/`, `maintenance`, `epoch`)
+- [x] define `DCS` interface in `internal/dcs/dcs.go` (Get, Set, CompareAndSet, Delete, List, Campaign, Leader, Resign, Touch, Alive, Watch, Initialize, Close)
+- [x] define `KeyValue`, `LeaderLease`, `WatchEvent`, `SetOption` types
+- [x] define DCS error types (`ErrKeyNotFound`, `ErrRevisionMismatch`, etc.)
+- [x] define DCS configuration model (`backend`, `clusterName`, `ttl`, backend-specific blocks)
+- [x] add DCS config section to `internal/config/config.go` and validation
+- [x] define key space layout (`/pacman/<cluster>/config`, `members/`, `status/`, `operation`, `history/`, `maintenance`, `epoch`)
 
 ### DCS Conformance Test Suite
 - [ ] create `internal/dcs/dcstest/` shared conformance test suite
