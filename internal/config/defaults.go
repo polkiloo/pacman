@@ -1,6 +1,10 @@
 package config
 
-import "github.com/polkiloo/pacman/internal/cluster"
+import (
+	"strings"
+
+	"github.com/polkiloo/pacman/internal/cluster"
+)
 
 const (
 	DefaultAPIAddress            = "0.0.0.0:8080"
@@ -23,6 +27,14 @@ func (config Config) WithDefaults() Config {
 	}
 
 	defaulted.Node = defaulted.Node.WithDefaults()
+
+	if defaulted.DCS != nil {
+		dcsConfig := defaulted.DCS.WithDefaults()
+		if strings.TrimSpace(dcsConfig.ClusterName) == "" && defaulted.Bootstrap != nil {
+			dcsConfig.ClusterName = defaulted.Bootstrap.ClusterName
+		}
+		defaulted.DCS = &dcsConfig
+	}
 
 	if defaulted.TLS != nil {
 		tls := defaulted.TLS.WithDefaults()

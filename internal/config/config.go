@@ -1,6 +1,9 @@
 package config
 
-import "github.com/polkiloo/pacman/internal/cluster"
+import (
+	"github.com/polkiloo/pacman/internal/cluster"
+	"github.com/polkiloo/pacman/internal/dcs"
+)
 
 const (
 	// APIVersionV1Alpha1 is the initial PACMAN node-config schema version.
@@ -18,6 +21,7 @@ type Config struct {
 	APIVersion string                  `yaml:"apiVersion" json:"apiVersion"`
 	Kind       string                  `yaml:"kind" json:"kind"`
 	Node       NodeConfig              `yaml:"node" json:"node"`
+	DCS        *dcs.Config             `yaml:"dcs,omitempty" json:"dcs,omitempty"`
 	TLS        *TLSConfig              `yaml:"tls,omitempty" json:"tls,omitempty"`
 	Security   *SecurityConfig         `yaml:"security,omitempty" json:"security,omitempty"`
 	Postgres   *PostgresLocalConfig    `yaml:"postgres,omitempty" json:"postgres,omitempty"`
