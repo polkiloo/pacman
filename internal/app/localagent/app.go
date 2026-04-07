@@ -16,6 +16,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.Config, options ..
 		return err
 	}
 
+	defaulted := cfg.WithDefaults()
+
 	daemon, err := agent.NewDaemon(cfg, logger, options...)
 	if err != nil {
 		return fmt.Errorf("construct local agent daemon: %w", err)
@@ -26,6 +28,16 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.Config, options ..
 	}
 
 	daemon.Wait()
+
+	if logger != nil {
+		logger.InfoContext(
+			ctx,
+			"stopped local agent daemon",
+			slog.String("component", "agent"),
+			slog.String("node", defaulted.Node.Name),
+			slog.String("node_role", defaulted.Node.Role.String()),
+		)
+	}
 
 	return nil
 }

@@ -15,12 +15,26 @@ COVERAGE_MIN ?= 90.0
 PACKAGE_LIST_CMD = $(GO) list ./... | grep -v '/test/'
 PACMAN_TEST_IMAGE ?= pacman-test:local
 PACMAN_TEST_PGEXT_IMAGE ?= pacman-pgext-postgres:local
+PACMAN_TEST_POSTGRES_IMAGE ?= $(PACMAN_TEST_PGEXT_IMAGE)
 DOCKER_BUILD_PROGRESS ?= plain
 GO_TEST_INTEGRATION_FLAGS ?= -v
+GO_TEST_INTEGRATION_PACKAGE ?= ./test/integration
+TESTCONTAINERS_RYUK_DISABLED ?=
 PG_EXTENSION_DIR ?= ./postgresql/pacman_agent
 PG_EXTENSION_IMAGE ?= postgres:17-bookworm
 PG_EXTENSION_OUTPUT ?= $(BIN_DIR)/pg-extension
 PG_CONFIG ?= pg_config
+
+INTEGRATION_TEST_ENV = PACMAN_TEST_IMAGE=$(PACMAN_TEST_IMAGE) \
+	PACMAN_TEST_PGEXT_IMAGE=$(PACMAN_TEST_PGEXT_IMAGE) \
+	PACMAN_TEST_POSTGRES_IMAGE=$(PACMAN_TEST_POSTGRES_IMAGE) \
+	TESTCONTAINERS_RYUK_DISABLED=$(TESTCONTAINERS_RYUK_DISABLED)
+
+INTEGRATION_GROUP_SMOKE := ^(TestPACMANClusterEnvironment|TestControlPlaneAggregatesSharedDaemonStateWithRealPostgres|TestPacmandDaemonStartupMatrix|TestPacmandHTTPAPIServesHealth|TestPacmandPrimaryAndReplicaProbes|TestPacmandNativeNodeAndMembersAPIWithRealPostgresOperation|TestPacmandHistoryMaintenanceAndDiagnosticsAPI|TestPacmandOperationsAndPublishedOpenAPI)$
+INTEGRATION_GROUP_SECURITY := ^(TestPacmandHTTPAPIServesHealthOverTLS|TestPacmandPeerIdentityAcceptsAllowedMemberCertificate|TestPacmandPeerIdentityRejectsUnexpectedMemberCertificate)$
+INTEGRATION_GROUP_PATRONI := ^(TestPatroniProbeCompatibilityWithContainerFixture|TestPatroniMonitoringDocumentsWithContainerFixture|TestPatroniAdminCompatibilityWithContainerFixture)$
+INTEGRATION_GROUP_PGEXT := ^(TestPostgresExtensionStartupPublishesAPIAndInstallsSQLAssets|TestPostgresExtensionRestartsPACMANHelperAfterUnexpectedExit|TestPostgresExtensionInvalidConfigKeepsAPIUnavailable|TestPostgresExtensionLocalStateObservationWithRealSQL|TestPostgresExtensionStopsPACMANHelperWhenPostgresStops)$
+INTEGRATION_GROUP_HA := ^(TestFailoverPromotesRealStandbyAndRecordsHistory|TestFailoverIntentRejectsHealthyPrimaryWithRealStreamingStandby|TestRejoinOperationProjectsRecoveringPhaseWithRealTopology|TestMaintenanceOverridesActiveFailoverPhaseWithRealTopology|TestConfirmPrimaryFailureConfiguredQuorumMatrixWithRealTopology|TestConfirmPrimaryFailureObservedQuorumMatrixWithRealTopology|TestConfiguredQuorumIgnoresObservedMembersOutsideSpecWithRealTopology|TestCreateFailoverIntentObservedQuorumMatrixWithRealTopology|TestRejoinStrategySelectsRewindAfterRealFailover|TestExecuteRejoinRewindKeepsClusterRecoveringWithRealTopology|TestSwitchoverValidationUsesRealStreamingStandby|TestSwitchoverIntentSchedulesRealStreamingStandby|TestSwitchoverPromotesRealStandbyAndRecordsHistory|TestSwitchoverValidationRejectsUnavailableRealStandby|TestSwitchoverExecutionRejectsFutureScheduledIntentWithRealStandby)$
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -30,7 +44,7 @@ LDFLAGS := -X github.com/polkiloo/pacman/internal/version.Version=$(VERSION) \
 	-X github.com/polkiloo/pacman/internal/version.Commit=$(COMMIT) \
 	-X github.com/polkiloo/pacman/internal/version.BuildDate=$(BUILD_DATE)
 
-.PHONY: fmt test test-integration docker-build-test-image docker-build-pgext-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl build-pg-extension package-pg-extension install-pg-extension clean-pg-extension tidy clean openapi-codegen-check
+.PHONY: fmt test test-integration test-integration-smoke test-integration-security test-integration-patroni test-integration-pgext test-integration-ha docker-build-test-image docker-build-pgext-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl build-pg-extension package-pg-extension install-pg-extension clean-pg-extension tidy clean openapi-codegen-check
 
 fmt:
 	$(GO) fmt ./...
@@ -60,8 +74,22 @@ docker-build-test-image:
 docker-build-pgext-image:
 	docker build --progress=$(DOCKER_BUILD_PROGRESS) -f test/docker/pacman-pgext-postgres.Dockerfile -t $(PACMAN_TEST_PGEXT_IMAGE) .
 
-test-integration: docker-build-test-image docker-build-pgext-image
-	PACMAN_TEST_IMAGE=$(PACMAN_TEST_IMAGE) PACMAN_TEST_PGEXT_IMAGE=$(PACMAN_TEST_PGEXT_IMAGE) $(GO) test $(GO_TEST_INTEGRATION_FLAGS) -tags=integration ./test/...
+test-integration: docker-build-test-image docker-build-pgext-image test-integration-smoke test-integration-security test-integration-patroni test-integration-pgext test-integration-ha
+
+test-integration-smoke:
+	$(INTEGRATION_TEST_ENV) $(GO) test $(GO_TEST_INTEGRATION_FLAGS) -tags=integration -run '$(INTEGRATION_GROUP_SMOKE)' $(GO_TEST_INTEGRATION_PACKAGE)
+
+test-integration-security:
+	$(INTEGRATION_TEST_ENV) $(GO) test $(GO_TEST_INTEGRATION_FLAGS) -tags=integration -run '$(INTEGRATION_GROUP_SECURITY)' $(GO_TEST_INTEGRATION_PACKAGE)
+
+test-integration-patroni:
+	$(INTEGRATION_TEST_ENV) $(GO) test $(GO_TEST_INTEGRATION_FLAGS) -tags=integration -run '$(INTEGRATION_GROUP_PATRONI)' $(GO_TEST_INTEGRATION_PACKAGE)
+
+test-integration-pgext:
+	$(INTEGRATION_TEST_ENV) $(GO) test $(GO_TEST_INTEGRATION_FLAGS) -tags=integration -run '$(INTEGRATION_GROUP_PGEXT)' $(GO_TEST_INTEGRATION_PACKAGE)
+
+test-integration-ha:
+	$(INTEGRATION_TEST_ENV) $(GO) test $(GO_TEST_INTEGRATION_FLAGS) -tags=integration -run '$(INTEGRATION_GROUP_HA)' $(GO_TEST_INTEGRATION_PACKAGE)
 
 coverage:
 	@packages="$$( $(PACKAGE_LIST_CMD) )"; \

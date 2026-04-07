@@ -31,6 +31,8 @@ func TestDaemonRegisterMemberLogsWarningOnFailure(t *testing.T) {
 	})
 
 	assertContains(t, logs.String(), `"msg":"failed to register local member in control plane"`)
+	assertContains(t, logs.String(), `"node":"alpha-1"`)
+	assertContains(t, logs.String(), `"node_role":"data"`)
 	assertContains(t, logs.String(), `"register_error":"registration unavailable"`)
 }
 
@@ -62,6 +64,7 @@ func TestDaemonCampaignLeaderLogsWarningOnFailure(t *testing.T) {
 	daemon.campaignLeader(context.Background(), "alpha-1")
 
 	assertContains(t, logs.String(), `"msg":"failed to campaign for control-plane leadership"`)
+	assertContains(t, logs.String(), `"node":"alpha-1"`)
 	assertContains(t, logs.String(), `"campaign_error":"leader election unavailable"`)
 }
 

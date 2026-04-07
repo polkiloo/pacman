@@ -130,6 +130,16 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 	return daemon, nil
 }
 
+func (daemon *Daemon) logArgs(component string, args ...any) []any {
+	combined := []any{
+		slog.String("component", component),
+		slog.String("node", daemon.config.Node.Name),
+		slog.String("node_role", daemon.config.Node.Role.String()),
+	}
+
+	return append(combined, args...)
+}
+
 func buildAPIAuthorizer(cfg config.Config) (httpapi.Authorizer, error) {
 	if cfg.Security == nil || !cfg.Security.AdminAuthEnabled() {
 		return nil, nil
@@ -222,14 +232,14 @@ func (daemon *Daemon) logStartup(ctx context.Context, startup agentmodel.Startup
 	daemon.logger.InfoContext(
 		ctx,
 		"started local agent daemon",
-		slog.String("component", "agent"),
-		slog.String("node", startup.NodeName),
-		slog.String("role", startup.NodeRole.String()),
-		slog.Bool("manages_postgres", startup.ManagesPostgres),
-		slog.Bool("api_tls_enabled", daemon.config.TLS != nil && daemon.config.TLS.Enabled),
-		slog.Bool("member_mtls_enabled", daemon.config.Security.PeerMTLSEnabled()),
-		slog.String("api_address", startup.APIAddress),
-		slog.String("control_address", startup.ControlAddress),
+		daemon.logArgs(
+			"agent",
+			slog.Bool("manages_postgres", startup.ManagesPostgres),
+			slog.Bool("api_tls_enabled", daemon.config.TLS != nil && daemon.config.TLS.Enabled),
+			slog.Bool("member_mtls_enabled", daemon.config.Security.PeerMTLSEnabled()),
+			slog.String("api_address", startup.APIAddress),
+			slog.String("control_address", startup.ControlAddress),
+		)...,
 	)
 }
 
@@ -253,7 +263,7 @@ func (daemon *Daemon) registerMember(ctx context.Context, startup agentmodel.Sta
 			"failed to register local member in control plane",
 			slog.String("component", "controlplane"),
 			slog.String("node", startup.NodeName),
-			slog.String("role", startup.NodeRole.String()),
+			slog.String("node_role", startup.NodeRole.String()),
 			slog.String("api_address", startup.APIAddress),
 			slog.String("control_address", startup.ControlAddress),
 			slog.String("register_error", err.Error()),
@@ -266,7 +276,7 @@ func (daemon *Daemon) registerMember(ctx context.Context, startup agentmodel.Sta
 		"registered local member in control plane",
 		slog.String("component", "controlplane"),
 		slog.String("node", startup.NodeName),
-		slog.String("role", startup.NodeRole.String()),
+		slog.String("node_role", startup.NodeRole.String()),
 		slog.String("api_address", startup.APIAddress),
 		slog.String("control_address", startup.ControlAddress),
 	)
@@ -306,8 +316,7 @@ func (daemon *Daemon) Wait() {
 		if err := daemon.peerServer.Wait(); err != nil {
 			daemon.logger.Error(
 				"peer api server stopped unexpectedly",
-				slog.String("component", "peerapi"),
-				slog.String("error", err.Error()),
+				daemon.logArgs("peerapi", slog.String("error", err.Error()))...,
 			)
 		}
 	}
@@ -319,8 +328,7 @@ func (daemon *Daemon) Wait() {
 	if err := daemon.apiServer.Wait(); err != nil {
 		daemon.logger.Error(
 			"http api server stopped unexpectedly",
-			slog.String("component", "httpapi"),
-			slog.String("error", err.Error()),
+			daemon.logArgs("httpapi", slog.String("error", err.Error()))...,
 		)
 	}
 }
@@ -371,9 +379,11 @@ func (daemon *Daemon) probeSeedPeer(ctx context.Context, client *http.Client, se
 		daemon.logger.WarnContext(
 			ctx,
 			"failed to build peer probe request",
-			slog.String("component", "peerapi"),
-			slog.String("seed_address", seedAddress),
-			slog.String("error", err.Error()),
+			daemon.logArgs(
+				"peerapi",
+				slog.String("seed_address", seedAddress),
+				slog.String("error", err.Error()),
+			)...,
 		)
 		return
 	}
@@ -383,9 +393,11 @@ func (daemon *Daemon) probeSeedPeer(ctx context.Context, client *http.Client, se
 		daemon.logger.WarnContext(
 			ctx,
 			"failed to probe peer over mTLS",
-			slog.String("component", "peerapi"),
-			slog.String("seed_address", seedAddress),
-			slog.String("error", err.Error()),
+			daemon.logArgs(
+				"peerapi",
+				slog.String("seed_address", seedAddress),
+				slog.String("error", err.Error()),
+			)...,
 		)
 		return
 	}
@@ -395,9 +407,11 @@ func (daemon *Daemon) probeSeedPeer(ctx context.Context, client *http.Client, se
 		daemon.logger.WarnContext(
 			ctx,
 			"peer probe returned unexpected status",
-			slog.String("component", "peerapi"),
-			slog.String("seed_address", seedAddress),
-			slog.Int("status", resp.StatusCode),
+			daemon.logArgs(
+				"peerapi",
+				slog.String("seed_address", seedAddress),
+				slog.Int("status", resp.StatusCode),
+			)...,
 		)
 		return
 	}
@@ -407,9 +421,11 @@ func (daemon *Daemon) probeSeedPeer(ctx context.Context, client *http.Client, se
 		daemon.logger.WarnContext(
 			ctx,
 			"failed to decode peer probe response",
-			slog.String("component", "peerapi"),
-			slog.String("seed_address", seedAddress),
-			slog.String("error", err.Error()),
+			daemon.logArgs(
+				"peerapi",
+				slog.String("seed_address", seedAddress),
+				slog.String("error", err.Error()),
+			)...,
 		)
 		return
 	}
@@ -417,10 +433,12 @@ func (daemon *Daemon) probeSeedPeer(ctx context.Context, client *http.Client, se
 	daemon.logger.InfoContext(
 		ctx,
 		"validated peer mTLS connection",
-		slog.String("component", "peerapi"),
-		slog.String("seed_address", seedAddress),
-		slog.String("peer_node", identity.NodeName),
-		slog.String("client_subject", identity.Peer.Subject),
+		daemon.logArgs(
+			"peerapi",
+			slog.String("seed_address", seedAddress),
+			slog.String("peer_node", identity.NodeName),
+			slog.String("client_subject", identity.Peer.Subject),
+		)...,
 	)
 }
 

@@ -20,6 +20,7 @@ var (
 	ErrSecurityMemberMTLSCAFileRequired    = errors.New("config security memberMTLSEnabled requires tls caFile")
 	ErrSecurityMemberMTLSBootstrapRequired = errors.New("config security memberMTLSEnabled requires bootstrap expectedMembers")
 	ErrSecurityMemberMTLSNodeUnknown       = errors.New("config security memberMTLSEnabled requires node name in bootstrap expectedMembers")
+	ErrSensitiveConfigFilePermissions      = errors.New("config file containing inline secrets must not be readable by group or others")
 	ErrPostgresDataDirRequired             = errors.New("config postgres dataDir is required")
 	ErrPostgresListenAddressRequired       = errors.New("config postgres listenAddress is required")
 	ErrPostgresListenAddressInvalid        = errors.New("config postgres listenAddress is invalid")

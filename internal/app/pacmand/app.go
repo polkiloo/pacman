@@ -94,14 +94,15 @@ func (a *App) Run(ctx context.Context) error {
 }
 
 func (a *App) logLoadedConfig(ctx context.Context, loadedConfig config.Config, source, path string) {
+	redactedConfig := loadedConfig.Redacted()
 	attributes := []slog.Attr{
 		slog.String("component", "config"),
 		slog.String("source", source),
-		slog.String("node", loadedConfig.Node.Name),
-		slog.String("role", loadedConfig.Node.Role.String()),
-		slog.Bool("api_tls_enabled", loadedConfig.TLS != nil && loadedConfig.TLS.Enabled),
-		slog.Bool("admin_auth_enabled", loadedConfig.Security.AdminAuthEnabled()),
-		slog.Bool("member_mtls_enabled", loadedConfig.Security.PeerMTLSEnabled()),
+		slog.String("node", redactedConfig.Node.Name),
+		slog.String("node_role", redactedConfig.Node.Role.String()),
+		slog.Bool("api_tls_enabled", redactedConfig.TLS != nil && redactedConfig.TLS.Enabled),
+		slog.Bool("admin_auth_enabled", redactedConfig.Security.AdminAuthEnabled()),
+		slog.Bool("member_mtls_enabled", redactedConfig.Security.PeerMTLSEnabled()),
 	}
 	if path != "" {
 		attributes = append(attributes, slog.String("path", path))

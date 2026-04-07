@@ -190,12 +190,13 @@ postgres:
 	assertContains(t, logs.String(), `"component":"config"`)
 	assertContains(t, logs.String(), `"path":"`+path+`"`)
 	assertContains(t, logs.String(), `"node":"alpha-1"`)
-	assertContains(t, logs.String(), `"role":"data"`)
+	assertContains(t, logs.String(), `"node_role":"data"`)
 	assertContains(t, logs.String(), `"msg":"started local agent daemon"`)
 	assertContains(t, logs.String(), `"component":"agent"`)
 	assertContains(t, logs.String(), `"manages_postgres":true`)
 	assertContains(t, logs.String(), `"msg":"observed PostgreSQL unavailability"`)
 	assertContains(t, logs.String(), `"msg":"published local state to control plane"`)
+	assertContains(t, logs.String(), `"msg":"stopped local agent daemon"`)
 	assertContains(t, logs.String(), `"postgres_up":false`)
 }
 

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -289,6 +290,8 @@ func TestDaemonStartRecordsStartupStateAndHeartbeat(t *testing.T) {
 	assertContains(t, logs.String(), `"msg":"started local agent daemon"`)
 	assertContains(t, logs.String(), `"msg":"observed PostgreSQL availability"`)
 	assertContains(t, logs.String(), `"msg":"published local state to control plane"`)
+	assertContains(t, logs.String(), `"node":"alpha-1"`)
+	assertContains(t, logs.String(), `"node_role":"data"`)
 	assertContains(t, logs.String(), `"heartbeat_sequence":1`)
 	assertContains(t, logs.String(), `"postgres_up":true`)
 	assertContains(t, logs.String(), `"member_role":"primary"`)
@@ -407,6 +410,8 @@ func TestDaemonStartRecordsWitnessHeartbeatWithoutLocalPostgres(t *testing.T) {
 	}
 
 	assertContains(t, logs.String(), `"msg":"observed heartbeat without local PostgreSQL"`)
+	assertContains(t, logs.String(), `"node":"witness-1"`)
+	assertContains(t, logs.String(), `"node_role":"witness"`)
 	assertContains(t, logs.String(), `"postgres_managed":false`)
 	assertContains(t, logs.String(), `"msg":"published local state to control plane"`)
 
@@ -623,6 +628,8 @@ func TestDaemonStartReportsRoleDetectionFailureWhileAvailabilityIsUp(t *testing.
 	}
 
 	assertContains(t, logs.String(), `"msg":"observed PostgreSQL availability without role state"`)
+	assertContains(t, logs.String(), `"node":"alpha-1"`)
+	assertContains(t, logs.String(), `"node_role":"data"`)
 	assertContains(t, logs.String(), `"postgres_state_error":"pq: password authentication failed"`)
 
 	cancel()
@@ -701,6 +708,8 @@ func TestDaemonHeartbeatLoopTicksAndTracksAvailabilityChanges(t *testing.T) {
 
 	assertContains(t, logs.String(), `"msg":"observed PostgreSQL unavailability"`)
 	assertContains(t, logs.String(), `"msg":"observed PostgreSQL availability"`)
+	assertContains(t, logs.String(), `"node":"alpha-1"`)
+	assertContains(t, logs.String(), `"node_role":"data"`)
 	assertContains(t, logs.String(), `"postgres_up":false`)
 	assertContains(t, logs.String(), `"postgres_up":true`)
 	assertContains(t, logs.String(), `"member_role":"primary"`)
@@ -1127,6 +1136,115 @@ func TestDaemonProbeSeedPeersLogsValidatedPeerMTLSConnection(t *testing.T) {
 	}
 }
 
+func TestDaemonWaitLogsPeerServerUnexpectedStop(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	daemon := &Daemon{
+		logger:     logging.New("pacmand", &logs),
+		config:     validWitnessMemberMTLSConfig(),
+		peerServer: waitErrorServer{waitErr: errors.New("peer stopped")},
+	}
+
+	daemon.Wait()
+
+	assertContains(t, logs.String(), `"msg":"peer api server stopped unexpectedly"`)
+	assertContains(t, logs.String(), `"node":"alpha-1"`)
+	assertContains(t, logs.String(), `"node_role":"witness"`)
+	assertContains(t, logs.String(), `"error":"peer stopped"`)
+}
+
+func TestDaemonWaitLogsAPIServerUnexpectedStop(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	daemon := &Daemon{
+		logger:    logging.New("pacmand", &logs),
+		config:    validDataConfig(),
+		apiServer: waitErrorServer{waitErr: errors.New("api stopped")},
+	}
+
+	daemon.Wait()
+
+	assertContains(t, logs.String(), `"msg":"http api server stopped unexpectedly"`)
+	assertContains(t, logs.String(), `"node":"alpha-1"`)
+	assertContains(t, logs.String(), `"node_role":"data"`)
+	assertContains(t, logs.String(), `"error":"api stopped"`)
+}
+
+func TestDaemonProbeSeedPeerLogsRequestBuildError(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	daemon := &Daemon{
+		logger:           logging.New("pacmand", &logs),
+		config:           validDataConfig(),
+		peerProbeTimeout: time.Second,
+	}
+
+	daemon.probeSeedPeer(context.Background(), &http.Client{Timeout: time.Second}, "bad\naddress:9090")
+
+	assertContains(t, logs.String(), `"msg":"failed to build peer probe request"`)
+	assertContains(t, logs.String(), `"seed_address":"bad\naddress:9090"`)
+}
+
+func TestDaemonProbeSeedPeerLogsTransportFailure(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	daemon := &Daemon{
+		logger:           logging.New("pacmand", &logs),
+		config:           validDataConfig(),
+		peerProbeTimeout: time.Second,
+	}
+
+	daemon.probeSeedPeer(context.Background(), &http.Client{Timeout: 20 * time.Millisecond}, reserveLoopbackAddress())
+
+	assertContains(t, logs.String(), `"msg":"failed to probe peer over mTLS"`)
+}
+
+func TestDaemonProbeSeedPeerLogsUnexpectedStatus(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	var logs bytes.Buffer
+	daemon := &Daemon{
+		logger:           logging.New("pacmand", &logs),
+		config:           validDataConfig(),
+		peerProbeTimeout: time.Second,
+	}
+
+	daemon.probeSeedPeer(context.Background(), server.Client(), strings.TrimPrefix(server.URL, "https://"))
+
+	assertContains(t, logs.String(), `"msg":"peer probe returned unexpected status"`)
+	assertContains(t, logs.String(), `"status":503`)
+}
+
+func TestDaemonProbeSeedPeerLogsDecodeFailure(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte("{"))
+	}))
+	defer server.Close()
+
+	var logs bytes.Buffer
+	daemon := &Daemon{
+		logger:           logging.New("pacmand", &logs),
+		config:           validDataConfig(),
+		peerProbeTimeout: time.Second,
+	}
+
+	daemon.probeSeedPeer(context.Background(), server.Client(), strings.TrimPrefix(server.URL, "https://"))
+
+	assertContains(t, logs.String(), `"msg":"failed to decode peer probe response"`)
+}
+
 func TestShouldProbeSeedAddress(t *testing.T) {
 	t.Parallel()
 
@@ -1202,6 +1320,18 @@ func validDataConfig() config.Config {
 			DataDir: "/var/lib/postgresql/data",
 		},
 	}
+}
+
+type waitErrorServer struct {
+	waitErr error
+}
+
+func (server waitErrorServer) Start(context.Context, string) error {
+	return nil
+}
+
+func (server waitErrorServer) Wait() error {
+	return server.waitErr
 }
 
 func validWitnessMemberMTLSConfig() config.Config {

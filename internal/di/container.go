@@ -2,11 +2,8 @@ package di
 
 import (
 	"io"
-	"log/slog"
 
 	"go.uber.org/fx"
-
-	"github.com/polkiloo/pacman/internal/logging"
 )
 
 type baseDependencies struct {
@@ -18,7 +15,7 @@ type baseDependencies struct {
 }
 
 // ProvideBase registers process-scoped dependencies shared by command entrypoints.
-func ProvideBase(processName string, args []string, stdout, stderr io.Writer) fx.Option {
+func ProvideBase(args []string, stdout, stderr io.Writer) fx.Option {
 	return fx.Options(
 		fx.Provide(func() baseDependencies {
 			return baseDependencies{
@@ -26,9 +23,6 @@ func ProvideBase(processName string, args []string, stdout, stderr io.Writer) fx
 				Stdout: stdout,
 				Stderr: stderr,
 			}
-		}),
-		fx.Provide(func() *slog.Logger {
-			return logging.New(processName, stderr)
 		}),
 	)
 }

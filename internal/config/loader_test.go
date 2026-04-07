@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -235,6 +237,102 @@ bootstrap:
 	}
 }
 
+func TestLoadRejectsPermissiveConfigFileWithInlineSecret(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pacmand.yaml")
+	payload := `
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: alpha-1
+postgres:
+  dataDir: /var/lib/postgresql/data
+security:
+  adminBearerToken: secret-token
+bootstrap:
+  clusterName: alpha
+`
+
+	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected sensitive config file permission error")
+	}
+
+	if !errors.Is(err, ErrSensitiveConfigFilePermissions) {
+		t.Fatalf("unexpected error: got %v, want %v", err, ErrSensitiveConfigFilePermissions)
+	}
+}
+
+func TestLoadAllowsRestrictedConfigFileWithInlineSecret(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pacmand.yaml")
+	payload := `
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: alpha-1
+postgres:
+  dataDir: /var/lib/postgresql/data
+security:
+  adminBearerToken: secret-token
+bootstrap:
+  clusterName: alpha
+`
+
+	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("load restricted sensitive config: %v", err)
+	}
+
+	if loaded.Security == nil || loaded.Security.AdminBearerToken != "secret-token" {
+		t.Fatalf("expected inline token to load from restricted config, got %+v", loaded.Security)
+	}
+}
+
+func TestLoadAllowsPermissiveConfigFileWhenSecretIsFileBacked(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pacmand.yaml")
+	payload := `
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: alpha-1
+postgres:
+  dataDir: /var/lib/postgresql/data
+security:
+  adminBearerTokenFile: /run/secrets/pacman-admin-token
+bootstrap:
+  clusterName: alpha
+`
+
+	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("load file-backed secret config: %v", err)
+	}
+
+	if loaded.Security == nil || loaded.Security.AdminBearerTokenFile != "/run/secrets/pacman-admin-token" {
+		t.Fatalf("expected token file config to load, got %+v", loaded.Security)
+	}
+}
+
 func TestLoadReturnsOpenError(t *testing.T) {
 	t.Parallel()
 
@@ -244,6 +342,43 @@ func TestLoadReturnsOpenError(t *testing.T) {
 	}
 
 	assertContains(t, err.Error(), "open config file")
+}
+
+func TestLoadReturnsStatError(t *testing.T) {
+	t.Parallel()
+
+	previousOpenConfigFile := openConfigFile
+	t.Cleanup(func() {
+		openConfigFile = previousOpenConfigFile
+	})
+
+	openConfigFile = func(string) (configFile, error) {
+		return stubConfigFile{
+			Reader:  strings.NewReader(""),
+			statErr: errors.New("stat failed"),
+		}, nil
+	}
+
+	_, err := Load("broken.yaml")
+	if err == nil {
+		t.Fatal("expected stat error")
+	}
+
+	assertContains(t, err.Error(), "stat config file")
+	assertContains(t, err.Error(), "stat failed")
+}
+
+type stubConfigFile struct {
+	io.Reader
+	statErr error
+}
+
+func (file stubConfigFile) Stat() (os.FileInfo, error) {
+	return nil, file.statErr
+}
+
+func (stubConfigFile) Close() error {
+	return nil
 }
 
 func assertContains(t *testing.T, got, want string) {

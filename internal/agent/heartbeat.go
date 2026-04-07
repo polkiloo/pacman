@@ -53,7 +53,7 @@ func (daemon *Daemon) logHeartbeat(current, previous agentmodel.Heartbeat) {
 	}
 
 	message, warn := heartbeatLogMessage(current.Postgres)
-	args := heartbeatLogArgs(current)
+	args := daemon.heartbeatLogArgs(current)
 	if warn {
 		daemon.logger.Warn(message, args...)
 		return
@@ -106,20 +106,20 @@ func heartbeatLogMessage(status agentmodel.PostgresStatus) (string, bool) {
 	return "observed PostgreSQL availability", false
 }
 
-func heartbeatLogArgs(heartbeat agentmodel.Heartbeat) []any {
+func (daemon *Daemon) heartbeatLogArgs(heartbeat agentmodel.Heartbeat) []any {
 	status := heartbeat.Postgres
 	details := status.Details
 	wal := status.WAL
 	errors := status.Errors
 
-	args := []any{
-		slog.String("component", "agent"),
+	args := daemon.logArgs(
+		"agent",
 		slog.Uint64("heartbeat_sequence", heartbeat.Sequence),
 		slog.Bool("postgres_managed", status.Managed),
 		slog.Bool("postgres_up", status.Up),
 		slog.Bool("pending_restart", details.PendingRestart),
 		slog.Int64("replication_lag_bytes", details.ReplicationLagBytes),
-	}
+	)
 
 	if status.Address != "" {
 		args = append(args, slog.String("postgres_address", status.Address))

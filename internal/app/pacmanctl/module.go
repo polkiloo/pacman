@@ -9,13 +9,15 @@ import (
 
 	"github.com/polkiloo/pacman/internal/di"
 	"github.com/polkiloo/pacman/internal/fxrun"
+	"github.com/polkiloo/pacman/internal/logging"
 )
 
 // Module wires the pacmanctl command graph and lifecycle runner into Fx.
 func Module(processName string, args []string, stdout, stderr io.Writer) fx.Option {
 	return fx.Module(
 		"pacmanctl",
-		di.ProvideBase(processName, args, stdout, stderr),
+		di.ProvideBase(args, stdout, stderr),
+		logging.Module(processName),
 		fx.Provide(New),
 		fx.Invoke(registerRunner),
 	)

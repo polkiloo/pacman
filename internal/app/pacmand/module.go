@@ -9,6 +9,7 @@ import (
 
 	"github.com/polkiloo/pacman/internal/di"
 	"github.com/polkiloo/pacman/internal/fxrun"
+	"github.com/polkiloo/pacman/internal/logging"
 	"github.com/polkiloo/pacman/internal/security"
 )
 
@@ -17,7 +18,8 @@ import (
 func Module(processName string, args []string, stdout, stderr io.Writer) fx.Option {
 	return fx.Module(
 		"pacmand",
-		di.ProvideBase(processName, args, stdout, stderr),
+		di.ProvideBase(args, stdout, stderr),
+		logging.Module(processName),
 		ConfigModule(),
 		security.TLSModule(),
 		security.MemberMTLSModule(),

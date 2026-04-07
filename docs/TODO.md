@@ -290,13 +290,13 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] add mTLS between cluster members
 - [x] implement certificate loading
 - [x] define admin authorization model
-- [ ] secure sensitive config handling
+- [x] secure sensitive config handling
 
 ---
 
 ## 15. Structured Logging (`slog`)
 
-- [ ] expand `pacmand` runtime `slog` coverage and field consistency
+- [x] expand `pacmand` runtime `slog` coverage and field consistency
 - [ ] expand `pacmanctl` runtime `slog` coverage and field consistency
 - [ ] add `slog`-backed HTTP access logging
 - [ ] add structured event logs for cluster lifecycle and state transitions

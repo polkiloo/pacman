@@ -35,10 +35,12 @@ func (daemon *Daemon) bootstrapClusterSpec(ctx context.Context) error {
 	daemon.logger.InfoContext(
 		ctx,
 		"stored bootstrap cluster spec",
-		slog.String("component", "controlplane"),
-		slog.String("cluster", stored.ClusterName),
-		slog.Int64("generation", int64(stored.Generation)),
-		slog.Int("members", len(stored.Members)),
+		daemon.logArgs(
+			"controlplane",
+			slog.String("cluster", stored.ClusterName),
+			slog.Int64("generation", int64(stored.Generation)),
+			slog.Int("members", len(stored.Members)),
+		)...,
 	)
 
 	return nil

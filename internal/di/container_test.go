@@ -3,8 +3,6 @@ package di
 import (
 	"bytes"
 	"io"
-	"log/slog"
-	"strings"
 	"testing"
 
 	"go.uber.org/fx"
@@ -16,7 +14,6 @@ type resolvedBaseDeps struct {
 	Args   []string  `name:"args"`
 	Stdout io.Writer `name:"stdout"`
 	Stderr io.Writer `name:"stderr"`
-	Logger *slog.Logger
 }
 
 func TestProvideBaseRegistersDependencies(t *testing.T) {
@@ -29,7 +26,7 @@ func TestProvideBaseRegistersDependencies(t *testing.T) {
 
 	app := fx.New(
 		fx.NopLogger,
-		ProvideBase("pacmand", args, stdout, stderr),
+		ProvideBase(args, stdout, stderr),
 		fx.Populate(&resolved),
 	)
 	if err := app.Err(); err != nil {
@@ -47,11 +44,6 @@ func TestProvideBaseRegistersDependencies(t *testing.T) {
 	if resolved.Stderr != stderr {
 		t.Fatal("stderr dependency does not match registered writer")
 	}
-
-	resolved.Logger.Info("registered logger")
-	if !strings.Contains(stderr.String(), `"service":"pacmand"`) {
-		t.Fatalf("expected structured logger output, got %q", stderr.String())
-	}
 }
 
 func TestProvideBaseReturnsArgsRegistrationError(t *testing.T) {
@@ -62,7 +54,7 @@ func TestProvideBaseReturnsArgsRegistrationError(t *testing.T) {
 		fx.Provide(func() duplicateArgsOut {
 			return duplicateArgsOut{Args: []string{"existing"}}
 		}),
-		ProvideBase("pacmand", nil, io.Discard, io.Discard),
+		ProvideBase(nil, io.Discard, io.Discard),
 	)
 	if err := app.Err(); err == nil {
 		t.Fatal("expected args registration error")
@@ -77,7 +69,7 @@ func TestProvideBaseReturnsStdoutRegistrationError(t *testing.T) {
 		fx.Provide(func() duplicateStdoutOut {
 			return duplicateStdoutOut{Stdout: io.Discard}
 		}),
-		ProvideBase("pacmand", nil, io.Discard, io.Discard),
+		ProvideBase(nil, io.Discard, io.Discard),
 	)
 	if err := app.Err(); err == nil {
 		t.Fatal("expected stdout registration error")
@@ -92,25 +84,10 @@ func TestProvideBaseReturnsStderrRegistrationError(t *testing.T) {
 		fx.Provide(func() duplicateStderrOut {
 			return duplicateStderrOut{Stderr: io.Discard}
 		}),
-		ProvideBase("pacmand", nil, io.Discard, io.Discard),
+		ProvideBase(nil, io.Discard, io.Discard),
 	)
 	if err := app.Err(); err == nil {
 		t.Fatal("expected stderr registration error")
-	}
-}
-
-func TestProvideBaseReturnsLoggerRegistrationError(t *testing.T) {
-	t.Parallel()
-
-	app := fx.New(
-		fx.NopLogger,
-		fx.Provide(func() *slog.Logger {
-			return slog.New(slog.NewTextHandler(io.Discard, nil))
-		}),
-		ProvideBase("pacmand", nil, io.Discard, io.Discard),
-	)
-	if err := app.Err(); err == nil {
-		t.Fatal("expected logger registration error")
 	}
 }
 
