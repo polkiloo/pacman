@@ -238,14 +238,14 @@ Framework: **`github.com/hashicorp/raft`** + **`github.com/hashicorp/raft-boltdb
 - [ ] add 3-node Raft integration tests with testcontainers
 
 ### etcd Backend
-- [ ] add `go.etcd.io/etcd/client/v3` dependency
-- [ ] implement `internal/dcs/etcd/etcd.go` — `DCS` backed by etcd v3
-- [ ] implement CompareAndSet via etcd transactions
-- [ ] implement leader election via `concurrency.Election`
-- [ ] implement session/TTL via etcd leases
-- [ ] implement Watch via etcd Watch
-- [ ] pass all conformance tests
-- [ ] add testcontainers-based etcd integration tests
+- [x] add `go.etcd.io/etcd/client/v3` dependency
+- [x] implement `internal/dcs/etcd/etcd.go` — `DCS` backed by etcd v3
+- [x] implement CompareAndSet via etcd transactions
+- [x] implement leader election via etcd transactions + leases
+- [x] implement session/TTL via etcd leases
+- [x] implement Watch via etcd Watch
+- [x] pass all conformance tests
+- [x] add testcontainers-based etcd integration tests
 
 ### Post-MVP Backends (deferred)
 
