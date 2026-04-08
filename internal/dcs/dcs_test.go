@@ -62,7 +62,7 @@ func TestLeaderLeaseClone(t *testing.T) {
 func TestApplySetOptions(t *testing.T) {
 	t.Parallel()
 
-	options := applySetOptions(nil, WithTTL(45*time.Second))
+	options := ApplySetOptions(nil, WithTTL(45*time.Second))
 	if options.TTL != 45*time.Second {
 		t.Fatalf("unexpected applied ttl: got %s, want %s", options.TTL, 45*time.Second)
 	}

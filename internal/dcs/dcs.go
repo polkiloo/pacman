@@ -77,21 +77,23 @@ func (event WatchEvent) Clone() WatchEvent {
 }
 
 // SetOption configures a DCS Set operation.
-type SetOption func(*setOptions)
+type SetOption func(*SetOptions)
 
-type setOptions struct {
+// SetOptions holds the concrete settings applied to a Set operation.
+type SetOptions struct {
 	TTL time.Duration
 }
 
 // WithTTL attaches a TTL to the key written by Set.
 func WithTTL(ttl time.Duration) SetOption {
-	return func(options *setOptions) {
+	return func(options *SetOptions) {
 		options.TTL = ttl
 	}
 }
 
-func applySetOptions(options ...SetOption) setOptions {
-	var applied setOptions
+// ApplySetOptions resolves a variadic SetOption list into concrete settings.
+func ApplySetOptions(options ...SetOption) SetOptions {
+	var applied SetOptions
 	for _, option := range options {
 		if option != nil {
 			option(&applied)
