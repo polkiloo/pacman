@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"log/slog"
 	"reflect"
 	"sort"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
 	"github.com/polkiloo/pacman/internal/cluster"
+	"github.com/polkiloo/pacman/internal/dcs"
 )
 
 // NodeStatePublisher accepts the latest local node observation from pacmand.
@@ -20,29 +22,29 @@ type NodeStatePublisher interface {
 // MemoryStateStore is an in-memory replicated control-plane state store used
 // until the distributed source of truth is implemented.
 type MemoryStateStore struct {
-	mu              sync.RWMutex
-	registrations   map[string]MemberRegistration
-	nodeStatuses    map[string]agentmodel.NodeStatus
-	clusterSpec     *cluster.ClusterSpec
-	clusterStatus   *cluster.ClusterStatus
-	maintenance     cluster.MaintenanceModeStatus
-	activeOperation *cluster.Operation
-	history         []cluster.HistoryEntry
-	leaderLease     LeaderLease
-	now             func() time.Time
-	leaseDuration   time.Duration
-	sourceUpdated   time.Time
-	lastDCSSeenAt   time.Time
-}
-
-// NewMemoryStateStore constructs an in-memory replicated control-plane store.
-func NewMemoryStateStore() *MemoryStateStore {
-	return &MemoryStateStore{
-		registrations: make(map[string]MemberRegistration),
-		nodeStatuses:  make(map[string]agentmodel.NodeStatus),
-		now:           time.Now,
-		leaseDuration: defaultLeaderLeaseDuration,
-	}
+	dcs                 dcs.DCS
+	keyspace            dcs.KeySpace
+	clusterName         string
+	logger              *slog.Logger
+	mu                  sync.RWMutex
+	registrations       map[string]MemberRegistration
+	nodeStatuses        map[string]agentmodel.NodeStatus
+	clusterSpec         *cluster.ClusterSpec
+	clusterSpecRevision int64
+	clusterStatus       *cluster.ClusterStatus
+	maintenance         cluster.MaintenanceModeStatus
+	maintenanceRevision int64
+	activeOperation     *cluster.Operation
+	activeOpRevision    int64
+	history             []cluster.HistoryEntry
+	leaderLease         LeaderLease
+	now                 func() time.Time
+	leaseDuration       time.Duration
+	cacheRefreshedAt    time.Time
+	cacheMaxAge         time.Duration
+	cacheDirty          bool
+	sourceUpdated       time.Time
+	lastDCSSeenAt       time.Time
 }
 
 // RegisterMember stores the static member identity published during daemon
@@ -59,11 +61,15 @@ func (store *MemoryStateStore) RegisterMember(ctx context.Context, registration 
 
 	cloned.RegisteredAt = cloned.RegisteredAt.UTC()
 
+	if err := store.setJSON(ctx, store.keyspace.Member(cloned.NodeName), cloned); err != nil {
+		return err
+	}
+
 	store.mu.Lock()
 	store.registrations[cloned.NodeName] = cloned
 	store.mu.Unlock()
 
-	return nil
+	return store.refreshCache(ctx)
 }
 
 // CampaignLeader tries to acquire or renew the control-plane leader lease for
@@ -73,45 +79,47 @@ func (store *MemoryStateStore) CampaignLeader(ctx context.Context, nodeName stri
 		return LeaderLease{}, false, err
 	}
 
+	if err := store.ensureCacheFresh(ctx); err != nil {
+		return LeaderLease{}, false, err
+	}
+
 	candidate := strings.TrimSpace(nodeName)
 	if candidate == "" {
 		return LeaderLease{}, false, ErrLeaderCandidateRequired
 	}
 
-	now := store.now().UTC()
-
-	store.mu.Lock()
-	defer store.mu.Unlock()
-
-	if _, ok := store.registrations[candidate]; !ok {
+	store.mu.RLock()
+	_, ok := store.registrations[candidate]
+	store.mu.RUnlock()
+	if !ok {
 		return LeaderLease{}, false, ErrLeaderCandidateUnknown
 	}
 
-	if store.leaderLease.isActiveAt(now, store.leaseDuration) {
-		if store.leaderLease.LeaderNode == candidate {
-			store.leaderLease.RenewedAt = now
-			return store.leaderLease.Clone(), true, nil
-		}
-
-		return store.leaderLease.Clone(), false, nil
+	lease, elected, err := store.dcs.Campaign(ctx, candidate)
+	if err != nil {
+		return LeaderLease{}, false, err
 	}
 
-	store.leaderLease = LeaderLease{
-		LeaderNode: candidate,
-		Term:       store.leaderLease.Term + 1,
-		AcquiredAt: now,
-		RenewedAt:  now,
-	}
+	store.markDCSWritten()
+	converted := leaderLeaseFromDCS(lease)
 
-	if store.leaderLease.Term == 0 {
-		store.leaderLease.Term = 1
-	}
+	store.mu.Lock()
+	store.leaderLease = converted
+	store.mu.Unlock()
 
-	return store.leaderLease.Clone(), true, nil
+	return converted.Clone(), elected, nil
 }
 
 // Leader returns the currently active control-plane leader lease.
 func (store *MemoryStateStore) Leader() (LeaderLease, bool) {
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return LeaderLease{}, false
+	}
+
+	if err := store.syncLeaderLease(context.Background()); err != nil {
+		return LeaderLease{}, false
+	}
+
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 
@@ -128,6 +136,10 @@ func (store *MemoryStateStore) PublishNodeStatus(ctx context.Context, status age
 		return agentmodel.ControlPlaneStatus{ClusterReachable: false}, err
 	}
 
+	if err := store.ensureCacheFresh(ctx); err != nil {
+		return agentmodel.ControlPlaneStatus{ClusterReachable: false}, err
+	}
+
 	cloned := status.Clone()
 
 	published := agentmodel.ControlPlaneStatus{
@@ -135,16 +147,36 @@ func (store *MemoryStateStore) PublishNodeStatus(ctx context.Context, status age
 		LastHeartbeatAt:  cloned.ObservedAt,
 	}
 
-	store.mu.Lock()
-	published.Leader = store.leaderLease.LeaderNode == cloned.NodeName && store.leaderLease.isActiveAt(cloned.ObservedAt, store.leaseDuration)
+	lease, ok, err := store.dcs.Leader(ctx)
+	if err == nil && ok {
+		converted := leaderLeaseFromDCS(lease)
+		store.mu.Lock()
+		store.leaderLease = converted
+		store.mu.Unlock()
+		published.Leader = converted.LeaderNode == cloned.NodeName && converted.isActiveAt(cloned.ObservedAt, store.leaseDuration)
+	}
+
+	store.mu.RLock()
 	published.LastDCSSeenAt = store.lastDCSSeenAt
-	cloned.ControlPlane = published
 	if previous, ok := store.nodeStatuses[cloned.NodeName]; ok {
 		cloned = mergeControlPlaneManagedNodeFlags(previous, cloned)
 	}
+	store.mu.RUnlock()
+
+	cloned.ControlPlane = published
+
+	if err := store.setJSON(ctx, store.keyspace.Status(cloned.NodeName), cloned, dcs.WithTTL(store.leaseDuration)); err != nil {
+		return agentmodel.ControlPlaneStatus{ClusterReachable: false}, err
+	}
+
+	store.mu.Lock()
 	store.nodeStatuses[cloned.NodeName] = cloned
 	store.refreshSourceOfTruthLocked(cloned.ObservedAt.UTC())
 	store.mu.Unlock()
+
+	if err := store.refreshCache(ctx); err != nil {
+		return agentmodel.ControlPlaneStatus{ClusterReachable: false}, err
+	}
 
 	return published, nil
 }
@@ -152,6 +184,10 @@ func (store *MemoryStateStore) PublishNodeStatus(ctx context.Context, status age
 // RegisteredMember returns the stored control-plane registration for the given
 // node.
 func (store *MemoryStateStore) RegisteredMember(nodeName string) (MemberRegistration, bool) {
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return MemberRegistration{}, false
+	}
+
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 
@@ -166,6 +202,10 @@ func (store *MemoryStateStore) RegisteredMember(nodeName string) (MemberRegistra
 // RegisteredMembers returns all registered control-plane members sorted by node
 // name.
 func (store *MemoryStateStore) RegisteredMembers() []MemberRegistration {
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return nil
+	}
+
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 
@@ -184,6 +224,10 @@ func (store *MemoryStateStore) RegisteredMembers() []MemberRegistration {
 // ClusterSpec returns the desired cluster spec stored in the replicated state
 // store.
 func (store *MemoryStateStore) ClusterSpec() (cluster.ClusterSpec, bool) {
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return cluster.ClusterSpec{}, false
+	}
+
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 
@@ -202,6 +246,10 @@ func (store *MemoryStateStore) StoreClusterSpec(ctx context.Context, spec cluste
 		return cluster.ClusterSpec{}, err
 	}
 
+	if err := store.ensureCacheFresh(ctx); err != nil {
+		return cluster.ClusterSpec{}, err
+	}
+
 	cloned := spec.Clone()
 	if err := cloned.Validate(); err != nil {
 		return cluster.ClusterSpec{}, err
@@ -210,16 +258,28 @@ func (store *MemoryStateStore) StoreClusterSpec(ctx context.Context, spec cluste
 	now := store.now().UTC()
 
 	store.mu.Lock()
-	defer store.mu.Unlock()
-
 	cloned = store.storeClusterSpecLocked(cloned)
+	revision := store.clusterSpecRevision
 	store.refreshSourceOfTruthLocked(now)
+	store.mu.Unlock()
+
+	if err := store.compareAndStoreJSON(ctx, store.keyspace.Config(), revision, cloned); err != nil {
+		return cluster.ClusterSpec{}, err
+	}
+
+	if err := store.refreshCache(ctx); err != nil {
+		return cluster.ClusterSpec{}, err
+	}
 
 	return cloned.Clone(), nil
 }
 
 // NodeStatus returns the last published state for the given node.
 func (store *MemoryStateStore) NodeStatus(nodeName string) (agentmodel.NodeStatus, bool) {
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return agentmodel.NodeStatus{}, false
+	}
+
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 
@@ -233,6 +293,10 @@ func (store *MemoryStateStore) NodeStatus(nodeName string) (agentmodel.NodeStatu
 
 // NodeStatuses returns all published node states sorted by node name.
 func (store *MemoryStateStore) NodeStatuses() []agentmodel.NodeStatus {
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return nil
+	}
+
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 
@@ -251,6 +315,10 @@ func (store *MemoryStateStore) NodeStatuses() []agentmodel.NodeStatus {
 // SourceOfTruth returns the current desired and observed cluster truth held in
 // the replicated state store.
 func (store *MemoryStateStore) SourceOfTruth() ClusterSourceOfTruth {
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return ClusterSourceOfTruth{}
+	}
+
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 
@@ -259,6 +327,10 @@ func (store *MemoryStateStore) SourceOfTruth() ClusterSourceOfTruth {
 
 // Member returns the discovered cluster member view for the given node.
 func (store *MemoryStateStore) Member(nodeName string) (cluster.MemberStatus, bool) {
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return cluster.MemberStatus{}, false
+	}
+
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 
@@ -272,6 +344,10 @@ func (store *MemoryStateStore) Member(nodeName string) (cluster.MemberStatus, bo
 
 // Members returns all discovered cluster members sorted by node name.
 func (store *MemoryStateStore) Members() []cluster.MemberStatus {
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return nil
+	}
+
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 

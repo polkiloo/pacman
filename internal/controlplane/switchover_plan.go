@@ -12,6 +12,10 @@ import (
 // SwitchoverTargetReadiness reports whether the requested standby is healthy
 // and observed as a promotable PostgreSQL standby under the current topology.
 func (store *MemoryStateStore) SwitchoverTargetReadiness(candidate string) (SwitchoverTargetReadiness, error) {
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return SwitchoverTargetReadiness{}, err
+	}
+
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 
@@ -27,6 +31,10 @@ func (store *MemoryStateStore) SwitchoverTargetReadiness(candidate string) (Swit
 // confirms that the requested standby is ready to become primary.
 func (store *MemoryStateStore) ValidateSwitchover(ctx context.Context, request SwitchoverRequest) (SwitchoverValidation, error) {
 	if err := ctx.Err(); err != nil {
+		return SwitchoverValidation{}, err
+	}
+
+	if err := store.ensureCacheFresh(ctx); err != nil {
 		return SwitchoverValidation{}, err
 	}
 
@@ -55,25 +63,35 @@ func (store *MemoryStateStore) CreateSwitchoverIntent(ctx context.Context, reque
 	normalized := normalizeSwitchoverRequest(request)
 
 	store.mu.Lock()
-	defer store.mu.Unlock()
-
 	spec, status, err := store.switchoverInputsLocked()
 	if err != nil {
+		store.mu.Unlock()
 		return SwitchoverIntent{}, err
 	}
 
 	validation, err := store.evaluateSwitchoverRequestLocked(spec, status, normalized, store.activeOperation, now)
 	if err != nil {
+		store.mu.Unlock()
 		return SwitchoverIntent{}, err
 	}
 
 	operation, err := buildSwitchoverIntentOperation(now, validation)
 	if err != nil {
+		store.mu.Unlock()
 		return SwitchoverIntent{}, err
 	}
 
 	store.journalOperationLocked(operation, now)
 	store.refreshSourceOfTruthLocked(now)
+	store.mu.Unlock()
+
+	if err := store.persistJournaledOperation(ctx, operation); err != nil {
+		return SwitchoverIntent{}, err
+	}
+
+	if err := store.refreshCache(ctx); err != nil {
+		return SwitchoverIntent{}, err
+	}
 
 	return SwitchoverIntent{
 		Operation:  operation.Clone(),

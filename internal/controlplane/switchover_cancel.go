@@ -14,22 +14,35 @@ func (store *MemoryStateStore) CancelSwitchover(ctx context.Context) (cluster.Op
 		return cluster.Operation{}, err
 	}
 
+	if err := store.ensureCacheFresh(ctx); err != nil {
+		return cluster.Operation{}, err
+	}
+
 	cancelledAt := store.now().UTC()
 
 	store.mu.Lock()
-	defer store.mu.Unlock()
-
 	if store.activeOperation == nil || store.activeOperation.Kind != cluster.OperationKindSwitchover || store.activeOperation.State.IsTerminal() {
+		store.mu.Unlock()
 		return cluster.Operation{}, ErrScheduledSwitchoverNotFound
 	}
 
 	if store.activeOperation.State == cluster.OperationStateRunning {
+		store.mu.Unlock()
 		return cluster.Operation{}, ErrSwitchoverAlreadyRunning
 	}
 
 	cancelled := cancelSwitchoverOperation(store.activeOperation.Clone(), cancelledAt)
 	store.journalOperationLocked(cancelled, cancelledAt)
 	store.refreshSourceOfTruthLocked(cancelledAt)
+	store.mu.Unlock()
+
+	if err := store.persistJournaledOperation(ctx, cancelled); err != nil {
+		return cluster.Operation{}, err
+	}
+
+	if err := store.refreshCache(ctx); err != nil {
+		return cluster.Operation{}, err
+	}
 
 	return cancelled.Clone(), nil
 }

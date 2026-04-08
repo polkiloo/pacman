@@ -19,7 +19,9 @@ const (
 // Config tunes the in-memory DCS test backend.
 type Config struct {
 	TTL           time.Duration
+	TTLFunc       func() time.Duration
 	SweepInterval time.Duration
+	Now           func() time.Time
 }
 
 type store struct {
@@ -28,7 +30,9 @@ type store struct {
 	sessions      map[string]time.Time
 	leader        dcs.LeaderLease
 	ttl           time.Duration
+	ttlFunc       func() time.Duration
 	sweepInterval time.Duration
+	now           func() time.Time
 	watchers      map[uint64]watcher
 	nextWatcherID uint64
 	closed        bool
@@ -57,7 +61,9 @@ func New(config Config) dcs.DCS {
 		entries:       make(map[string]entry),
 		sessions:      make(map[string]time.Time),
 		ttl:           defaulted.TTL,
+		ttlFunc:       defaulted.TTLFunc,
 		sweepInterval: defaulted.SweepInterval,
+		now:           defaulted.Now,
 		watchers:      make(map[uint64]watcher),
 		stopCh:        make(chan struct{}),
 		doneCh:        make(chan struct{}),
@@ -107,7 +113,7 @@ func (store *store) Get(ctx context.Context, key string) (dcs.KeyValue, error) {
 		return dcs.KeyValue{}, err
 	}
 
-	store.expireEntries(time.Now().UTC())
+	store.expireEntries(store.nowUTC())
 
 	store.mu.RLock()
 	defer store.mu.RUnlock()
@@ -127,7 +133,7 @@ func (store *store) Set(ctx context.Context, key string, value []byte, options .
 	}
 
 	applied := dcs.ApplySetOptions(options...)
-	now := time.Now().UTC()
+	now := store.nowUTC()
 	store.expireEntries(now)
 
 	store.mu.Lock()
@@ -168,7 +174,7 @@ func (store *store) CompareAndSet(ctx context.Context, key string, value []byte,
 		return err
 	}
 
-	now := time.Now().UTC()
+	now := store.nowUTC()
 	store.expireEntries(now)
 
 	store.mu.Lock()
@@ -204,7 +210,7 @@ func (store *store) Delete(ctx context.Context, key string) error {
 		return err
 	}
 
-	store.expireEntries(time.Now().UTC())
+	store.expireEntries(store.nowUTC())
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -231,7 +237,7 @@ func (store *store) List(ctx context.Context, prefix string) ([]dcs.KeyValue, er
 		return nil, err
 	}
 
-	store.expireEntries(time.Now().UTC())
+	store.expireEntries(store.nowUTC())
 
 	store.mu.RLock()
 	defer store.mu.RUnlock()
@@ -257,7 +263,7 @@ func (store *store) Campaign(ctx context.Context, candidate string) (dcs.LeaderL
 		return dcs.LeaderLease{}, false, err
 	}
 
-	now := time.Now().UTC()
+	now := store.nowUTC()
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -276,7 +282,7 @@ func (store *store) Campaign(ctx context.Context, candidate string) (dcs.LeaderL
 			Term:      nextTerm,
 			Acquired:  now,
 			Renewed:   now,
-			ExpiresAt: now.Add(store.ttl),
+			ExpiresAt: now.Add(store.ttlDuration()),
 		}
 
 		return store.leader.Clone(), true, nil
@@ -284,7 +290,7 @@ func (store *store) Campaign(ctx context.Context, candidate string) (dcs.LeaderL
 
 	if store.leader.Leader == trimmedCandidate {
 		store.leader.Renewed = now
-		store.leader.ExpiresAt = now.Add(store.ttl)
+		store.leader.ExpiresAt = now.Add(store.ttlDuration())
 		return store.leader.Clone(), true, nil
 	}
 
@@ -297,7 +303,7 @@ func (store *store) Leader(ctx context.Context) (dcs.LeaderLease, bool, error) {
 		return dcs.LeaderLease{}, false, err
 	}
 
-	now := time.Now().UTC()
+	now := store.nowUTC()
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -316,7 +322,7 @@ func (store *store) Resign(ctx context.Context) error {
 		return err
 	}
 
-	now := time.Now().UTC()
+	now := store.nowUTC()
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -340,13 +346,13 @@ func (store *store) Touch(ctx context.Context, member string) error {
 		return err
 	}
 
-	now := time.Now().UTC()
+	now := store.nowUTC()
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
 	store.expireSessionsLocked(now)
-	store.sessions[strings.TrimSpace(member)] = now.Add(store.ttl)
+	store.sessions[strings.TrimSpace(member)] = now.Add(store.ttlDuration())
 
 	return nil
 }
@@ -357,7 +363,7 @@ func (store *store) Alive(ctx context.Context, member string) (bool, error) {
 		return false, err
 	}
 
-	now := time.Now().UTC()
+	now := store.nowUTC()
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -407,11 +413,30 @@ func (config Config) withDefaults() Config {
 		defaulted.TTL = DefaultTTL
 	}
 
+	if defaulted.TTLFunc == nil {
+		ttl := defaulted.TTL
+		defaulted.TTLFunc = func() time.Duration {
+			return ttl
+		}
+	}
+
 	if defaulted.SweepInterval <= 0 {
 		defaulted.SweepInterval = DefaultSweepInterval
 	}
 
+	if defaulted.Now == nil {
+		defaulted.Now = time.Now
+	}
+
 	return defaulted
+}
+
+func (store *store) nowUTC() time.Time {
+	return store.now().UTC()
+}
+
+func (store *store) ttlDuration() time.Duration {
+	return store.ttlFunc()
 }
 
 func (store *store) checkAvailable(ctx context.Context) error {
@@ -437,7 +462,7 @@ func (store *store) expireLoop() {
 	for {
 		select {
 		case <-ticker.C:
-			now := time.Now().UTC()
+			now := store.nowUTC()
 			store.expireEntries(now)
 			store.expireSessions(now)
 		case <-store.stopCh:

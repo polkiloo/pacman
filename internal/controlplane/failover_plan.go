@@ -11,6 +11,10 @@ import (
 // FailoverCandidates returns the current ordered promotion candidates together
 // with the eligibility reasons applied to every observed member.
 func (store *MemoryStateStore) FailoverCandidates() ([]FailoverCandidate, error) {
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return nil, err
+	}
+
 	store.mu.RLock()
 	spec, status, err := store.failoverInputsLocked()
 	store.mu.RUnlock()
@@ -24,6 +28,10 @@ func (store *MemoryStateStore) FailoverCandidates() ([]FailoverCandidate, error)
 // ConfirmPrimaryFailure evaluates the current primary against the observed
 // cluster state and quorum policy.
 func (store *MemoryStateStore) ConfirmPrimaryFailure() (PrimaryFailureConfirmation, error) {
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return PrimaryFailureConfirmation{}, err
+	}
+
 	store.mu.RLock()
 	spec, status, err := store.failoverInputsLocked()
 	store.mu.RUnlock()
@@ -42,22 +50,27 @@ func (store *MemoryStateStore) CreateFailoverIntent(ctx context.Context, request
 		return FailoverIntent{}, err
 	}
 
+	if err := store.ensureCacheFresh(ctx); err != nil {
+		return FailoverIntent{}, err
+	}
+
 	now := store.now().UTC()
 
 	store.mu.Lock()
-	defer store.mu.Unlock()
-
 	spec, status, err := store.failoverInputsLocked()
 	if err != nil {
+		store.mu.Unlock()
 		return FailoverIntent{}, err
 	}
 
 	if err := validateFailoverIntentCreation(spec, status, store.activeOperation); err != nil {
+		store.mu.Unlock()
 		return FailoverIntent{}, err
 	}
 
 	confirmation := confirmPrimaryFailure(spec, status)
 	if err := validateFailoverConfirmation(confirmation); err != nil {
+		store.mu.Unlock()
 		return FailoverIntent{}, err
 	}
 
@@ -65,16 +78,27 @@ func (store *MemoryStateStore) CreateFailoverIntent(ctx context.Context, request
 	normalizedRequest := normalizeFailoverIntentRequest(request)
 	selected, err := selectFailoverCandidate(candidates, normalizedRequest.Candidate)
 	if err != nil {
+		store.mu.Unlock()
 		return FailoverIntent{}, err
 	}
 
 	operation, err := buildFailoverIntentOperation(now, normalizedRequest, confirmation, selected)
 	if err != nil {
+		store.mu.Unlock()
 		return FailoverIntent{}, err
 	}
 
 	store.journalOperationLocked(operation, now)
 	store.refreshSourceOfTruthLocked(now)
+	store.mu.Unlock()
+
+	if err := store.persistJournaledOperation(ctx, operation); err != nil {
+		return FailoverIntent{}, err
+	}
+
+	if err := store.refreshCache(ctx); err != nil {
+		return FailoverIntent{}, err
+	}
 
 	return FailoverIntent{
 		Operation:      operation.Clone(),
