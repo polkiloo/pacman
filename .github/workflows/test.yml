@@ -8,6 +8,22 @@ on:
   pull_request:
 
 jobs:
+  test-dcs-conformance:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.1'
+          cache: true
+
+      - name: Run DCS conformance suite
+        run: make test-dcs-conformance
+
   test:
     runs-on: ubuntu-latest
 

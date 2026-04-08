@@ -172,17 +172,17 @@ See [ARCHITECTURE_DCS.md](ARCHITECTURE_DCS.md) for full design.
 - [x] define key space layout (`/pacman/<cluster>/config`, `members/`, `status/`, `operation`, `history/`, `maintenance`, `epoch`)
 
 ### DCS Conformance Test Suite
-- [ ] create `internal/dcs/dcstest/` shared conformance test suite
-- [ ] add Get/Set/Delete conformance tests
-- [ ] add CompareAndSet conflict and success conformance tests
-- [ ] add List prefix conformance tests
-- [ ] add Campaign/Leader/Resign conformance tests
-- [ ] add Touch/Alive TTL conformance tests
-- [ ] add Watch event delivery conformance tests
+- [x] create `internal/dcs/dcstest/` shared conformance test suite
+- [x] add Get/Set/Delete conformance tests
+- [x] add CompareAndSet conflict and success conformance tests
+- [x] add List prefix conformance tests
+- [x] add Campaign/Leader/Resign conformance tests
+- [x] add Touch/Alive TTL conformance tests
+- [x] add Watch event delivery conformance tests
 
 ### Memory Backend (testing)
-- [ ] implement `internal/dcs/memory/memory.go` — in-memory `DCS` for unit tests
-- [ ] pass all conformance tests
+- [x] implement `internal/dcs/memory/memory.go` — in-memory `DCS` for unit tests
+- [x] pass all conformance tests
 
 ### ControlPlane Refactoring
 - [ ] refactor `ControlPlane` to accept `dcs.DCS` instead of being `MemoryStateStore`
