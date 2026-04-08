@@ -1,0 +1,48 @@
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+
+node:
+  name: alpha-w1
+  role: witness
+  apiAddress: 10.0.0.21:8080
+  controlAddress: 10.0.0.21:9090
+
+dcs:
+  backend: raft
+  clusterName: alpha
+  ttl: 30s
+  retryTimeout: 10s
+  raft:
+    dataDir: /var/lib/pacman/raft
+    bindAddress: 10.0.0.21:7100
+    peers:
+      - 10.0.0.11:7100
+      - 10.0.0.12:7100
+      - 10.0.0.21:7100
+    snapshotInterval: 2m
+    snapshotThreshold: 8192
+    trailingLogs: 10240
+
+tls:
+  enabled: true
+  caFile: /etc/pacman/tls/ca.crt
+  certFile: /etc/pacman/tls/node.crt
+  keyFile: /etc/pacman/tls/node.key
+  serverName: alpha.internal
+  insecureSkipVerify: false
+
+security:
+  adminBearerTokenFile: /run/secrets/pacman-admin-token
+  memberMTLSEnabled: true
+
+bootstrap:
+  clusterName: alpha
+  initialPrimary: alpha-1
+  seedAddresses:
+    - 10.0.0.11:9090
+    - 10.0.0.12:9090
+    - 10.0.0.21:9090
+  expectedMembers:
+    - alpha-1
+    - alpha-2
+    - alpha-w1

@@ -102,6 +102,9 @@ helper binary:
 The Docker-backed integration image lives at
 [`test/docker/pacman-pgext-postgres.Dockerfile`](../test/docker/pacman-pgext-postgres.Dockerfile).
 
+Full example settings for extension mode live in
+[`docs/examples/pacman-agent.postgresql.conf`](./examples/pacman-agent.postgresql.conf).
+
 ## Current Scope
 
 Implemented in this pass:

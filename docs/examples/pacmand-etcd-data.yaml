@@ -1,0 +1,56 @@
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+
+node:
+  name: alpha-1
+  role: data
+  apiAddress: 10.0.0.11:8080
+  controlAddress: 10.0.0.11:9090
+
+dcs:
+  backend: etcd
+  clusterName: alpha
+  ttl: 30s
+  retryTimeout: 10s
+  etcd:
+    endpoints:
+      - https://etcd-1.alpha.internal:2379
+      - https://etcd-2.alpha.internal:2379
+      - https://etcd-3.alpha.internal:2379
+    username: pacman
+
+tls:
+  enabled: true
+  caFile: /etc/pacman/tls/ca.crt
+  certFile: /etc/pacman/tls/node.crt
+  keyFile: /etc/pacman/tls/node.key
+  serverName: alpha.internal
+  insecureSkipVerify: false
+
+security:
+  adminBearerTokenFile: /run/secrets/pacman-admin-token
+  memberMTLSEnabled: true
+
+postgres:
+  dataDir: /var/lib/postgresql/17/main
+  binDir: /usr/lib/postgresql/17/bin
+  listenAddress: 127.0.0.1
+  port: 5432
+  parameters:
+    max_connections: "300"
+    max_replication_slots: "16"
+    max_wal_senders: "16"
+    shared_buffers: "1GB"
+    wal_keep_size: "2048MB"
+
+bootstrap:
+  clusterName: alpha
+  initialPrimary: alpha-1
+  seedAddresses:
+    - 10.0.0.11:9090
+    - 10.0.0.12:9090
+    - 10.0.0.13:9090
+  expectedMembers:
+    - alpha-1
+    - alpha-2
+    - alpha-3
