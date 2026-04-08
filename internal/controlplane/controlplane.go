@@ -799,4 +799,3 @@ func leaderLeaseFromDCS(lease dcs.LeaderLease) LeaderLease {
 		RenewedAt:  lease.Renewed,
 	}
 }
-
