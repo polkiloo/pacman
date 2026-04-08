@@ -15,7 +15,6 @@ func TestExampleConfigsLoad(t *testing.T) {
 	}
 
 	for _, example := range examples {
-		example := example
 		t.Run(example, func(t *testing.T) {
 			t.Parallel()
 

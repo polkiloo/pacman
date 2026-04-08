@@ -800,17 +800,3 @@ func leaderLeaseFromDCS(lease dcs.LeaderLease) LeaderLease {
 	}
 }
 
-func leaderLeaseToDCS(lease LeaderLease, duration time.Duration) dcs.LeaderLease {
-	reference := lease.RenewedAt
-	if reference.IsZero() {
-		reference = lease.AcquiredAt
-	}
-
-	return dcs.LeaderLease{
-		Leader:    lease.LeaderNode,
-		Term:      lease.Term,
-		Acquired:  lease.AcquiredAt,
-		Renewed:   lease.RenewedAt,
-		ExpiresAt: reference.Add(duration),
-	}
-}
