@@ -157,6 +157,25 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] verify replication health after rejoin
 - [x] mark node as healthy cluster member again
 
+### Replica Reinit / Recloning
+
+- [ ] define explicit `reinit` operation model distinct from former-primary rejoin
+- [ ] define operator-triggered reinit API and `pacmanctl` command surface
+- [ ] define validation rules for eligible reinit targets (not primary, not witness, known member, healthy source primary)
+- [ ] block reinit while failover / switchover / rejoin is already in progress
+- [ ] define config surface for reinit / basebackup settings and credential sourcing
+- [ ] select the replication source for reinit (`current primary` by default, optional preferred source later)
+- [ ] stop PostgreSQL cleanly on the target before destructive reinit steps
+- [ ] implement safe data-directory wipe / archive handling before reclone
+- [ ] implement `pg_basebackup` workflow for full replica reinit
+- [ ] recreate standby / replication configuration after basebackup
+- [ ] start PostgreSQL as a standby after reinit completes
+- [ ] verify system identifier, timeline, slot attachment, and streaming health after reinit
+- [ ] record reinit progress and result in operation journal / history
+- [ ] expose reinit state and last result in member / cluster status
+- [ ] add unit tests for reinit validation, planning, and operation-state transitions
+- [ ] add integration tests for `pg_basebackup`-driven reinit and post-reinit replication recovery
+
 ---
 
 ## 11. Pluggable DCS Layer
@@ -185,18 +204,18 @@ See [ARCHITECTURE_DCS.md](ARCHITECTURE_DCS.md) for full design.
 - [x] pass all conformance tests
 
 ### ControlPlane Refactoring
-- [ ] refactor `ControlPlane` to accept `dcs.DCS` instead of being `MemoryStateStore`
-- [ ] implement `NodeStatePublisher` via `DCS.Set("status/<node>", ..., WithTTL)`
-- [ ] implement `MemberRegistrar` via `DCS.Set("members/<node>", ...)`
-- [ ] implement `MemberDiscovery` via `DCS.List("members/")` + `DCS.List("status/")`
-- [ ] implement `LeaderElector` via `DCS.Campaign()` / `DCS.Leader()`
-- [ ] implement `DesiredStateStore` via `DCS.Get("config")` / `DCS.CompareAndSet("config", ...)`
-- [ ] implement `ObservedStateStore` via in-process aggregation from DCS data
-- [ ] implement `Reconciler` via DCS reads + in-process aggregation
-- [ ] implement `MaintenanceStore` via `DCS.CompareAndSet("maintenance", ...)`
-- [ ] implement `OperationJournal` via `DCS.Get("operation")` + `DCS.List("history/")`
-- [ ] implement local read cache with watch-driven invalidation
-- [ ] verify all existing controlplane tests pass with memory DCS backend
+- [x] refactor `ControlPlane` to accept `dcs.DCS` instead of being `MemoryStateStore`
+- [x] implement `NodeStatePublisher` via `DCS.Set("status/<node>", ..., WithTTL)`
+- [x] implement `MemberRegistrar` via `DCS.Set("members/<node>", ...)`
+- [x] implement `MemberDiscovery` via `DCS.List("members/")` + `DCS.List("status/")`
+- [x] implement `LeaderElector` via `DCS.Campaign()` / `DCS.Leader()`
+- [x] implement `DesiredStateStore` via `DCS.Get("config")` / `DCS.CompareAndSet("config", ...)`
+- [x] implement `ObservedStateStore` via in-process aggregation from DCS data
+- [x] implement `Reconciler` via DCS reads + in-process aggregation
+- [x] implement `MaintenanceStore` via `DCS.CompareAndSet("maintenance", ...)`
+- [x] implement `OperationJournal` via `DCS.Get("operation")` + `DCS.List("history/")`
+- [x] implement local read cache with watch-driven invalidation
+- [x] verify all existing controlplane tests pass with memory DCS backend
 
 ### Embedded Raft Backend (`hashicorp/raft`)
 
@@ -206,16 +225,16 @@ Framework: **`github.com/hashicorp/raft`** + **`github.com/hashicorp/raft-boltdb
 - MPL 2.0 license, actively maintained, 2,289+ importers
 - Alternatives considered and deferred: `etcd-io/raft` (too much custom code), `lni/dragonboat` (less production validation)
 
-- [ ] add `hashicorp/raft` and `raft-boltdb/v2` dependencies
-- [ ] implement `internal/dcs/raft/fsm.go` — Raft FSM with flat key-value state
-- [ ] implement `internal/dcs/raft/transport.go` — TCP transport with TLS support
-- [ ] implement `internal/dcs/raft/snapshot.go` — snapshot handling
-- [ ] implement `internal/dcs/raft/raft.go` — `DCS` interface backed by Raft consensus
-- [ ] implement `internal/dcs/raft/config.go` — Raft-specific configuration
-- [ ] implement TTL expiration via background goroutine with Raft-applied deletes
-- [ ] implement leader read path (`raft.VerifyLeader()` for linearizable reads)
+- [x] add `hashicorp/raft` and `raft-boltdb/v2` dependencies
+- [x] implement `internal/dcs/raft/fsm.go` — Raft FSM with flat key-value state
+- [x] implement `internal/dcs/raft/transport.go` — TCP transport with TLS support
+- [x] implement `internal/dcs/raft/snapshot.go` — snapshot handling
+- [x] implement `internal/dcs/raft/raft.go` — `DCS` interface backed by Raft consensus
+- [x] implement `internal/dcs/raft/config.go` — Raft-specific configuration
+- [x] implement TTL expiration via background goroutine with Raft-applied deletes
+- [x] implement leader read path (`raft.VerifyLeader()` for linearizable reads)
 - [ ] wire Raft bootstrap into `pacmand` startup when `dcs.backend: raft`
-- [ ] pass all conformance tests
+- [x] pass all conformance tests
 - [ ] add 3-node Raft integration tests with testcontainers
 
 ### etcd Backend
@@ -320,7 +339,7 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 ## 17. Packaging and Operations
 
 - [ ] add systemd unit files
-- [ ] add example configs
+- [x] add example configs
 - [ ] add local lab environment
 - [ ] add bootstrap scripts for test cluster
 - [ ] add container image for lab/testing
@@ -350,6 +369,21 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [] verify every PostgreSQL sidecar reports a PostgreSQL 17 server version and remains attached to the shared cluster network with the expected alias mapping
 - [] verify `pacmanctl -version` and `pacmanctl cluster status` execute successfully from the client container
 - [ ] extend the same topology with replication/bootstrap wiring and assert switchover, failover, and rejoin flows after the control-plane API and local agent logic are implemented
+
+
+### Patroni Migration Compatibility
+
+- [ ] define the minimum supported Patroni config subset for migration, anchored to upstream `postgres0.yml`, `postgres1.yml`, and `postgres2.yml`
+- [ ] document field-by-field mapping between Patroni example config keys and PACMAN config / API surfaces
+- [ ] add three PACMAN example configs mirroring the Patroni `postgres0/1/2.yml` topology for side-by-side infrastructure migration
+- [ ] implement a Patroni-config import / translation path for the supported subset
+- [ ] support translation of Patroni DCS discovery settings (`etcd.host` / `hosts`, optional `raft`) into PACMAN backend configuration
+- [ ] support translation of Patroni node-local settings (`name`, REST listen/connect addresses, PostgreSQL listen/connect addresses, `data_dir`, `bin_dir`)
+- [ ] support translation of Patroni bootstrap DCS settings (`ttl`, `retry_timeout`, `maximum_lag_on_failover`, `use_pg_rewind`) into PACMAN equivalents or explicit migration warnings
+- [ ] support translation or explicit migration diagnostics for Patroni PostgreSQL blocks such as `pg_hba`, `initdb`, `authentication`, `parameters`, and `tags`
+- [ ] emit explicit warnings for unsupported Patroni fields instead of silently dropping them during migration
+- [ ] add regression fixtures/tests that use the upstream Patroni `postgres0.yml`, `postgres1.yml`, and `postgres2.yml` files as migration inputs
+- [ ] write a migration guide from Patroni sample configs to PACMAN process mode and PostgreSQL extension mode
 
 ### Unit Tests
 - [ ] add cluster domain model unit tests
