@@ -246,6 +246,12 @@ func TestMemoryStateStoreRejoinStandbyContinuationRejectsBlockedExecution(t *tes
 	}
 }
 
+func TestRejoinStandbyFailureMessage(t *testing.T) {
+	if got := rejoinStandbyConfigFailedMessage("alpha-1", "alpha-2"); got != "standby configuration failed for alpha-1 against alpha-2" {
+		t.Fatalf("unexpected standby config failure message: %q", got)
+	}
+}
+
 func TestMemoryStateStoreExecuteRejoinRestartAsStandbyRecordsFailure(t *testing.T) {
 	t.Parallel()
 
