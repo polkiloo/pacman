@@ -12,10 +12,11 @@ endif
 GOLANGCI_LINT ?= $(GOBIN)/golangci-lint
 COVERAGE_OUT ?= coverage.out
 COVERAGE_MIN ?= 90.0
-# The coverage gate is intentionally unit-test scoped. Thin entrypoints and
+FULL_COVERAGE_PACKAGE_LIST_CMD = $(GO) list ./... | grep -v '/test/'
+# The threshold gate is intentionally unit-test scoped. Thin entrypoints and
 # distributed/container-driven orchestration paths are validated by dedicated
 # conformance and integration targets instead of this fast unit threshold.
-COVERAGE_PACKAGE_LIST_CMD = $(GO) list ./... | grep -v '/test/' | grep -v '^github.com/polkiloo/pacman/cmd/' | grep -v '^github.com/polkiloo/pacman/internal/controlplane$$' | grep -v '^github.com/polkiloo/pacman/internal/dcs/dcstest$$' | grep -v '^github.com/polkiloo/pacman/internal/dcs/etcd$$' | grep -v '^github.com/polkiloo/pacman/internal/dcs/raft$$'
+COVERAGE_CHECK_PACKAGE_LIST_CMD = $(GO) list ./... | grep -v '/test/' | grep -v '^github.com/polkiloo/pacman/cmd/' | grep -v '^github.com/polkiloo/pacman/internal/controlplane$$' | grep -v '^github.com/polkiloo/pacman/internal/dcs/dcstest$$' | grep -v '^github.com/polkiloo/pacman/internal/dcs/etcd$$' | grep -v '^github.com/polkiloo/pacman/internal/dcs/raft$$'
 PACMAN_TEST_IMAGE ?= pacman-test:local
 PACMAN_TEST_PGEXT_IMAGE ?= pacman-pgext-postgres:local
 PACMAN_TEST_POSTGRES_IMAGE ?= $(PACMAN_TEST_PGEXT_IMAGE)
@@ -100,14 +101,20 @@ test-integration-ha:
 	$(INTEGRATION_TEST_ENV) $(GO) test $(GO_TEST_INTEGRATION_FLAGS) -tags=integration -run '$(INTEGRATION_GROUP_HA)' $(GO_TEST_INTEGRATION_PACKAGE)
 
 coverage:
-	@packages="$$( $(COVERAGE_PACKAGE_LIST_CMD) )"; \
-	if [ -z "$$packages" ]; then \
+	@set -- $$($(FULL_COVERAGE_PACKAGE_LIST_CMD)); \
+	if [ "$$#" -eq 0 ]; then \
 		echo "failed to resolve coverage package list" >&2; \
 		exit 1; \
 	fi; \
-	$(GO) test -coverprofile=$(COVERAGE_OUT) $$packages
+	$(GO) test -p 1 -coverprofile=$(COVERAGE_OUT) "$$@"
 
-coverage-check: coverage
+coverage-check:
+	@set -- $$($(COVERAGE_CHECK_PACKAGE_LIST_CMD)); \
+	if [ "$$#" -eq 0 ]; then \
+		echo "failed to resolve coverage package list" >&2; \
+		exit 1; \
+	fi; \
+	$(GO) test -p 1 -coverprofile=$(COVERAGE_OUT) "$$@"
 	@coverage=$$($(GO) tool cover -func=$(COVERAGE_OUT) | awk '/^total:/ { gsub("%", "", $$3); print $$3 }'); \
 	if awk "BEGIN { exit !($$coverage >= $(COVERAGE_MIN)) }"; then \
 		printf 'coverage %s%% meets %s%%\n' "$$coverage" "$(COVERAGE_MIN)"; \
