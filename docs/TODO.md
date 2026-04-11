@@ -235,7 +235,7 @@ Framework: **`github.com/hashicorp/raft`** + **`github.com/hashicorp/raft-boltdb
 - [x] implement leader read path (`raft.VerifyLeader()` for linearizable reads)
 - [ ] wire Raft bootstrap into `pacmand` startup when `dcs.backend: raft`
 - [x] pass all conformance tests
-- [ ] add 3-node Raft integration tests with testcontainers
+- [x] add 3-node Raft integration tests with testcontainers
 
 ### etcd Backend
 - [x] add `go.etcd.io/etcd/client/v3` dependency

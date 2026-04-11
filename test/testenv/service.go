@@ -175,6 +175,19 @@ func (s *Service) Logs(t *testing.T) string {
 	return readContainerLogs(t, s.ctx, s.container, s.name)
 }
 
+// Stop stops the service container.
+func (s *Service) Stop(t *testing.T) {
+	t.Helper()
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), dockerOperationTimeout)
+	defer cancel()
+
+	timeout := dockerOperationTimeout
+	if err := s.container.Stop(stopCtx, &timeout); err != nil {
+		t.Fatalf("stop service %q: %v", s.name, err)
+	}
+}
+
 func (s *Service) mappedPort(t *testing.T, port string) nat.Port {
 	t.Helper()
 
