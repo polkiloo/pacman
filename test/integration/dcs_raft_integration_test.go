@@ -521,8 +521,10 @@ func (node *raftIntegrationNode) Watch(t *testing.T, prefix string) *raftWatch {
 		t.Fatalf("construct watch request: %v", err)
 	}
 
-	client := &http.Client{}
-	response, err := client.Do(request)
+	// Watch is a long-lived streaming response; use node.client's transport but
+	// no per-request timeout — the context handles cancellation instead.
+	streamClient := &http.Client{Transport: node.client.Transport}
+	response, err := streamClient.Do(request)
 	if err != nil {
 		cancel()
 		t.Fatalf("open watch stream: %v", err)

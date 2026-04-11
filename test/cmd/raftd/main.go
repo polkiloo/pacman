@@ -90,11 +90,11 @@ func main() {
 		Handler: handler.routes(),
 	}
 
+	serveErrCh := make(chan error, 1)
 	go func() {
 		logger.Info("serving raft helper", "http", httpAddress, "raft", config.BindAddress)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("serve http", "error", err)
-			os.Exit(1)
+			serveErrCh <- err
 		}
 	}()
 
@@ -102,7 +102,12 @@ func main() {
 	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(signalCh)
 
-	<-signalCh
+	select {
+	case <-signalCh:
+	case err := <-serveErrCh:
+		logger.Error("serve http", "error", err)
+		os.Exit(1)
+	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
@@ -459,7 +464,9 @@ func (srv server) handleWatch(writer http.ResponseWriter, request *http.Request)
 func writeJSON(writer http.ResponseWriter, status int, payload any) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(status)
-	_ = json.NewEncoder(writer).Encode(payload)
+	if err := json.NewEncoder(writer).Encode(payload); err != nil {
+		slog.Default().Error("encode json response", "error", err)
+	}
 }
 
 func writeDCSError(writer http.ResponseWriter, err error) {
