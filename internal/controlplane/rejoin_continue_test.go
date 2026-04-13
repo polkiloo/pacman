@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,8 +12,6 @@ import (
 )
 
 func TestMemoryStateStoreExecuteRejoinStandbyConfigMarksPendingRestart(t *testing.T) {
-	t.Parallel()
-
 	now := time.Date(2026, time.March, 30, 10, 0, 0, 0, time.UTC)
 	store := seededPreparedRejoinStore(t, cluster.ClusterSpec{
 		ClusterName: "alpha",
@@ -83,8 +82,6 @@ func TestMemoryStateStoreExecuteRejoinStandbyConfigMarksPendingRestart(t *testin
 }
 
 func TestMemoryStateStoreExecuteRejoinRestartAsStandbyTransitionsToStarting(t *testing.T) {
-	t.Parallel()
-
 	now := time.Date(2026, time.March, 30, 10, 30, 0, 0, time.UTC)
 	store := seededPreparedRejoinStore(t, cluster.ClusterSpec{
 		ClusterName: "alpha",
@@ -142,8 +139,6 @@ func TestMemoryStateStoreExecuteRejoinRestartAsStandbyTransitionsToStarting(t *t
 }
 
 func TestMemoryStateStoreRejoinStandbyContinuationRejectsBlockedExecution(t *testing.T) {
-	t.Parallel()
-
 	now := time.Date(2026, time.March, 30, 11, 0, 0, 0, time.UTC)
 
 	testCases := []struct {
@@ -190,7 +185,7 @@ func TestMemoryStateStoreRejoinStandbyContinuationRejectsBlockedExecution(t *tes
 					ClusterName: "alpha",
 					Members:     []cluster.MemberSpec{{Name: "alpha-1"}, {Name: "alpha-2"}},
 				}, []agentmodel.NodeStatus{formerPrimary, currentPrimary})
-				store.now = sequencedNow(now)
+				setTestNow(store, sequencedNow(now))
 				store.mu.Lock()
 				store.clusterStatus.CurrentEpoch = 7
 				store.mu.Unlock()
@@ -236,8 +231,6 @@ func TestMemoryStateStoreRejoinStandbyContinuationRejectsBlockedExecution(t *tes
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			t.Parallel()
-
 			err := testCase.call(t)
 			if !errors.Is(err, testCase.wantErr) {
 				t.Fatalf("unexpected rejoin continuation error: got %v want %v", err, testCase.wantErr)
@@ -247,14 +240,14 @@ func TestMemoryStateStoreRejoinStandbyContinuationRejectsBlockedExecution(t *tes
 }
 
 func TestRejoinStandbyFailureMessage(t *testing.T) {
+	t.Parallel()
+
 	if got := rejoinStandbyConfigFailedMessage("alpha-1", "alpha-2"); got != "standby configuration failed for alpha-1 against alpha-2" {
 		t.Fatalf("unexpected standby config failure message: %q", got)
 	}
 }
 
 func TestMemoryStateStoreExecuteRejoinRestartAsStandbyRecordsFailure(t *testing.T) {
-	t.Parallel()
-
 	now := time.Date(2026, time.March, 30, 11, 30, 0, 0, time.UTC)
 	store := seededPreparedRejoinStore(t, cluster.ClusterSpec{
 		ClusterName: "alpha",
@@ -296,10 +289,11 @@ func seededPreparedRejoinStore(t *testing.T, spec cluster.ClusterSpec, times ...
 		rejoinFormerPrimaryStatus("alpha-1", times[0].Add(-time.Minute), 10, "sys-alpha"),
 		rejoinPrimaryStatus("alpha-2", times[0].Add(-time.Minute+time.Second), 11, "sys-alpha"),
 	})
-	store.now = sequencedNow(times...)
 	store.mu.Lock()
 	store.clusterStatus.CurrentEpoch = 7
 	store.mu.Unlock()
+	setTestLeaseDuration(store, time.Hour)
+	setTestNow(store, sequencedNow(times...))
 
 	if _, err := store.ExecuteRejoinRewind(context.Background(), RejoinRequest{Member: "alpha-1"}, &recordingRewinder{}); err != nil {
 		t.Fatalf("execute rejoin rewind: %v", err)
@@ -309,15 +303,22 @@ func seededPreparedRejoinStore(t *testing.T, spec cluster.ClusterSpec, times ...
 }
 
 func sequencedNow(times ...time.Time) func() time.Time {
-	index := 0
+	var mu sync.Mutex
+	callCount := 0
+
+	const callsPerStep = 64
 
 	return func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+
+		index := callCount / callsPerStep
 		if index >= len(times) {
 			return times[len(times)-1]
 		}
 
 		current := times[index]
-		index++
+		callCount++
 		return current
 	}
 }

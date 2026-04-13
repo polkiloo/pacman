@@ -13,7 +13,11 @@ import (
 	"github.com/polkiloo/pacman/internal/dcs"
 )
 
+const testNodeName = "alpha-1"
+
 func TestRunCacheWatchRetriesAndInvalidatesCache(t *testing.T) {
+	t.Parallel()
+
 	keyspace, err := dcs.NewKeySpace("alpha")
 	if err != nil {
 		t.Fatalf("keyspace: %v", err)
@@ -31,13 +35,14 @@ func TestRunCacheWatchRetriesAndInvalidatesCache(t *testing.T) {
 	}
 
 	store := &MemoryStateStore{
-		dcs:           backend,
-		keyspace:      keyspace,
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		registrations: make(map[string]MemberRegistration),
-		nodeStatuses:  make(map[string]agentmodel.NodeStatus),
-		now:           time.Now,
-		cacheDirty:    false,
+		dcs:                 backend,
+		keyspace:            keyspace,
+		logger:              slog.New(slog.NewTextHandler(io.Discard, nil)),
+		registrations:       make(map[string]MemberRegistration),
+		nodeStatuses:        make(map[string]agentmodel.NodeStatus),
+		nodeStatusRevisions: make(map[string]int64),
+		now:                 time.Now,
+		cacheDirty:          false,
 	}
 
 	finished := make(chan struct{})
@@ -65,6 +70,7 @@ func TestRunCacheWatchRetriesAndInvalidatesCache(t *testing.T) {
 }
 
 func TestRemoveHistoryEntryLocked(t *testing.T) {
+	t.Parallel()
 	store := &MemoryStateStore{
 		history: []cluster.HistoryEntry{
 			{OperationID: "op-1"},
@@ -85,11 +91,12 @@ func TestRemoveHistoryEntryLocked(t *testing.T) {
 }
 
 func TestCurrentPrimaryNameLocked(t *testing.T) {
+	t.Parallel()
 	store := &MemoryStateStore{
 		registrations: make(map[string]MemberRegistration),
 		nodeStatuses: map[string]agentmodel.NodeStatus{
-			"alpha-1": {
-				NodeName: "alpha-1",
+			testNodeName: {
+				NodeName: testNodeName,
 				Role:     cluster.MemberRolePrimary,
 				State:    cluster.MemberStateRunning,
 				Postgres: agentmodel.PostgresStatus{Managed: true, Up: true},
@@ -103,8 +110,8 @@ func TestCurrentPrimaryNameLocked(t *testing.T) {
 		},
 	}
 
-	if got := store.currentPrimaryNameLocked(); got != "alpha-1" {
-		t.Fatalf("unexpected inferred primary: got %q, want %q", got, "alpha-1")
+	if got := store.currentPrimaryNameLocked(); got != testNodeName {
+		t.Fatalf("unexpected inferred primary: got %q, want %q", got, testNodeName)
 	}
 
 	store.clusterStatus = &cluster.ClusterStatus{CurrentPrimary: "beta-1"}
@@ -114,6 +121,7 @@ func TestCurrentPrimaryNameLocked(t *testing.T) {
 }
 
 func TestMemberWALLSNLocked(t *testing.T) {
+	t.Parallel()
 	testCases := []struct {
 		name   string
 		status agentmodel.NodeStatus
@@ -122,7 +130,7 @@ func TestMemberWALLSNLocked(t *testing.T) {
 		{
 			name: "flush",
 			status: agentmodel.NodeStatus{
-				NodeName: "alpha-1",
+				NodeName: testNodeName,
 				Postgres: agentmodel.PostgresStatus{WAL: agentmodel.WALProgress{FlushLSN: "0/10"}},
 			},
 			want: "0/10",
@@ -130,7 +138,7 @@ func TestMemberWALLSNLocked(t *testing.T) {
 		{
 			name: "replay fallback",
 			status: agentmodel.NodeStatus{
-				NodeName: "alpha-1",
+				NodeName: testNodeName,
 				Postgres: agentmodel.PostgresStatus{WAL: agentmodel.WALProgress{ReplayLSN: "0/20"}},
 			},
 			want: "0/20",
@@ -138,7 +146,7 @@ func TestMemberWALLSNLocked(t *testing.T) {
 		{
 			name: "write fallback",
 			status: agentmodel.NodeStatus{
-				NodeName: "alpha-1",
+				NodeName: testNodeName,
 				Postgres: agentmodel.PostgresStatus{WAL: agentmodel.WALProgress{WriteLSN: "0/30"}},
 			},
 			want: "0/30",
@@ -146,7 +154,7 @@ func TestMemberWALLSNLocked(t *testing.T) {
 		{
 			name: "receive fallback",
 			status: agentmodel.NodeStatus{
-				NodeName: "alpha-1",
+				NodeName: testNodeName,
 				Postgres: agentmodel.PostgresStatus{WAL: agentmodel.WALProgress{ReceiveLSN: "0/40"}},
 			},
 			want: "0/40",
@@ -154,28 +162,36 @@ func TestMemberWALLSNLocked(t *testing.T) {
 		{
 			name: "missing",
 			status: agentmodel.NodeStatus{
-				NodeName: "alpha-1",
+				NodeName: testNodeName,
 			},
 			want: "",
 		},
 	}
 
 	for _, testCase := range testCases {
-		store := &MemoryStateStore{
-			nodeStatuses: map[string]agentmodel.NodeStatus{
-				"alpha-1": testCase.status,
-			},
-		}
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-		if got := store.memberWALLSNLocked("alpha-1"); got != testCase.want {
-			t.Fatalf("%s: unexpected wal lsn: got %q, want %q", testCase.name, got, testCase.want)
-		}
+			store := &MemoryStateStore{
+				nodeStatuses: map[string]agentmodel.NodeStatus{
+					testNodeName: testCase.status,
+				},
+			}
+
+			if got := store.memberWALLSNLocked(testNodeName); got != testCase.want {
+				t.Fatalf("unexpected wal lsn: got %q, want %q", got, testCase.want)
+			}
+		})
 	}
 
-	store := &MemoryStateStore{nodeStatuses: map[string]agentmodel.NodeStatus{}}
-	if got := store.memberWALLSNLocked("missing"); got != "" {
-		t.Fatalf("expected missing node wal lsn to be empty, got %q", got)
-	}
+	t.Run("missing node", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MemoryStateStore{nodeStatuses: map[string]agentmodel.NodeStatus{}}
+		if got := store.memberWALLSNLocked("missing"); got != "" {
+			t.Fatalf("expected missing node wal lsn to be empty, got %q", got)
+		}
+	})
 }
 
 type watchResult struct {

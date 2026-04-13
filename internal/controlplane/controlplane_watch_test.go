@@ -55,10 +55,10 @@ func TestControlPlaneWatchUpdatesCachedClusterSpecAcrossInstances(t *testing.T) 
 
 	writer := NewControlPlane(backend, "alpha", nil)
 	reader := NewControlPlane(backend, "alpha", nil)
-	writer.now = clock.Now
-	reader.now = clock.Now
-	writer.cacheMaxAge = time.Hour
-	reader.cacheMaxAge = time.Hour
+	setTestNow(writer, clock.Now)
+	setTestNow(reader, clock.Now)
+	setTestCacheMaxAge(writer, time.Hour)
+	setTestCacheMaxAge(reader, time.Hour)
 
 	if _, err := writer.StoreClusterSpec(context.Background(), cluster.ClusterSpec{
 		ClusterName: "alpha",
@@ -117,12 +117,12 @@ func TestControlPlaneWatchRemovesExpiredNodeStatusAcrossInstances(t *testing.T) 
 
 	writer := NewControlPlane(backend, "alpha", nil)
 	reader := NewControlPlane(backend, "alpha", nil)
-	writer.now = clock.Now
-	reader.now = clock.Now
-	writer.cacheMaxAge = time.Hour
-	reader.cacheMaxAge = time.Hour
-	writer.leaseDuration = time.Second
-	reader.leaseDuration = time.Second
+	setTestNow(writer, clock.Now)
+	setTestNow(reader, clock.Now)
+	setTestCacheMaxAge(writer, time.Hour)
+	setTestCacheMaxAge(reader, time.Hour)
+	setTestLeaseDuration(writer, time.Second)
+	setTestLeaseDuration(reader, time.Second)
 
 	if _, err := writer.StoreClusterSpec(context.Background(), cluster.ClusterSpec{
 		ClusterName: "alpha",
@@ -174,6 +174,74 @@ func TestControlPlaneWatchRemovesExpiredNodeStatusAcrossInstances(t *testing.T) 
 	if status.Phase != cluster.ClusterPhaseInitializing {
 		t.Fatalf("expected watched status expiration to reinitialize cluster view, got %+v", status)
 	}
+}
+
+func TestControlPlaneWatchReappliesNodeStatusAfterExpirationAcrossInstances(t *testing.T) {
+	t.Parallel()
+
+	clock := newTestClock(time.Date(2026, time.April, 8, 14, 0, 0, 0, time.UTC))
+
+	backend := dcsmemory.New(dcsmemory.Config{
+		TTL:           time.Minute,
+		SweepInterval: 5 * time.Millisecond,
+		Now:           clock.Now,
+	})
+	t.Cleanup(func() {
+		if err := backend.Close(); err != nil {
+			t.Fatalf("close backend: %v", err)
+		}
+	})
+
+	writer := NewControlPlane(backend, "alpha", nil)
+	reader := NewControlPlane(backend, "alpha", nil)
+	setTestNow(writer, clock.Now)
+	setTestNow(reader, clock.Now)
+	setTestCacheMaxAge(writer, time.Hour)
+	setTestCacheMaxAge(reader, time.Hour)
+	setTestLeaseDuration(writer, time.Second)
+	setTestLeaseDuration(reader, time.Second)
+
+	if _, err := writer.StoreClusterSpec(context.Background(), cluster.ClusterSpec{
+		ClusterName: "alpha",
+		Members: []cluster.MemberSpec{
+			{Name: watchTestNodeName},
+		},
+	}); err != nil {
+		t.Fatalf("store cluster spec: %v", err)
+	}
+
+	publish := func(observedAt time.Time, state cluster.MemberState) {
+		t.Helper()
+
+		if _, err := writer.PublishNodeStatus(context.Background(), agentmodel.NodeStatus{
+			NodeName:   watchTestNodeName,
+			Role:       cluster.MemberRolePrimary,
+			State:      state,
+			ObservedAt: observedAt,
+		}); err != nil {
+			t.Fatalf("publish remote node status: %v", err)
+		}
+	}
+
+	publish(clock.Now(), cluster.MemberStateRunning)
+	waitForControlPlaneCondition(t, time.Second, func() bool {
+		status, ok := reader.NodeStatus(watchTestNodeName)
+		return ok && status.State == cluster.MemberStateRunning
+	})
+
+	clock.Advance(2 * time.Second)
+	waitForControlPlaneCondition(t, time.Second, func() bool {
+		_, ok := reader.NodeStatus(watchTestNodeName)
+		return !ok
+	})
+
+	clock.Advance(time.Second)
+	publish(clock.Now(), cluster.MemberStateStreaming)
+
+	waitForControlPlaneCondition(t, time.Second, func() bool {
+		status, ok := reader.NodeStatus(watchTestNodeName)
+		return ok && status.State == cluster.MemberStateStreaming
+	})
 }
 
 func waitForControlPlaneCondition(t *testing.T, timeout time.Duration, predicate func() bool) {

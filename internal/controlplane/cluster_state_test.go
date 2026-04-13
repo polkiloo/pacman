@@ -37,7 +37,7 @@ func TestMemoryStateStoreAggregatesObservedClusterStatus(t *testing.T) {
 
 	store := NewMemoryStateStore()
 	now := time.Date(2026, time.March, 27, 11, 0, 0, 0, time.UTC)
-	store.now = func() time.Time { return now }
+	setTestNow(store, func() time.Time { return now })
 
 	if _, err := store.StoreClusterSpec(context.Background(), cluster.ClusterSpec{
 		ClusterName: "alpha",
@@ -179,7 +179,7 @@ func TestMemoryStateStoreReconcileReflectsDesiredVsObservedGap(t *testing.T) {
 
 	store := NewMemoryStateStore()
 	now := time.Date(2026, time.March, 27, 12, 0, 0, 0, time.UTC)
-	store.now = func() time.Time { return now }
+	setTestNow(store, func() time.Time { return now })
 
 	if _, err := store.StoreClusterSpec(context.Background(), cluster.ClusterSpec{
 		ClusterName: "alpha",
@@ -227,7 +227,7 @@ func TestMemoryStateStoreStoresInitializingObservedClusterStatusWithoutMembers(t
 
 	store := NewMemoryStateStore()
 	now := time.Date(2026, time.March, 27, 12, 30, 0, 0, time.UTC)
-	store.now = func() time.Time { return now }
+	setTestNow(store, func() time.Time { return now })
 
 	if _, err := store.StoreClusterSpec(context.Background(), cluster.ClusterSpec{
 		ClusterName: "alpha",
@@ -253,7 +253,7 @@ func TestMemoryStateStoreUpdateMaintenanceModeReconcilesAndJournals(t *testing.T
 
 	store := NewMemoryStateStore()
 	now := time.Date(2026, time.March, 27, 13, 0, 0, 0, time.UTC)
-	store.now = func() time.Time { return now }
+	setTestNow(store, func() time.Time { return now })
 
 	if _, err := store.StoreClusterSpec(context.Background(), cluster.ClusterSpec{
 		ClusterName: "alpha",
@@ -351,8 +351,10 @@ func TestMemoryStateStoreJournalOperationTracksActiveAndFinishedState(t *testing
 	t.Parallel()
 
 	store := NewMemoryStateStore()
-	now := time.Date(2026, time.March, 27, 14, 0, 0, 0, time.UTC)
-	store.now = func() time.Time { return now }
+	startedAt := time.Date(2026, time.March, 27, 14, 0, 0, 0, time.UTC)
+	clock := newMutableTestClock(startedAt)
+	setTestNow(store, clock.Now)
+	setTestLeaseDuration(store, time.Hour)
 
 	if _, err := store.StoreClusterSpec(context.Background(), cluster.ClusterSpec{
 		ClusterName: "alpha",
@@ -378,7 +380,7 @@ func TestMemoryStateStoreJournalOperationTracksActiveAndFinishedState(t *testing
 				FlushLSN: "0/5000200",
 			},
 		},
-		ObservedAt: now,
+		ObservedAt: startedAt,
 	}); err != nil {
 		t.Fatalf("publish alpha-1 node status: %v", err)
 	}
@@ -397,7 +399,7 @@ func TestMemoryStateStoreJournalOperationTracksActiveAndFinishedState(t *testing
 				ReplayLSN: "0/5000100",
 			},
 		},
-		ObservedAt: now,
+		ObservedAt: startedAt,
 	}); err != nil {
 		t.Fatalf("publish alpha-2 node status: %v", err)
 	}
@@ -407,7 +409,7 @@ func TestMemoryStateStoreJournalOperationTracksActiveAndFinishedState(t *testing
 		Kind:        cluster.OperationKindFailover,
 		State:       cluster.OperationStateRunning,
 		RequestedBy: "controller",
-		RequestedAt: now,
+		RequestedAt: startedAt,
 		FromMember:  "alpha-1",
 		ToMember:    "alpha-2",
 	})
@@ -433,16 +435,16 @@ func TestMemoryStateStoreJournalOperationTracksActiveAndFinishedState(t *testing
 		t.Fatalf("expected failover phase while operation is active, got %q", status.Phase)
 	}
 
-	now = now.Add(time.Minute)
+	completedAt := clock.Advance(time.Minute)
 	completed, err := store.JournalOperation(context.Background(), cluster.Operation{
 		ID:          "op-1",
 		Kind:        cluster.OperationKindFailover,
 		State:       cluster.OperationStateCompleted,
 		RequestedBy: "controller",
-		RequestedAt: now.Add(-time.Minute),
+		RequestedAt: completedAt.Add(-time.Minute),
 		FromMember:  "alpha-1",
 		ToMember:    "alpha-2",
-		CompletedAt: now,
+		CompletedAt: completedAt,
 		Result:      cluster.OperationResultSucceeded,
 	})
 	if err != nil {

@@ -379,7 +379,7 @@ func TestMemoryStateStoreExecuteRejoinRewindStartsRecoveringOperation(t *testing
 		rejoinFormerPrimaryStatus("alpha-1", now.Add(-time.Minute), 10, "sys-alpha"),
 		rejoinPrimaryStatus("alpha-2", now.Add(-time.Minute+time.Second), 11, "sys-alpha"),
 	})
-	store.now = func() time.Time { return now }
+	setTestNow(store, func() time.Time { return now })
 	store.mu.Lock()
 	store.clusterStatus.CurrentEpoch = 7
 	store.mu.Unlock()
@@ -584,7 +584,7 @@ func TestMemoryStateStoreExecuteRejoinRewindRecordsFailure(t *testing.T) {
 		rejoinFormerPrimaryStatus("alpha-1", now, 10, "sys-alpha"),
 		rejoinPrimaryStatus("alpha-2", now.Add(time.Second), 11, "sys-alpha"),
 	})
-	store.now = func() time.Time { return now }
+	setTestNow(store, func() time.Time { return now })
 
 	rewinder := &recordingRewinder{err: errors.New("pg_rewind failed")}
 	_, err := store.ExecuteRejoinRewind(context.Background(), RejoinRequest{Member: "alpha-1"}, rewinder)

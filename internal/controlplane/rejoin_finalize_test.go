@@ -10,8 +10,6 @@ import (
 )
 
 func TestMemoryStateStorePublishNodeStatusPreservesControlPlaneRejoinFlags(t *testing.T) {
-	t.Parallel()
-
 	now := time.Date(2026, time.March, 30, 12, 0, 0, 0, time.UTC)
 	store := seededPreparedRejoinStore(t, cluster.ClusterSpec{
 		ClusterName: "alpha",
@@ -41,8 +39,6 @@ func TestMemoryStateStorePublishNodeStatusPreservesControlPlaneRejoinFlags(t *te
 }
 
 func TestMemoryStateStoreVerifyRejoinReplicationKeepsOperationRunning(t *testing.T) {
-	t.Parallel()
-
 	now := time.Date(2026, time.March, 30, 12, 30, 0, 0, time.UTC)
 	store := seededRestartedRejoinStore(t, cluster.ClusterSpec{
 		ClusterName: "alpha",
@@ -93,8 +89,6 @@ func TestMemoryStateStoreVerifyRejoinReplicationKeepsOperationRunning(t *testing
 }
 
 func TestMemoryStateStoreCompleteRejoinMarksMemberHealthyAgain(t *testing.T) {
-	t.Parallel()
-
 	now := time.Date(2026, time.March, 30, 13, 0, 0, 0, time.UTC)
 	store := seededRestartedRejoinStore(t, cluster.ClusterSpec{
 		ClusterName: "alpha",
@@ -152,8 +146,6 @@ func TestMemoryStateStoreCompleteRejoinMarksMemberHealthyAgain(t *testing.T) {
 }
 
 func TestMemoryStateStoreVerifyAndCompleteRejoinRejectBlockedState(t *testing.T) {
-	t.Parallel()
-
 	now := time.Date(2026, time.March, 30, 13, 30, 0, 0, time.UTC)
 
 	testCases := []struct {
@@ -203,8 +195,6 @@ func TestMemoryStateStoreVerifyAndCompleteRejoinRejectBlockedState(t *testing.T)
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			t.Parallel()
-
 			err := testCase.call(t)
 			if !errors.Is(err, testCase.wantErr) {
 				t.Fatalf("unexpected rejoin verification/completion error: got %v want %v", err, testCase.wantErr)
@@ -229,7 +219,7 @@ func seededRestartedRejoinStore(t *testing.T, spec cluster.ClusterSpec, times ..
 	}
 
 	if len(times) > 3 {
-		store.now = sequencedNow(times[3:]...)
+		setTestNow(store, sequencedNow(times[3:]...))
 	}
 
 	return store
