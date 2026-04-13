@@ -425,8 +425,6 @@ func TestLoadReturnsOpenError(t *testing.T) {
 }
 
 func TestLoadReturnsStatError(t *testing.T) {
-	t.Parallel()
-
 	previousOpenConfigFile := openConfigFile
 	t.Cleanup(func() {
 		openConfigFile = previousOpenConfigFile
