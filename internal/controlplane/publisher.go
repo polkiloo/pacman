@@ -29,6 +29,7 @@ type MemoryStateStore struct {
 	mu                  sync.RWMutex
 	registrations       map[string]MemberRegistration
 	nodeStatuses        map[string]agentmodel.NodeStatus
+	nodeStatusRevisions map[string]int64
 	clusterSpec         *cluster.ClusterSpec
 	clusterSpecRevision int64
 	clusterStatus       *cluster.ClusterStatus
@@ -170,7 +171,11 @@ func (store *MemoryStateStore) PublishNodeStatus(ctx context.Context, status age
 	}
 
 	store.mu.Lock()
+	if store.nodeStatusRevisions == nil {
+		store.nodeStatusRevisions = make(map[string]int64)
+	}
 	store.nodeStatuses[cloned.NodeName] = cloned
+	store.nodeStatusRevisions[cloned.NodeName] = nextRevision(store.nodeStatusRevisions[cloned.NodeName])
 	store.refreshSourceOfTruthLocked(cloned.ObservedAt.UTC())
 	store.mu.Unlock()
 

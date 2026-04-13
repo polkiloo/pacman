@@ -58,6 +58,7 @@ func NewControlPlane(store dcs.DCS, clusterName string, logger *slog.Logger) *Co
 		logger:              logger,
 		registrations:       make(map[string]MemberRegistration),
 		nodeStatuses:        make(map[string]agentmodel.NodeStatus),
+		nodeStatusRevisions: make(map[string]int64),
 		now:                 time.Now,
 		leaseDuration:       defaultLeaderLeaseDuration,
 		cacheMaxAge:         defaultCacheMaxAge,
@@ -81,15 +82,26 @@ func NewMemoryStateStore() *MemoryStateStore {
 	backend := dcsmemory.New(dcsmemory.Config{
 		TTL: defaultLeaderLeaseDuration,
 		TTLFunc: func() time.Duration {
-			if s := ref.Load(); s != nil {
-				return s.leaseDuration
+			s := ref.Load()
+			if s == nil {
+				return defaultLeaderLeaseDuration
 			}
-			return defaultLeaderLeaseDuration
+			s.mu.RLock()
+			leaseDuration := s.leaseDuration
+			s.mu.RUnlock()
+			return leaseDuration
 		},
 		SweepInterval: 10 * time.Millisecond,
 		Now: func() time.Time {
-			if s := ref.Load(); s != nil && s.now != nil {
-				return s.now()
+			s := ref.Load()
+			if s == nil {
+				return time.Now()
+			}
+			s.mu.RLock()
+			now := s.now
+			s.mu.RUnlock()
+			if now != nil {
+				return now()
 			}
 			return time.Now()
 		},
@@ -125,11 +137,10 @@ func (store *MemoryStateStore) refreshCache(ctx context.Context) error {
 		return err
 	}
 
-	now := store.now().UTC()
-
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
+	now := store.now().UTC()
 	store.cacheRefreshedAt = now
 	store.cacheDirty = false
 	return nil
@@ -192,10 +203,10 @@ func (store *MemoryStateStore) consumeCacheWatch(prefix string, events <-chan dc
 }
 
 func (store *MemoryStateStore) applyWatchEvent(event dcs.WatchEvent) error {
-	now := store.now().UTC()
-
 	store.mu.Lock()
 	defer store.mu.Unlock()
+
+	now := store.now().UTC()
 
 	if store.cacheRefreshedAt.IsZero() {
 		store.cacheDirty = true
@@ -284,13 +295,17 @@ func (store *MemoryStateStore) applyMaintenanceEventLocked(event dcs.WatchEvent)
 }
 
 func (store *MemoryStateStore) applyOperationEventLocked(event dcs.WatchEvent) error {
-	if event.Revision > 0 && store.activeOpRevision > event.Revision {
+	if event.Revision > 0 && store.activeOpRevision >= event.Revision {
 		return nil
 	}
 
 	if watchEventDeletesKey(event) {
 		store.activeOperation = nil
-		store.activeOpRevision = -1
+		if event.Revision > 0 {
+			store.activeOpRevision = event.Revision
+		} else {
+			store.activeOpRevision = -1
+		}
 		return nil
 	}
 
@@ -334,8 +349,26 @@ func (store *MemoryStateStore) applyNodeStatusEventLocked(event dcs.WatchEvent) 
 		return nil
 	}
 
+	if store.nodeStatusRevisions == nil {
+		store.nodeStatusRevisions = make(map[string]int64)
+	}
+
+	if event.Revision > 0 {
+		if _, ok := store.nodeStatuses[nodeName]; ok && store.nodeStatusRevisions[nodeName] >= event.Revision {
+			return nil
+		}
+		if watchEventDeletesKey(event) && store.nodeStatusRevisions[nodeName] >= event.Revision {
+			return nil
+		}
+	}
+
 	if watchEventDeletesKey(event) {
 		delete(store.nodeStatuses, nodeName)
+		if event.Revision > 0 {
+			store.nodeStatusRevisions[nodeName] = event.Revision
+		} else {
+			delete(store.nodeStatusRevisions, nodeName)
+		}
 		return nil
 	}
 
@@ -349,6 +382,9 @@ func (store *MemoryStateStore) applyNodeStatusEventLocked(event dcs.WatchEvent) 
 	}
 
 	store.nodeStatuses[status.NodeName] = status
+	if event.Revision > 0 {
+		store.nodeStatusRevisions[nodeName] = event.Revision
+	}
 	return nil
 }
 
@@ -426,7 +462,7 @@ func (store *MemoryStateStore) forceRefreshCache(ctx context.Context) error {
 		return err
 	}
 
-	nodeStatuses, err := store.loadNodeStatuses(ctx)
+	nodeStatuses, nodeStatusRevisions, err := store.loadNodeStatuses(ctx)
 	if err != nil {
 		return err
 	}
@@ -463,12 +499,18 @@ func (store *MemoryStateStore) forceRefreshCache(ctx context.Context) error {
 
 	store.registrations = registrations
 	store.nodeStatuses = nodeStatuses
+	store.nodeStatusRevisions = nodeStatusRevisions
 	store.clusterSpec = spec
 	store.clusterSpecRevision = specRevision
 	store.maintenance = maintenance
 	store.maintenanceRevision = maintenanceRevision
 	store.activeOperation = activeOperation
-	store.activeOpRevision = activeOpRevision
+	if activeOperation == nil && activeOpRevision < 0 && store.activeOpRevision > 0 {
+		// Preserve the latest seen operation revision across refreshes so a
+		// delayed watch put cannot resurrect a finished operation.
+	} else {
+		store.activeOpRevision = activeOpRevision
+	}
 	store.history = history
 	store.leaderLease = leaderLease
 	store.lastDCSSeenAt = now
@@ -504,23 +546,25 @@ func (store *MemoryStateStore) loadRegistrations(ctx context.Context) (map[strin
 	return registrations, nil
 }
 
-func (store *MemoryStateStore) loadNodeStatuses(ctx context.Context) (map[string]agentmodel.NodeStatus, error) {
+func (store *MemoryStateStore) loadNodeStatuses(ctx context.Context) (map[string]agentmodel.NodeStatus, map[string]int64, error) {
 	values, err := store.dcs.List(ctx, store.keyspace.StatusPrefix())
 	if err != nil {
-		return nil, fmt.Errorf("list node statuses: %w", err)
+		return nil, nil, fmt.Errorf("list node statuses: %w", err)
 	}
 
 	statuses := make(map[string]agentmodel.NodeStatus, len(values))
+	revisions := make(map[string]int64, len(values))
 	for _, value := range values {
 		var status agentmodel.NodeStatus
 		if err := json.Unmarshal(value.Value, &status); err != nil {
-			return nil, fmt.Errorf("decode node status %q: %w", value.Key, err)
+			return nil, nil, fmt.Errorf("decode node status %q: %w", value.Key, err)
 		}
 
 		statuses[status.NodeName] = status
+		revisions[status.NodeName] = value.Revision
 	}
 
-	return statuses, nil
+	return statuses, revisions, nil
 }
 
 func (store *MemoryStateStore) loadClusterSpec(ctx context.Context) (*cluster.ClusterSpec, int64, error) {
@@ -677,6 +721,11 @@ func (store *MemoryStateStore) deleteKey(ctx context.Context, key string) error 
 
 	store.markDCSWritten()
 	store.clearLocalRevision(key)
+	if key == store.keyspace.Operation() {
+		store.mu.Lock()
+		store.activeOperation = nil
+		store.mu.Unlock()
+	}
 	return nil
 }
 
@@ -694,7 +743,20 @@ func (store *MemoryStateStore) getKey(ctx context.Context, key string) (dcs.KeyV
 }
 
 func (store *MemoryStateStore) persistNodeStatus(ctx context.Context, status agentmodel.NodeStatus) error {
-	return store.setJSON(ctx, store.keyspace.Status(status.NodeName), status, dcs.WithTTL(store.leaseDuration))
+	if err := store.setJSON(ctx, store.keyspace.Status(status.NodeName), status, dcs.WithTTL(store.leaseDuration)); err != nil {
+		return err
+	}
+
+	store.mu.Lock()
+	if store.nodeStatusRevisions == nil {
+		store.nodeStatusRevisions = make(map[string]int64)
+	}
+	cloned := status.Clone()
+	store.nodeStatuses[status.NodeName] = cloned
+	store.nodeStatusRevisions[status.NodeName] = nextRevision(store.nodeStatusRevisions[status.NodeName])
+	store.mu.Unlock()
+
+	return nil
 }
 
 func (store *MemoryStateStore) persistNodeStatuses(ctx context.Context, statuses ...agentmodel.NodeStatus) error {
