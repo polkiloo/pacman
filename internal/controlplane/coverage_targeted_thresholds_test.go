@@ -48,10 +48,11 @@ func TestExecuteRejoinStandbyConfigPropagatesPersistenceErrors(t *testing.T) {
 
 	newStore := func(t *testing.T) *MemoryStateStore {
 		t.Helper()
-		return seededPreparedRejoinStore(t, cluster.ClusterSpec{
+		store, _ := preparedRejoinStoreForCoverage(t, cluster.ClusterSpec{
 			ClusterName: "alpha",
 			Members:     []cluster.MemberSpec{{Name: "alpha-1"}, {Name: "alpha-2"}},
-		}, now, now.Add(10*time.Second))
+		}, now)
+		return store
 	}
 
 	t.Run("persist active operation", func(t *testing.T) {
@@ -77,13 +78,10 @@ func TestExecuteRejoinRestartAsStandbyPropagatesPersistenceErrors(t *testing.T) 
 	newStore := func(t *testing.T) *MemoryStateStore {
 		t.Helper()
 
-		store := seededPreparedRejoinStore(t, cluster.ClusterSpec{
+		store, _ := configuredRejoinStoreForCoverage(t, cluster.ClusterSpec{
 			ClusterName: "alpha",
 			Members:     []cluster.MemberSpec{{Name: "alpha-1"}, {Name: "alpha-2"}},
-		}, now, now.Add(10*time.Second), now.Add(20*time.Second))
-		if _, err := store.ExecuteRejoinStandbyConfig(context.Background(), &recordingStandbyConfigurer{}); err != nil {
-			t.Fatalf("execute standby config: %v", err)
-		}
+		}, now)
 
 		return store
 	}
@@ -111,10 +109,10 @@ func TestVerifyRejoinReplicationPropagatesPersistenceErrors(t *testing.T) {
 	newStore := func(t *testing.T) *MemoryStateStore {
 		t.Helper()
 
-		store := seededRestartedRejoinStore(t, cluster.ClusterSpec{
+		store, _ := restartedRejoinStoreForCoverage(t, cluster.ClusterSpec{
 			ClusterName: "alpha",
 			Members:     []cluster.MemberSpec{{Name: "alpha-1"}, {Name: "alpha-2"}},
-		}, now, now.Add(10*time.Second), now.Add(20*time.Second))
+		}, now)
 		publishVerifiedRejoinReplica(t, store, now.Add(30*time.Second))
 		return store
 	}
@@ -139,7 +137,9 @@ func TestVerifyRejoinReplicationPropagatesPersistenceErrors(t *testing.T) {
 type failingControlPlaneDCS struct {
 	dcs.DCS
 	failSetOnCall map[string]map[int]error
+	failCASOnCall map[string]map[int]error
 	setCalls      map[string]int
+	casCalls      map[string]int
 }
 
 func (backend *failingControlPlaneDCS) Set(ctx context.Context, key string, value []byte, options ...dcs.SetOption) error {
@@ -157,4 +157,120 @@ func (backend *failingControlPlaneDCS) Set(ctx context.Context, key string, valu
 	}
 
 	return backend.DCS.Set(ctx, key, value, options...)
+}
+
+func (backend *failingControlPlaneDCS) CompareAndSet(ctx context.Context, key string, value []byte, expectedRevision int64) error {
+	trimmedKey := strings.TrimSpace(key)
+
+	if backend.casCalls == nil {
+		backend.casCalls = make(map[string]int)
+	}
+	backend.casCalls[trimmedKey]++
+
+	if failures, ok := backend.failCASOnCall[trimmedKey]; ok {
+		if err, ok := failures[backend.casCalls[trimmedKey]]; ok {
+			return err
+		}
+	}
+
+	return backend.DCS.CompareAndSet(ctx, key, value, expectedRevision)
+}
+
+func preparedRejoinStoreForCoverage(t *testing.T, spec cluster.ClusterSpec, now time.Time) (*MemoryStateStore, *mutableTestClock) {
+	t.Helper()
+
+	clock := newMutableTestClock(now)
+	store := NewMemoryStateStore()
+	setTestNow(store, clock.Now)
+	setTestLeaseDuration(store, time.Hour)
+
+	if _, err := store.StoreClusterSpec(context.Background(), spec); err != nil {
+		t.Fatalf("store cluster spec: %v", err)
+	}
+
+	for _, status := range []agentmodel.NodeStatus{
+		rejoinFormerPrimaryStatus("alpha-1", now.Add(-time.Minute), 10, "sys-alpha"),
+		rejoinPrimaryStatus("alpha-2", now.Add(-time.Minute+time.Second), 11, "sys-alpha"),
+	} {
+		if _, err := store.PublishNodeStatus(context.Background(), status); err != nil {
+			t.Fatalf("publish node status for %q: %v", status.NodeName, err)
+		}
+	}
+
+	store.mu.Lock()
+	store.clusterStatus.CurrentEpoch = 7
+	store.activeOperation = &cluster.Operation{
+		ID:          "rejoin-prepared",
+		Kind:        cluster.OperationKindRejoin,
+		State:       cluster.OperationStateRunning,
+		Result:      cluster.OperationResultPending,
+		FromMember:  "alpha-1",
+		ToMember:    "alpha-2",
+		RequestedAt: now.Add(-15 * time.Second),
+		StartedAt:   now.Add(-10 * time.Second),
+		Message:     rejoinRewindCompletedMessage("alpha-1", "alpha-2"),
+	}
+	store.refreshSourceOfTruthLocked(now)
+	store.mu.Unlock()
+
+	clock.Advance(10 * time.Second)
+	return store, clock
+}
+
+func configuredRejoinStoreForCoverage(t *testing.T, spec cluster.ClusterSpec, now time.Time) (*MemoryStateStore, *mutableTestClock) {
+	t.Helper()
+
+	store, clock := preparedRejoinStoreForCoverage(t, spec, now)
+	member, ok := store.NodeStatus("alpha-1")
+	if !ok {
+		t.Fatal("expected former primary node status")
+	}
+
+	store.mu.Lock()
+	store.nodeStatuses["alpha-1"] = configuredFormerPrimaryStandbyStatus(member, now)
+	store.activeOperation = &cluster.Operation{
+		ID:          "rejoin-configured",
+		Kind:        cluster.OperationKindRejoin,
+		State:       cluster.OperationStateRunning,
+		Result:      cluster.OperationResultPending,
+		FromMember:  "alpha-1",
+		ToMember:    "alpha-2",
+		RequestedAt: now.Add(-15 * time.Second),
+		StartedAt:   now.Add(-10 * time.Second),
+		Message:     rejoinStandbyConfigCompletedMessage("alpha-1", "alpha-2"),
+	}
+	store.refreshSourceOfTruthLocked(now)
+	store.mu.Unlock()
+
+	clock.Advance(10 * time.Second)
+	return store, clock
+}
+
+func restartedRejoinStoreForCoverage(t *testing.T, spec cluster.ClusterSpec, now time.Time) (*MemoryStateStore, *mutableTestClock) {
+	t.Helper()
+
+	store, clock := configuredRejoinStoreForCoverage(t, spec, now)
+	member, ok := store.NodeStatus("alpha-1")
+	if !ok {
+		t.Fatal("expected former primary node status")
+	}
+
+	store.mu.Lock()
+	store.nodeStatuses["alpha-1"] = restartingFormerPrimaryStandbyStatus(member, now)
+	store.activeOperation = &cluster.Operation{
+		ID:          "rejoin-restarted",
+		Kind:        cluster.OperationKindRejoin,
+		State:       cluster.OperationStateRunning,
+		Result:      cluster.OperationResultPending,
+		FromMember:  "alpha-1",
+		ToMember:    "alpha-2",
+		RequestedAt: now.Add(-15 * time.Second),
+		StartedAt:   now.Add(-10 * time.Second),
+		Message:     rejoinRestartCompletedMessage("alpha-1", "alpha-2"),
+	}
+	store.refreshSourceOfTruthLocked(now)
+	store.mu.Unlock()
+
+	clock.Advance(10 * time.Second)
+	return store, clock
 }
