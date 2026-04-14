@@ -38,6 +38,18 @@ func (config Config) Validate() error {
 		return err
 	}
 
+	if config.DCS != nil {
+		if err := config.DCS.Validate(); err != nil {
+			return err
+		}
+
+		if config.Bootstrap != nil &&
+			strings.TrimSpace(config.Bootstrap.ClusterName) != "" &&
+			strings.TrimSpace(config.DCS.ClusterName) != strings.TrimSpace(config.Bootstrap.ClusterName) {
+			return ErrDCSClusterNameMismatch
+		}
+	}
+
 	if config.TLS != nil {
 		if err := config.TLS.Validate(); err != nil {
 			return err

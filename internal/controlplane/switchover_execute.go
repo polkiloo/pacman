@@ -22,8 +22,20 @@ func (store *MemoryStateStore) ExecuteSwitchover(ctx context.Context, demoter De
 		return SwitchoverExecution{}, err
 	}
 
+	if err := store.ensureCacheFresh(ctx); err != nil {
+		return SwitchoverExecution{}, err
+	}
+
 	prepared, err := store.prepareSwitchoverExecution(demoter, promoter)
 	if err != nil {
+		return SwitchoverExecution{}, err
+	}
+
+	if err := store.persistActiveOperation(ctx, prepared.operation); err != nil {
+		return SwitchoverExecution{}, err
+	}
+
+	if err := store.refreshCache(ctx); err != nil {
 		return SwitchoverExecution{}, err
 	}
 
@@ -173,31 +185,41 @@ func runSwitchoverPromotion(ctx context.Context, prepared preparedSwitchoverExec
 
 func (store *MemoryStateStore) publishSwitchoverDemotion(prepared preparedSwitchoverExecution) error {
 	store.mu.Lock()
-	defer store.mu.Unlock()
-
 	if _, err := store.switchoverOperationForPublicationLocked(prepared.operation); err != nil {
+		store.mu.Unlock()
 		return err
 	}
 
 	primaryStatus := store.memberNodeStatusLocked(prepared.operation.FromMember, prepared.executedAt)
 	store.nodeStatuses[prepared.operation.FromMember] = demotingPrimaryNodeStatus(primaryStatus, prepared.executedAt)
 	store.refreshSourceOfTruthLocked(prepared.executedAt)
+	primary := store.nodeStatuses[prepared.operation.FromMember].Clone()
+	store.mu.Unlock()
 
-	return nil
+	if err := store.persistNodeStatus(context.Background(), primary); err != nil {
+		return err
+	}
+
+	return store.refreshCache(context.Background())
 }
 
 func (store *MemoryStateStore) publishSwitchoverCompletion(prepared preparedSwitchoverExecution) (SwitchoverExecution, error) {
 	store.mu.Lock()
-	defer store.mu.Unlock()
-
 	runningOperation, err := store.switchoverOperationForPublicationLocked(prepared.operation)
 	if err != nil {
+		store.mu.Unlock()
 		return SwitchoverExecution{}, err
 	}
 
 	targetStatus, err := store.switchoverTargetStatusLocked(prepared.operation.ToMember)
 	if err != nil {
+		store.mu.Unlock()
 		return SwitchoverExecution{}, err
+	}
+
+	if store.clusterStatus == nil {
+		store.mu.Unlock()
+		return SwitchoverExecution{}, ErrSwitchoverIntentChanged
 	}
 
 	formerPrimaryStatus := store.formerPrimaryNodeStatusLocked(prepared.operation.FromMember, prepared.executedAt)
@@ -209,6 +231,21 @@ func (store *MemoryStateStore) publishSwitchoverCompletion(prepared preparedSwit
 	completedOperation := completeSwitchoverExecution(runningOperation, prepared.executedAt, prepared.operation.ToMember, nextEpoch)
 	store.journalOperationLocked(completedOperation, prepared.executedAt)
 	store.refreshSourceOfTruthLocked(prepared.executedAt)
+	target := store.nodeStatuses[prepared.operation.ToMember].Clone()
+	formerPrimary := store.nodeStatuses[prepared.operation.FromMember].Clone()
+	store.mu.Unlock()
+
+	if err := store.persistNodeStatuses(context.Background(), target, formerPrimary); err != nil {
+		return SwitchoverExecution{}, err
+	}
+
+	if err := store.persistJournaledOperation(context.Background(), completedOperation); err != nil {
+		return SwitchoverExecution{}, err
+	}
+
+	if err := store.refreshCache(context.Background()); err != nil {
+		return SwitchoverExecution{}, err
+	}
 
 	return buildSwitchoverExecution(prepared, completedOperation, nextEpoch), nil
 }

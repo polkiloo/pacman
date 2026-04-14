@@ -12,6 +12,7 @@ var (
 	ErrNodeAPIAddressInvalid               = errors.New("config node apiAddress is invalid")
 	ErrNodeControlAddressRequired          = errors.New("config node controlAddress is required")
 	ErrNodeControlAddressInvalid           = errors.New("config node controlAddress is invalid")
+	ErrDCSClusterNameMismatch              = errors.New("config dcs clusterName must match bootstrap clusterName")
 	ErrTLSCertFileRequired                 = errors.New("config tls certFile is required")
 	ErrTLSKeyFileRequired                  = errors.New("config tls keyFile is required")
 	ErrSecurityAdminBearerTokenRequired    = errors.New("config security adminBearerToken or adminBearerTokenFile is required")

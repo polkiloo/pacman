@@ -24,6 +24,10 @@ func (store *MemoryStateStore) ExecuteFailover(ctx context.Context, promoter Pro
 		return FailoverExecution{}, err
 	}
 
+	if err := store.ensureCacheFresh(ctx); err != nil {
+		return FailoverExecution{}, err
+	}
+
 	prepared, err := store.prepareFailoverExecution(promoter, fencer)
 	if err != nil {
 		return FailoverExecution{}, err
@@ -48,25 +52,35 @@ func (store *MemoryStateStore) prepareFailoverExecution(promoter PromotionExecut
 	executedAt := store.now().UTC()
 
 	store.mu.Lock()
-	defer store.mu.Unlock()
-
 	spec, status, err := store.failoverInputsLocked()
 	if err != nil {
+		store.mu.Unlock()
 		return preparedFailoverExecution{}, err
 	}
 
 	operation, err := store.activeFailoverOperationLocked()
 	if err != nil {
+		store.mu.Unlock()
 		return preparedFailoverExecution{}, err
 	}
 
 	if spec.Failover.FencingRequired && fencer == nil {
+		store.mu.Unlock()
 		return preparedFailoverExecution{}, ErrFailoverFencingHookRequired
 	}
 
 	operation = beginFailoverExecution(operation, executedAt)
 	store.activeOperation = &operation
 	store.refreshSourceOfTruthLocked(executedAt)
+	store.mu.Unlock()
+
+	if err := store.persistActiveOperation(context.Background(), operation); err != nil {
+		return preparedFailoverExecution{}, err
+	}
+
+	if err := store.refreshCache(context.Background()); err != nil {
+		return preparedFailoverExecution{}, err
+	}
 
 	return preparedFailoverExecution{
 		spec:          spec,
@@ -100,16 +114,21 @@ func runFailoverPromotion(ctx context.Context, prepared preparedFailoverExecutio
 
 func (store *MemoryStateStore) publishFailoverEpoch(prepared preparedFailoverExecution) (FailoverExecution, error) {
 	store.mu.Lock()
-	defer store.mu.Unlock()
-
 	runningOperation, err := store.failoverOperationForPublicationLocked(prepared.operation)
 	if err != nil {
+		store.mu.Unlock()
 		return FailoverExecution{}, err
 	}
 
 	candidateStatus, err := store.failoverCandidateStatusLocked(prepared.operation.ToMember)
 	if err != nil {
+		store.mu.Unlock()
 		return FailoverExecution{}, err
+	}
+
+	if store.clusterStatus == nil {
+		store.mu.Unlock()
+		return FailoverExecution{}, ErrFailoverIntentChanged
 	}
 
 	formerPrimaryStatus := store.formerPrimaryNodeStatusLocked(prepared.operation.FromMember, prepared.executedAt)
@@ -121,6 +140,21 @@ func (store *MemoryStateStore) publishFailoverEpoch(prepared preparedFailoverExe
 	completedOperation := completeFailoverExecution(runningOperation, prepared.executedAt, prepared.operation.ToMember, nextEpoch)
 	store.journalOperationLocked(completedOperation, prepared.executedAt)
 	store.refreshSourceOfTruthLocked(prepared.executedAt)
+	promoted := store.nodeStatuses[prepared.operation.ToMember].Clone()
+	formerPrimary := store.nodeStatuses[prepared.operation.FromMember].Clone()
+	store.mu.Unlock()
+
+	if err := store.persistNodeStatuses(context.Background(), promoted, formerPrimary); err != nil {
+		return FailoverExecution{}, err
+	}
+
+	if err := store.persistJournaledOperation(context.Background(), completedOperation); err != nil {
+		return FailoverExecution{}, err
+	}
+
+	if err := store.refreshCache(context.Background()); err != nil {
+		return FailoverExecution{}, err
+	}
 
 	return buildFailoverExecution(prepared, completedOperation, nextEpoch), nil
 }

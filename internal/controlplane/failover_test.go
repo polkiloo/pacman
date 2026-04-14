@@ -199,7 +199,7 @@ func TestMemoryStateStoreCreateFailoverIntentCreatesAcceptedOperation(t *testing
 		failoverNodeStatus("alpha-3", cluster.MemberRoleReplica, cluster.MemberStateStreaming, now, true, 11, 32),
 		failoverNodeStatus("witness-1", cluster.MemberRoleWitness, cluster.MemberStateRunning, now, false, 0, 0),
 	})
-	store.now = func() time.Time { return now.Add(10 * time.Second) }
+	setTestNow(store, func() time.Time { return now.Add(10 * time.Second) })
 
 	intent, err := store.CreateFailoverIntent(context.Background(), FailoverIntentRequest{
 		RequestedBy: "controller",
@@ -424,7 +424,7 @@ func TestMemoryStateStoreExecuteFailoverRunsFencingPromotionAndAdvancesEpoch(t *
 		failoverNodeStatus("alpha-2", cluster.MemberRoleReplica, cluster.MemberStateStreaming, now, true, 15, 4),
 		failoverNodeStatus("witness-1", cluster.MemberRoleWitness, cluster.MemberStateRunning, now, false, 0, 0),
 	})
-	store.now = func() time.Time { return now.Add(10 * time.Second) }
+	setTestNow(store, func() time.Time { return now.Add(10 * time.Second) })
 
 	intent, err := store.CreateFailoverIntent(context.Background(), FailoverIntentRequest{
 		RequestedBy: "controller",
@@ -540,7 +540,7 @@ func TestMemoryStateStoreExecuteFailoverSkipsOptionalFencing(t *testing.T) {
 		failoverNodeStatus("alpha-1", cluster.MemberRolePrimary, cluster.MemberStateFailed, now, false, 16, 0),
 		failoverNodeStatus("alpha-2", cluster.MemberRoleReplica, cluster.MemberStateStreaming, now, true, 16, 0),
 	})
-	store.now = func() time.Time { return now.Add(5 * time.Second) }
+	setTestNow(store, func() time.Time { return now.Add(5 * time.Second) })
 
 	if _, err := store.CreateFailoverIntent(context.Background(), FailoverIntentRequest{}); err != nil {
 		t.Fatalf("create failover intent: %v", err)
@@ -671,6 +671,9 @@ func seededFailoverStore(t *testing.T, spec cluster.ClusterSpec, statuses []agen
 	t.Helper()
 
 	store := NewMemoryStateStore()
+	// Use a long lease so node-status DCS entries don't expire when tests advance
+	// store.now past the 5-second production default.
+	setTestLeaseDuration(store, time.Hour)
 	if _, err := store.StoreClusterSpec(context.Background(), spec); err != nil {
 		t.Fatalf("store cluster spec: %v", err)
 	}

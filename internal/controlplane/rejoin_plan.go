@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -28,6 +29,10 @@ func (store *MemoryStateStore) AssessRejoinMember(nodeName string) (RejoinMember
 		return RejoinMemberAssessment{}, ErrRejoinTargetRequired
 	}
 
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return RejoinMemberAssessment{}, err
+	}
+
 	store.mu.RLock()
 	inputs, err := store.rejoinInputsLocked(target)
 	store.mu.RUnlock()
@@ -45,6 +50,10 @@ func (store *MemoryStateStore) DetectRejoinDivergence(nodeName string) (RejoinDi
 	target := strings.TrimSpace(nodeName)
 	if target == "" {
 		return RejoinDivergenceAssessment{}, ErrRejoinTargetRequired
+	}
+
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return RejoinDivergenceAssessment{}, err
 	}
 
 	store.mu.RLock()

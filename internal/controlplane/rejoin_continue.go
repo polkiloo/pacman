@@ -19,8 +19,20 @@ func (store *MemoryStateStore) ExecuteRejoinStandbyConfig(ctx context.Context, c
 		return RejoinExecution{}, err
 	}
 
+	if err := store.ensureCacheFresh(ctx); err != nil {
+		return RejoinExecution{}, err
+	}
+
 	prepared, err := store.prepareRejoinStandbyConfig(configurator)
 	if err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.persistActiveOperation(ctx, prepared.operation); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.refreshCache(ctx); err != nil {
 		return RejoinExecution{}, err
 	}
 
@@ -39,8 +51,20 @@ func (store *MemoryStateStore) ExecuteRejoinRestartAsStandby(ctx context.Context
 		return RejoinExecution{}, err
 	}
 
+	if err := store.ensureCacheFresh(ctx); err != nil {
+		return RejoinExecution{}, err
+	}
+
 	prepared, err := store.prepareRejoinStandbyRestart(restarter)
 	if err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.persistActiveOperation(ctx, prepared.operation); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.refreshCache(ctx); err != nil {
 		return RejoinExecution{}, err
 	}
 
@@ -159,10 +183,9 @@ func (store *MemoryStateStore) startRejoinContinuationLocked(prepared preparedRe
 
 func (store *MemoryStateStore) publishRejoinStandbyConfig(prepared preparedRejoinExecution) (RejoinExecution, error) {
 	store.mu.Lock()
-	defer store.mu.Unlock()
-
 	running, err := store.rejoinOperationForPublicationLocked(prepared.operation)
 	if err != nil {
+		store.mu.Unlock()
 		return RejoinExecution{}, err
 	}
 
@@ -171,6 +194,20 @@ func (store *MemoryStateStore) publishRejoinStandbyConfig(prepared preparedRejoi
 	store.activeOperation = &updatedOperation
 	store.nodeStatuses[prepared.decision.Member.Name] = configuredFormerPrimaryStandbyStatus(prepared.memberNode, prepared.executedAt)
 	store.refreshSourceOfTruthLocked(prepared.executedAt)
+	member := store.nodeStatuses[prepared.decision.Member.Name].Clone()
+	store.mu.Unlock()
+
+	if err := store.persistActiveOperation(context.Background(), updatedOperation); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.persistNodeStatus(context.Background(), member); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.refreshCache(context.Background()); err != nil {
+		return RejoinExecution{}, err
+	}
 
 	return RejoinExecution{
 		Operation:         updatedOperation.Clone(),
@@ -184,10 +221,9 @@ func (store *MemoryStateStore) publishRejoinStandbyConfig(prepared preparedRejoi
 
 func (store *MemoryStateStore) publishRejoinStandbyRestart(prepared preparedRejoinExecution) (RejoinExecution, error) {
 	store.mu.Lock()
-	defer store.mu.Unlock()
-
 	running, err := store.rejoinOperationForPublicationLocked(prepared.operation)
 	if err != nil {
+		store.mu.Unlock()
 		return RejoinExecution{}, err
 	}
 
@@ -196,6 +232,20 @@ func (store *MemoryStateStore) publishRejoinStandbyRestart(prepared preparedRejo
 	store.activeOperation = &updatedOperation
 	store.nodeStatuses[prepared.decision.Member.Name] = restartingFormerPrimaryStandbyStatus(prepared.memberNode, prepared.executedAt)
 	store.refreshSourceOfTruthLocked(prepared.executedAt)
+	member := store.nodeStatuses[prepared.decision.Member.Name].Clone()
+	store.mu.Unlock()
+
+	if err := store.persistActiveOperation(context.Background(), updatedOperation); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.persistNodeStatus(context.Background(), member); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.refreshCache(context.Background()); err != nil {
+		return RejoinExecution{}, err
+	}
 
 	return RejoinExecution{
 		Operation:          updatedOperation.Clone(),

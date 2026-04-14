@@ -17,6 +17,11 @@ type redactedConfig Config
 func (config Config) Redacted() Config {
 	redacted := config
 
+	if redacted.DCS != nil {
+		dcs := redacted.DCS.Redacted()
+		redacted.DCS = &dcs
+	}
+
 	if redacted.Security != nil {
 		security := redacted.Security.Redacted()
 		redacted.Security = &security
@@ -28,7 +33,8 @@ func (config Config) Redacted() Config {
 // HasInlineSecrets reports whether the config document directly embeds secret
 // material rather than referencing it indirectly by file path.
 func (config Config) HasInlineSecrets() bool {
-	return config.Security != nil && config.Security.HasInlineSecrets()
+	return (config.DCS != nil && config.DCS.HasInlineSecrets()) ||
+		(config.Security != nil && config.Security.HasInlineSecrets())
 }
 
 // LogValue implements slog.LogValuer so structured logging redacts secret

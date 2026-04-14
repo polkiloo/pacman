@@ -96,7 +96,7 @@ bootstrap:
 			wantContains: []string{
 				`"msg":"started local agent daemon"`,
 				`"node":"alpha-2"`,
-				`"role":"data"`,
+				`"node_role":"data"`,
 				`"api_tls_enabled":true`,
 				`"api_address":"0.0.0.0:8081"`,
 				`"control_address":"0.0.0.0:9091"`,
@@ -128,7 +128,7 @@ node:
 			wantContains: []string{
 				`"msg":"started local agent daemon"`,
 				`"node":"witness-1"`,
-				`"role":"witness"`,
+				`"node_role":"witness"`,
 				`"manages_postgres":false`,
 				`"msg":"observed heartbeat without local PostgreSQL"`,
 				`"msg":"published local state to control plane"`,

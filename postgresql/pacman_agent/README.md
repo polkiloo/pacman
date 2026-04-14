@@ -48,4 +48,6 @@ pacman.cluster_name = 'alpha'
 ```
 
 Further lifecycle wiring is documented in
-[`docs/POSTGRES_EXTENSION.md`](../../docs/POSTGRES_EXTENSION.md).
+[`docs/POSTGRES_EXTENSION.md`](../../docs/POSTGRES_EXTENSION.md). A fuller
+example lives in
+[`docs/examples/pacman-agent.postgresql.conf`](../../docs/examples/pacman-agent.postgresql.conf).

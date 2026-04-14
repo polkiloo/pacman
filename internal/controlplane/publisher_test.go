@@ -17,8 +17,8 @@ func TestMemoryStateStorePublishesNodeStatus(t *testing.T) {
 	store := NewMemoryStateStore()
 	observedAt := time.Date(2026, time.March, 23, 9, 0, 0, 0, time.UTC)
 	store.MarkDCSSeen(observedAt.Add(-time.Second))
-	store.now = func() time.Time { return observedAt }
-	store.leaseDuration = time.Minute
+	setTestNow(store, func() time.Time { return observedAt })
+	setTestLeaseDuration(store, time.Minute)
 
 	if err := store.RegisterMember(context.Background(), MemberRegistration{
 		NodeName:       "alpha-1",
@@ -139,9 +139,9 @@ func TestMemoryStateStoreCampaignLeaderRequiresRegisteredCandidate(t *testing.T)
 	t.Parallel()
 
 	store := NewMemoryStateStore()
-	store.now = func() time.Time {
+	setTestNow(store, func() time.Time {
 		return time.Date(2026, time.March, 24, 9, 0, 0, 0, time.UTC)
-	}
+	})
 
 	if _, _, err := store.CampaignLeader(context.Background(), "alpha-1"); !errors.Is(err, ErrLeaderCandidateUnknown) {
 		t.Fatalf("unexpected leader campaign error: got %v", err)
@@ -156,9 +156,9 @@ func TestMemoryStateStoreCampaignLeaderElectsAndRenewsLease(t *testing.T) {
 	t.Parallel()
 
 	store := NewMemoryStateStore()
-	current := time.Date(2026, time.March, 24, 10, 0, 0, 0, time.UTC)
-	store.now = func() time.Time { return current }
-	store.leaseDuration = 2 * time.Second
+	clock := newMutableTestClock(time.Date(2026, time.March, 24, 10, 0, 0, 0, time.UTC))
+	setTestNow(store, clock.Now)
+	setTestLeaseDuration(store, 2*time.Second)
 
 	for _, registration := range []MemberRegistration{
 		{
@@ -166,14 +166,14 @@ func TestMemoryStateStoreCampaignLeaderElectsAndRenewsLease(t *testing.T) {
 			NodeRole:       cluster.NodeRoleData,
 			APIAddress:     "10.0.0.10:8080",
 			ControlAddress: "10.0.0.10:9090",
-			RegisteredAt:   current.Add(-time.Minute),
+			RegisteredAt:   clock.Now().Add(-time.Minute),
 		},
 		{
 			NodeName:       "alpha-2",
 			NodeRole:       cluster.NodeRoleData,
 			APIAddress:     "10.0.0.11:8080",
 			ControlAddress: "10.0.0.11:9090",
-			RegisteredAt:   current.Add(-time.Minute),
+			RegisteredAt:   clock.Now().Add(-time.Minute),
 		},
 	} {
 		if err := store.RegisterMember(context.Background(), registration); err != nil {
@@ -190,7 +190,7 @@ func TestMemoryStateStoreCampaignLeaderElectsAndRenewsLease(t *testing.T) {
 		t.Fatalf("unexpected initial leader lease: elected=%v lease=%+v", elected, lease)
 	}
 
-	current = current.Add(time.Second)
+	current := clock.Advance(time.Second)
 	lease, elected, err = store.CampaignLeader(context.Background(), "alpha-1")
 	if err != nil {
 		t.Fatalf("renew alpha-1: %v", err)
@@ -200,7 +200,7 @@ func TestMemoryStateStoreCampaignLeaderElectsAndRenewsLease(t *testing.T) {
 		t.Fatalf("unexpected renewed leader lease: elected=%v lease=%+v", elected, lease)
 	}
 
-	current = current.Add(3 * time.Second)
+	clock.Advance(3 * time.Second)
 	lease, elected, err = store.CampaignLeader(context.Background(), "alpha-2")
 	if err != nil {
 		t.Fatalf("campaign alpha-2: %v", err)
@@ -215,9 +215,9 @@ func TestMemoryStateStoreCampaignLeaderReturnsExistingLeaseWhileActive(t *testin
 	t.Parallel()
 
 	store := NewMemoryStateStore()
-	current := time.Date(2026, time.March, 24, 10, 0, 0, 0, time.UTC)
-	store.now = func() time.Time { return current }
-	store.leaseDuration = time.Minute
+	clock := newMutableTestClock(time.Date(2026, time.March, 24, 10, 0, 0, 0, time.UTC))
+	setTestNow(store, clock.Now)
+	setTestLeaseDuration(store, time.Minute)
 
 	for _, registration := range []MemberRegistration{
 		{
@@ -225,14 +225,14 @@ func TestMemoryStateStoreCampaignLeaderReturnsExistingLeaseWhileActive(t *testin
 			NodeRole:       cluster.NodeRoleData,
 			APIAddress:     "10.0.0.10:8080",
 			ControlAddress: "10.0.0.10:9090",
-			RegisteredAt:   current,
+			RegisteredAt:   clock.Now(),
 		},
 		{
 			NodeName:       "alpha-2",
 			NodeRole:       cluster.NodeRoleData,
 			APIAddress:     "10.0.0.11:8080",
 			ControlAddress: "10.0.0.11:9090",
-			RegisteredAt:   current,
+			RegisteredAt:   clock.Now(),
 		},
 	} {
 		if err := store.RegisterMember(context.Background(), registration); err != nil {
@@ -245,7 +245,7 @@ func TestMemoryStateStoreCampaignLeaderReturnsExistingLeaseWhileActive(t *testin
 		t.Fatalf("campaign alpha-1: elected=%v err=%v", elected, err)
 	}
 
-	current = current.Add(10 * time.Second)
+	clock.Advance(10 * time.Second)
 	secondLease, elected, err := store.CampaignLeader(context.Background(), "alpha-2")
 	if err != nil {
 		t.Fatalf("campaign alpha-2 while active: %v", err)
@@ -264,9 +264,9 @@ func TestMemoryStateStoreLeaderReturnsActiveAndExpiredLease(t *testing.T) {
 	t.Parallel()
 
 	store := NewMemoryStateStore()
-	current := time.Date(2026, time.March, 24, 11, 0, 0, 0, time.UTC)
-	store.now = func() time.Time { return current }
-	store.leaseDuration = 2 * time.Second
+	clock := newMutableTestClock(time.Date(2026, time.March, 24, 11, 0, 0, 0, time.UTC))
+	setTestNow(store, clock.Now)
+	setTestLeaseDuration(store, 2*time.Second)
 
 	if _, ok := store.Leader(); ok {
 		t.Fatal("expected missing leader before election")
@@ -277,7 +277,7 @@ func TestMemoryStateStoreLeaderReturnsActiveAndExpiredLease(t *testing.T) {
 		NodeRole:       cluster.NodeRoleData,
 		APIAddress:     "10.0.0.10:8080",
 		ControlAddress: "10.0.0.10:9090",
-		RegisteredAt:   current,
+		RegisteredAt:   clock.Now(),
 	}); err != nil {
 		t.Fatalf("register member: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestMemoryStateStoreLeaderReturnsActiveAndExpiredLease(t *testing.T) {
 		t.Fatalf("expected active leader lease, got ok=%v lease=%+v", ok, lease)
 	}
 
-	current = current.Add(3 * time.Second)
+	clock.Advance(3 * time.Second)
 	if _, ok := store.Leader(); ok {
 		t.Fatal("expected leader lease to expire")
 	}
@@ -867,7 +867,7 @@ func TestMemoryStateStoreStoresDesiredStateAndSourceOfTruth(t *testing.T) {
 
 	store := NewMemoryStateStore()
 	updatedAt := time.Date(2026, time.March, 25, 8, 0, 0, 0, time.UTC)
-	store.now = func() time.Time { return updatedAt }
+	setTestNow(store, func() time.Time { return updatedAt })
 
 	spec, err := store.StoreClusterSpec(context.Background(), cluster.ClusterSpec{
 		ClusterName: "alpha",
@@ -935,8 +935,8 @@ func TestMemoryStateStoreStoreClusterSpecAdvancesGenerationWhenDesiredStateChang
 	t.Parallel()
 
 	store := NewMemoryStateStore()
-	current := time.Date(2026, time.March, 25, 9, 0, 0, 0, time.UTC)
-	store.now = func() time.Time { return current }
+	clock := newMutableTestClock(time.Date(2026, time.March, 25, 9, 0, 0, 0, time.UTC))
+	setTestNow(store, clock.Now)
 
 	initial, err := store.StoreClusterSpec(context.Background(), cluster.ClusterSpec{
 		ClusterName: "alpha",
@@ -953,7 +953,7 @@ func TestMemoryStateStoreStoreClusterSpecAdvancesGenerationWhenDesiredStateChang
 		t.Fatalf("unexpected initial generation: got %d", initial.Generation)
 	}
 
-	current = current.Add(time.Minute)
+	clock.Advance(time.Minute)
 	same, err := store.StoreClusterSpec(context.Background(), cluster.ClusterSpec{
 		ClusterName: "alpha",
 		Members: []cluster.MemberSpec{
@@ -968,7 +968,7 @@ func TestMemoryStateStoreStoreClusterSpecAdvancesGenerationWhenDesiredStateChang
 		t.Fatalf("expected unchanged desired state to keep generation, got %d", same.Generation)
 	}
 
-	current = current.Add(time.Minute)
+	clock.Advance(time.Minute)
 	changed, err := store.StoreClusterSpec(context.Background(), cluster.ClusterSpec{
 		ClusterName: "alpha",
 		Members: []cluster.MemberSpec{

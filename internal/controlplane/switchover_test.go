@@ -30,7 +30,7 @@ func TestMemoryStateStoreValidateSwitchoverAcceptsReadyStandby(t *testing.T) {
 		readyPrimaryStatus("alpha-1", now, 18),
 		readyStandbyStatus("alpha-2", now.Add(time.Second), 18, 8),
 	})
-	store.now = func() time.Time { return now.Add(2 * time.Minute) }
+	setTestNow(store, func() time.Time { return now.Add(2 * time.Minute) })
 
 	store.mu.Lock()
 	store.clusterStatus.CurrentEpoch = 6
@@ -88,7 +88,7 @@ func TestMemoryStateStoreCreateSwitchoverIntentCreatesPlannedTransition(t *testi
 			readyPrimaryStatus("alpha-1", now, 18),
 			readyStandbyStatus("alpha-2", now.Add(time.Second), 18, 0),
 		})
-		store.now = func() time.Time { return now.Add(5 * time.Minute) }
+		setTestNow(store, func() time.Time { return now.Add(5 * time.Minute) })
 
 		intent, err := store.CreateSwitchoverIntent(context.Background(), SwitchoverRequest{
 			RequestedBy: "operator",
@@ -147,7 +147,7 @@ func TestMemoryStateStoreCreateSwitchoverIntentCreatesPlannedTransition(t *testi
 			readyPrimaryStatus("alpha-1", now, 18),
 			readyStandbyStatus("alpha-2", now.Add(time.Second), 18, 0),
 		})
-		store.now = func() time.Time { return now.Add(5 * time.Minute) }
+		setTestNow(store, func() time.Time { return now.Add(5 * time.Minute) })
 
 		intent, err := store.CreateSwitchoverIntent(context.Background(), SwitchoverRequest{
 			RequestedBy: "operator",
@@ -196,7 +196,7 @@ func TestMemoryStateStoreCancelSwitchoverCancelsPendingIntent(t *testing.T) {
 		readyPrimaryStatus("alpha-1", now, 18),
 		readyStandbyStatus("alpha-2", now.Add(time.Second), 18, 0),
 	})
-	store.now = func() time.Time { return now }
+	setTestNow(store, func() time.Time { return now })
 
 	intent, err := store.CreateSwitchoverIntent(context.Background(), SwitchoverRequest{
 		RequestedBy: "operator",
@@ -209,7 +209,7 @@ func TestMemoryStateStoreCancelSwitchoverCancelsPendingIntent(t *testing.T) {
 	}
 
 	cancelledAt := now.Add(5 * time.Minute)
-	store.now = func() time.Time { return cancelledAt }
+	setTestNow(store, func() time.Time { return cancelledAt })
 
 	cancelled, err := store.CancelSwitchover(context.Background())
 	if err != nil {
@@ -329,7 +329,7 @@ func TestMemoryStateStoreCancelSwitchoverRejectsMissingOrRunningIntent(t *testin
 				readyPrimaryStatus("alpha-1", now, 18),
 				readyStandbyStatus("alpha-2", now.Add(time.Second), 18, 0),
 			})
-			store.now = func() time.Time { return now }
+			setTestNow(store, func() time.Time { return now })
 
 			testCase.prepare(t, store)
 
@@ -491,7 +491,7 @@ func TestMemoryStateStoreSwitchoverTargetReadinessReportsReadinessReasons(t *tes
 		readyPrimaryStatus("alpha-1", now, 20),
 		notReadyStandbyStatus("alpha-2", now.Add(time.Second), 19, 128),
 	})
-	store.now = func() time.Time { return now.Add(2 * time.Minute) }
+	setTestNow(store, func() time.Time { return now.Add(2 * time.Minute) })
 
 	readiness, err := store.SwitchoverTargetReadiness("alpha-2")
 	if err != nil {
@@ -559,7 +559,7 @@ func TestMemoryStateStoreExecuteSwitchoverPromotesTargetAndRecordsHistory(t *tes
 		readyPrimaryStatus("alpha-1", now, 22),
 		readyStandbyStatus("alpha-2", now.Add(time.Second), 22, 0),
 	})
-	store.now = func() time.Time { return now.Add(10 * time.Second) }
+	setTestNow(store, func() time.Time { return now.Add(10 * time.Second) })
 
 	if _, err := store.CreateSwitchoverIntent(context.Background(), SwitchoverRequest{
 		RequestedBy: "operator",
@@ -749,7 +749,7 @@ func TestMemoryStateStoreExecuteSwitchoverRejectsInvalidExecutionPrerequisites(t
 			},
 			prepare: func(t *testing.T, store *MemoryStateStore) {
 				t.Helper()
-				store.now = func() time.Time { return now }
+				setTestNow(store, func() time.Time { return now })
 				if _, err := store.CreateSwitchoverIntent(context.Background(), SwitchoverRequest{
 					Candidate:   "alpha-2",
 					ScheduledAt: now.Add(10 * time.Minute),

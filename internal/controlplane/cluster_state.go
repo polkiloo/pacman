@@ -12,6 +12,10 @@ import (
 // ClusterStatus returns the aggregated cluster-wide observed state derived from
 // the replicated member observations.
 func (store *MemoryStateStore) ClusterStatus() (cluster.ClusterStatus, bool) {
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return cluster.ClusterStatus{}, false
+	}
+
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 
@@ -26,6 +30,10 @@ func (store *MemoryStateStore) ClusterStatus() (cluster.ClusterStatus, bool) {
 // the latest observed member information.
 func (store *MemoryStateStore) Reconcile(ctx context.Context) (ClusterSourceOfTruth, error) {
 	if err := ctx.Err(); err != nil {
+		return ClusterSourceOfTruth{}, err
+	}
+
+	if err := store.forceRefreshCache(ctx); err != nil {
 		return ClusterSourceOfTruth{}, err
 	}
 
@@ -46,6 +54,10 @@ func (store *MemoryStateStore) Reconcile(ctx context.Context) (ClusterSourceOfTr
 
 // MaintenanceStatus returns the currently effective maintenance mode.
 func (store *MemoryStateStore) MaintenanceStatus() cluster.MaintenanceModeStatus {
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return cluster.MaintenanceModeStatus{}
+	}
+
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 
@@ -60,6 +72,10 @@ func (store *MemoryStateStore) UpdateMaintenanceMode(ctx context.Context, reques
 		return cluster.MaintenanceModeStatus{}, err
 	}
 
+	if err := store.ensureCacheFresh(ctx); err != nil {
+		return cluster.MaintenanceModeStatus{}, err
+	}
+
 	if err := request.Validate(); err != nil {
 		return cluster.MaintenanceModeStatus{}, err
 	}
@@ -67,9 +83,8 @@ func (store *MemoryStateStore) UpdateMaintenanceMode(ctx context.Context, reques
 	now := store.now().UTC()
 
 	store.mu.Lock()
-	defer store.mu.Unlock()
-
 	if store.clusterSpec == nil {
+		store.mu.Unlock()
 		return cluster.MaintenanceModeStatus{}, ErrClusterSpecRequired
 	}
 
@@ -77,6 +92,7 @@ func (store *MemoryStateStore) UpdateMaintenanceMode(ctx context.Context, reques
 	spec.Maintenance.Enabled = request.Enabled
 	spec.Maintenance.DefaultReason = request.EffectiveReason(spec.Maintenance.DefaultReason)
 	spec = store.storeClusterSpecLocked(spec)
+	specRevision := store.clusterSpecRevision
 
 	status := cluster.MaintenanceModeStatus{
 		Enabled:     request.Enabled,
@@ -89,6 +105,7 @@ func (store *MemoryStateStore) UpdateMaintenanceMode(ctx context.Context, reques
 	}
 
 	store.maintenance = status
+	maintenanceRevision := store.maintenanceRevision
 
 	operation := cluster.Operation{
 		ID:          maintenanceOperationID(now),
@@ -108,13 +125,34 @@ func (store *MemoryStateStore) UpdateMaintenanceMode(ctx context.Context, reques
 
 	store.journalOperationLocked(operation, now)
 	store.refreshSourceOfTruthLocked(now)
+	store.mu.Unlock()
 
-	return store.maintenance, nil
+	if err := store.compareAndStoreJSON(ctx, store.keyspace.Config(), specRevision, spec); err != nil {
+		return cluster.MaintenanceModeStatus{}, err
+	}
+
+	if err := store.compareAndStoreJSON(ctx, store.keyspace.Maintenance(), maintenanceRevision, status); err != nil {
+		return cluster.MaintenanceModeStatus{}, err
+	}
+
+	if err := store.persistJournaledOperation(ctx, operation); err != nil {
+		return cluster.MaintenanceModeStatus{}, err
+	}
+
+	if err := store.refreshCache(ctx); err != nil {
+		return cluster.MaintenanceModeStatus{}, err
+	}
+
+	return status, nil
 }
 
 // ActiveOperation returns the currently active cluster-wide operation tracked
 // by the control plane.
 func (store *MemoryStateStore) ActiveOperation() (cluster.Operation, bool) {
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return cluster.Operation{}, false
+	}
+
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 
@@ -127,6 +165,10 @@ func (store *MemoryStateStore) ActiveOperation() (cluster.Operation, bool) {
 
 // History returns the finished operation history recorded by the control plane.
 func (store *MemoryStateStore) History() []cluster.HistoryEntry {
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return nil
+	}
+
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 
@@ -137,6 +179,10 @@ func (store *MemoryStateStore) History() []cluster.HistoryEntry {
 // the finished history, depending on the operation state.
 func (store *MemoryStateStore) JournalOperation(ctx context.Context, operation cluster.Operation) (cluster.Operation, error) {
 	if err := ctx.Err(); err != nil {
+		return cluster.Operation{}, err
+	}
+
+	if err := store.ensureCacheFresh(ctx); err != nil {
 		return cluster.Operation{}, err
 	}
 
@@ -160,10 +206,17 @@ func (store *MemoryStateStore) JournalOperation(ctx context.Context, operation c
 	}
 
 	store.mu.Lock()
-	defer store.mu.Unlock()
-
 	store.journalOperationLocked(cloned, now)
 	store.refreshSourceOfTruthLocked(now)
+	store.mu.Unlock()
+
+	if err := store.persistJournaledOperation(ctx, cloned); err != nil {
+		return cluster.Operation{}, err
+	}
+
+	if err := store.refreshCache(ctx); err != nil {
+		return cluster.Operation{}, err
+	}
 
 	return cloned.Clone(), nil
 }
@@ -498,6 +551,22 @@ func cloneHistoryEntries(entries []cluster.HistoryEntry) []cluster.HistoryEntry 
 	copy(cloned, entries)
 
 	return cloned
+}
+
+func (store *MemoryStateStore) persistJournaledOperation(ctx context.Context, operation cluster.Operation) error {
+	if operation.State.IsTerminal() {
+		store.mu.RLock()
+		entry := store.historyEntryForOperationLocked(operation, operation.CompletedAt)
+		store.mu.RUnlock()
+
+		if err := store.setJSON(ctx, store.keyspace.History(operation.ID), entry); err != nil {
+			return err
+		}
+
+		return store.deleteKey(ctx, store.keyspace.Operation())
+	}
+
+	return store.setJSON(ctx, store.keyspace.Operation(), operation)
 }
 
 func maintenanceOperationID(now time.Time) string {

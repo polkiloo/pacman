@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/polkiloo/pacman/internal/cluster"
+	"github.com/polkiloo/pacman/internal/dcs"
 )
 
 func TestConfigValidate(t *testing.T) {
@@ -50,6 +51,87 @@ func TestConfigValidate(t *testing.T) {
 					ExpectedMembers: []string{"alpha-1", "alpha-2"},
 				},
 			},
+		},
+		{
+			name: "valid config with dcs",
+			config: Config{
+				APIVersion: APIVersionV1Alpha1,
+				Kind:       KindNodeConfig,
+				Node: NodeConfig{
+					Name:           "alpha-1",
+					Role:           cluster.NodeRoleData,
+					APIAddress:     "0.0.0.0:8080",
+					ControlAddress: "0.0.0.0:9090",
+				},
+				DCS: &dcs.Config{
+					Backend:      dcs.BackendRaft,
+					ClusterName:  "alpha",
+					TTL:          dcs.DefaultTTL,
+					RetryTimeout: dcs.DefaultRetryTimeout,
+					Raft: &dcs.RaftConfig{
+						DataDir:     "/var/lib/pacman/raft",
+						BindAddress: "0.0.0.0:7100",
+						Peers:       []string{"0.0.0.0:7100"},
+					},
+				},
+				Bootstrap: &ClusterBootstrapConfig{
+					ClusterName:     "alpha",
+					InitialPrimary:  "alpha-1",
+					SeedAddresses:   []string{"0.0.0.0:9090"},
+					ExpectedMembers: []string{"alpha-1"},
+				},
+			},
+		},
+		{
+			name: "dcs validation is delegated",
+			config: Config{
+				APIVersion: APIVersionV1Alpha1,
+				Kind:       KindNodeConfig,
+				Node: NodeConfig{
+					Name:           "alpha-1",
+					Role:           cluster.NodeRoleData,
+					APIAddress:     "0.0.0.0:8080",
+					ControlAddress: "0.0.0.0:9090",
+				},
+				DCS: &dcs.Config{
+					Backend:      dcs.BackendEtcd,
+					ClusterName:  "alpha",
+					TTL:          dcs.DefaultTTL,
+					RetryTimeout: dcs.DefaultRetryTimeout,
+				},
+			},
+			wantErr: dcs.ErrEtcdConfigRequired,
+		},
+		{
+			name: "dcs cluster name must match bootstrap",
+			config: Config{
+				APIVersion: APIVersionV1Alpha1,
+				Kind:       KindNodeConfig,
+				Node: NodeConfig{
+					Name:           "alpha-1",
+					Role:           cluster.NodeRoleData,
+					APIAddress:     "0.0.0.0:8080",
+					ControlAddress: "0.0.0.0:9090",
+				},
+				DCS: &dcs.Config{
+					Backend:      dcs.BackendRaft,
+					ClusterName:  "beta",
+					TTL:          dcs.DefaultTTL,
+					RetryTimeout: dcs.DefaultRetryTimeout,
+					Raft: &dcs.RaftConfig{
+						DataDir:     "/var/lib/pacman/raft",
+						BindAddress: "0.0.0.0:7100",
+						Peers:       []string{"0.0.0.0:7100"},
+					},
+				},
+				Bootstrap: &ClusterBootstrapConfig{
+					ClusterName:     "alpha",
+					InitialPrimary:  "alpha-1",
+					SeedAddresses:   []string{"0.0.0.0:9090"},
+					ExpectedMembers: []string{"alpha-1"},
+				},
+			},
+			wantErr: ErrDCSClusterNameMismatch,
 		},
 		{
 			name: "unsupported api version",

@@ -29,8 +29,20 @@ func (store *MemoryStateStore) ExecuteRejoinRewind(ctx context.Context, request 
 		return RejoinExecution{}, err
 	}
 
+	if err := store.ensureCacheFresh(ctx); err != nil {
+		return RejoinExecution{}, err
+	}
+
 	prepared, err := store.prepareRejoinRewindExecution(request, rewinder)
 	if err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.persistActiveOperation(ctx, prepared.operation); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.refreshCache(ctx); err != nil {
 		return RejoinExecution{}, err
 	}
 
@@ -39,7 +51,7 @@ func (store *MemoryStateStore) ExecuteRejoinRewind(ctx context.Context, request 
 		return RejoinExecution{}, err
 	}
 
-	return store.publishRejoinRewind(prepared), nil
+	return store.publishRejoinRewind(prepared)
 }
 
 func (store *MemoryStateStore) prepareRejoinRewindExecution(request RejoinRequest, rewinder RewindExecutor) (preparedRejoinExecution, error) {
@@ -134,15 +146,27 @@ func buildRewindRequest(prepared preparedRejoinExecution) RewindRequest {
 	}
 }
 
-func (store *MemoryStateStore) publishRejoinRewind(prepared preparedRejoinExecution) RejoinExecution {
+func (store *MemoryStateStore) publishRejoinRewind(prepared preparedRejoinExecution) (RejoinExecution, error) {
 	store.mu.Lock()
-	defer store.mu.Unlock()
-
 	updatedOperation := prepared.operation.Clone()
 	updatedOperation.Message = rejoinRewindCompletedMessage(prepared.decision.Member.Name, prepared.decision.CurrentPrimary.Name)
 	store.activeOperation = &updatedOperation
 	store.nodeStatuses[prepared.decision.Member.Name] = rewoundFormerPrimaryStatus(prepared.memberNode, prepared.executedAt)
 	store.refreshSourceOfTruthLocked(prepared.executedAt)
+	member := store.nodeStatuses[prepared.decision.Member.Name].Clone()
+	store.mu.Unlock()
+
+	if err := store.persistActiveOperation(context.Background(), updatedOperation); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.persistNodeStatus(context.Background(), member); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.refreshCache(context.Background()); err != nil {
+		return RejoinExecution{}, err
+	}
 
 	return RejoinExecution{
 		Operation:    updatedOperation.Clone(),
@@ -151,13 +175,11 @@ func (store *MemoryStateStore) publishRejoinRewind(prepared preparedRejoinExecut
 		State:        cluster.RejoinStateRewinding,
 		Rewound:      true,
 		ExecutedAt:   prepared.executedAt,
-	}.Clone()
+	}.Clone(), nil
 }
 
 func (store *MemoryStateStore) failRejoinExecution(prepared preparedRejoinExecution, message string) {
 	store.mu.Lock()
-	defer store.mu.Unlock()
-
 	failed := prepared.operation.Clone()
 	failed.State = cluster.OperationStateFailed
 	failed.Result = cluster.OperationResultFailed
@@ -165,6 +187,15 @@ func (store *MemoryStateStore) failRejoinExecution(prepared preparedRejoinExecut
 	failed.Message = message
 	store.journalOperationLocked(failed, prepared.executedAt)
 	store.refreshSourceOfTruthLocked(prepared.executedAt)
+	store.mu.Unlock()
+
+	if err := store.persistJournaledOperation(context.Background(), failed); err != nil {
+		store.logger.Error("failed to persist failed rejoin operation", "operation_id", failed.ID, "error", err)
+	}
+
+	if err := store.refreshCache(context.Background()); err != nil {
+		store.logger.Error("failed to refresh cache after rejoin failure", "operation_id", failed.ID, "error", err)
+	}
 }
 
 func normalizeRejoinRequest(request RejoinRequest) RejoinRequest {

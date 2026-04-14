@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/polkiloo/pacman/internal/cluster"
+	"github.com/polkiloo/pacman/internal/dcs"
 )
 
 func TestConfigWithDefaults(t *testing.T) {
@@ -139,5 +140,60 @@ func TestConfigWithDefaultsAppliesSectionDefaults(t *testing.T) {
 
 	if original.Bootstrap == nil || original.Bootstrap.InitialPrimary != "" || len(original.Bootstrap.SeedAddresses) != 0 || len(original.Bootstrap.ExpectedMembers) != 0 {
 		t.Fatalf("expected bootstrap defaults to avoid mutating original, got %+v", original.Bootstrap)
+	}
+}
+
+func TestConfigWithDefaultsAppliesDCSDefaults(t *testing.T) {
+	t.Parallel()
+
+	original := Config{
+		Node: NodeConfig{
+			Name: "alpha-1",
+		},
+		DCS: &dcs.Config{
+			Backend: dcs.BackendRaft,
+			Raft: &dcs.RaftConfig{
+				DataDir:     "/var/lib/pacman/raft",
+				BindAddress: "10.0.0.10:7100",
+				Peers:       []string{"10.0.0.10:7100"},
+			},
+		},
+		Bootstrap: &ClusterBootstrapConfig{
+			ClusterName: "alpha",
+		},
+	}
+
+	got := original.WithDefaults()
+
+	if got.DCS == nil {
+		t.Fatal("expected dcs defaults to be applied")
+	}
+
+	if got.DCS.ClusterName != "alpha" {
+		t.Fatalf("unexpected dcs cluster name default: got %q, want %q", got.DCS.ClusterName, "alpha")
+	}
+
+	if got.DCS.TTL != dcs.DefaultTTL {
+		t.Fatalf("unexpected dcs ttl default: got %s, want %s", got.DCS.TTL, dcs.DefaultTTL)
+	}
+
+	if got.DCS.RetryTimeout != dcs.DefaultRetryTimeout {
+		t.Fatalf("unexpected dcs retryTimeout default: got %s, want %s", got.DCS.RetryTimeout, dcs.DefaultRetryTimeout)
+	}
+
+	if got.DCS.Raft == nil {
+		t.Fatal("expected raft defaults to be applied")
+	}
+
+	if got.DCS.Raft.SnapshotInterval != dcs.DefaultRaftSnapshotInterval {
+		t.Fatalf("unexpected raft snapshot interval default: got %s, want %s", got.DCS.Raft.SnapshotInterval, dcs.DefaultRaftSnapshotInterval)
+	}
+
+	if original.DCS == nil {
+		t.Fatal("expected original dcs config to remain available")
+	}
+
+	if original.DCS.ClusterName != "" || original.DCS.TTL != 0 || original.DCS.RetryTimeout != 0 {
+		t.Fatalf("expected dcs defaults to avoid mutating original, got %+v", original.DCS)
 	}
 }

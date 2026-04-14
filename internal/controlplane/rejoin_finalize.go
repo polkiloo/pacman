@@ -17,8 +17,20 @@ func (store *MemoryStateStore) VerifyRejoinReplication(ctx context.Context) (Rej
 		return RejoinExecution{}, err
 	}
 
+	if err := store.ensureCacheFresh(ctx); err != nil {
+		return RejoinExecution{}, err
+	}
+
 	prepared, err := store.prepareRejoinReplicationVerification()
 	if err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.persistActiveOperation(ctx, prepared.operation); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.refreshCache(ctx); err != nil {
 		return RejoinExecution{}, err
 	}
 
@@ -29,6 +41,10 @@ func (store *MemoryStateStore) VerifyRejoinReplication(ctx context.Context) (Rej
 // records the completed rejoin operation in history.
 func (store *MemoryStateStore) CompleteRejoin(ctx context.Context) (RejoinExecution, error) {
 	if err := ctx.Err(); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.ensureCacheFresh(ctx); err != nil {
 		return RejoinExecution{}, err
 	}
 
@@ -165,10 +181,9 @@ func assessRejoinReplicationVerificationReasons(inputs rejoinInputs) []string {
 
 func (store *MemoryStateStore) publishRejoinReplicationVerification(prepared preparedRejoinExecution) (RejoinExecution, error) {
 	store.mu.Lock()
-	defer store.mu.Unlock()
-
 	running, err := store.rejoinOperationForPublicationLocked(prepared.operation)
 	if err != nil {
+		store.mu.Unlock()
 		return RejoinExecution{}, err
 	}
 
@@ -176,6 +191,15 @@ func (store *MemoryStateStore) publishRejoinReplicationVerification(prepared pre
 	updatedOperation.Message = rejoinVerificationCompletedMessage(prepared.decision.Member.Name, prepared.decision.CurrentPrimary.Name)
 	store.activeOperation = &updatedOperation
 	store.refreshSourceOfTruthLocked(prepared.executedAt)
+	store.mu.Unlock()
+
+	if err := store.persistActiveOperation(context.Background(), updatedOperation); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.refreshCache(context.Background()); err != nil {
+		return RejoinExecution{}, err
+	}
 
 	return RejoinExecution{
 		Operation:           updatedOperation.Clone(),
@@ -189,10 +213,9 @@ func (store *MemoryStateStore) publishRejoinReplicationVerification(prepared pre
 
 func (store *MemoryStateStore) publishRejoinCompletion(prepared preparedRejoinExecution) (RejoinExecution, error) {
 	store.mu.Lock()
-	defer store.mu.Unlock()
-
 	running, err := store.rejoinOperationForPublicationLocked(prepared.operation)
 	if err != nil {
+		store.mu.Unlock()
 		return RejoinExecution{}, err
 	}
 
@@ -200,6 +223,20 @@ func (store *MemoryStateStore) publishRejoinCompletion(prepared preparedRejoinEx
 	completedOperation := completeRejoinExecution(running, prepared.executedAt, prepared.decision.Member.Name, prepared.decision.CurrentPrimary.Name)
 	store.journalOperationLocked(completedOperation, prepared.executedAt)
 	store.refreshSourceOfTruthLocked(prepared.executedAt)
+	member := store.nodeStatuses[prepared.decision.Member.Name].Clone()
+	store.mu.Unlock()
+
+	if err := store.persistNodeStatus(context.Background(), member); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.persistJournaledOperation(context.Background(), completedOperation); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.refreshCache(context.Background()); err != nil {
+		return RejoinExecution{}, err
+	}
 
 	return RejoinExecution{
 		Operation:    completedOperation.Clone(),
