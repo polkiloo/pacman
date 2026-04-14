@@ -671,6 +671,9 @@ func seededFailoverStore(t *testing.T, spec cluster.ClusterSpec, statuses []agen
 	t.Helper()
 
 	store := NewMemoryStateStore()
+	// Use a long lease so node-status DCS entries don't expire when tests advance
+	// store.now past the 5-second production default.
+	setTestLeaseDuration(store, time.Hour)
 	if _, err := store.StoreClusterSpec(context.Background(), spec); err != nil {
 		t.Fatalf("store cluster spec: %v", err)
 	}
