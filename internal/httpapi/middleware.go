@@ -113,22 +113,48 @@ func (srv *Server) accessLogMiddleware() fiber.Handler {
 			level = slog.LevelWarn
 		}
 
-		requestID, _ := c.Locals(requestIDLocalKey).(string)
-		srv.logger.LogAttrs(
-			context.Background(),
-			level,
-			"handled http request",
+		attributes := []slog.Attr{
 			slog.String("component", "httpapi"),
-			slog.String("request_id", requestID),
+			slog.String("node", srv.nodeName),
+			slog.String("request_id", RequestID(c)),
 			slog.String("method", c.Method()),
 			slog.String("path", c.Path()),
+			slog.String("route", currentRoutePattern(c)),
 			slog.String("remote_addr", c.IP()),
+			slog.String("user_agent", c.Get(fiber.HeaderUserAgent)),
 			slog.Int("status", status),
 			slog.Duration("duration", duration),
-		)
+			slog.Int("response_bytes", len(c.Response().Body())),
+		}
+		if principal, ok := CurrentPrincipal(c); ok {
+			attributes = append(
+				attributes,
+				slog.String("principal_subject", principal.Subject),
+				slog.String("principal_mechanism", principal.Mechanism),
+			)
+		}
+		if err != nil {
+			attributes = append(attributes, slog.String("error", err.Error()))
+		}
+
+		srv.logger.LogAttrs(context.Background(), level, "handled http request", attributes...)
 
 		return err
 	}
+}
+
+func currentRoutePattern(c *fiber.Ctx) string {
+	route := c.Route()
+	if route == nil {
+		return c.Path()
+	}
+
+	trimmed := strings.TrimSpace(route.Path)
+	if trimmed == "" {
+		return c.Path()
+	}
+
+	return trimmed
 }
 
 func (srv *Server) apiCommonMiddleware() fiber.Handler {

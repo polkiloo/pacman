@@ -6,15 +6,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 type apiClient struct {
 	baseURL    *url.URL
 	apiToken   string
 	httpClient *http.Client
+	logger     *slog.Logger
 }
 
 func newAPIClient(rawBaseURL, apiToken string, httpClient *http.Client) (*apiClient, error) {
@@ -143,24 +146,32 @@ func (client *apiClient) getJSON(ctx context.Context, path string, target any) e
 }
 
 func (client *apiClient) doJSON(ctx context.Context, method, path string, body any, target any) error {
+	startedAt := time.Now().UTC()
+
 	var requestBody io.Reader
 	if body != nil {
 		payload, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("encode %s %s request: %w", method, path, err)
+			err = fmt.Errorf("encode %s %s request: %w", method, path, err)
+			client.logRequest(ctx, slog.LevelError, "pacmanctl api request failed", method, path, startedAt, 0, err)
+			return err
 		}
 		requestBody = bytes.NewReader(payload)
 	}
 
 	relativeURL, err := url.Parse(path)
 	if err != nil {
-		return fmt.Errorf("parse request path %q: %w", path, err)
+		err = fmt.Errorf("parse request path %q: %w", path, err)
+		client.logRequest(ctx, slog.LevelError, "pacmanctl api request failed", method, path, startedAt, 0, err)
+		return err
 	}
 
 	requestURL := client.baseURL.ResolveReference(relativeURL)
 	request, err := http.NewRequestWithContext(ctx, method, requestURL.String(), requestBody)
 	if err != nil {
-		return fmt.Errorf("build request %s %s: %w", method, path, err)
+		err = fmt.Errorf("build request %s %s: %w", method, path, err)
+		client.logRequest(ctx, slog.LevelError, "pacmanctl api request failed", method, path, startedAt, 0, err)
+		return err
 	}
 	if client.apiToken != "" {
 		request.Header.Set("Authorization", "Bearer "+client.apiToken)
@@ -171,23 +182,55 @@ func (client *apiClient) doJSON(ctx context.Context, method, path string, body a
 
 	response, err := client.httpClient.Do(request)
 	if err != nil {
-		return fmt.Errorf("perform %s %s: %w", method, path, err)
+		err = fmt.Errorf("perform %s %s: %w", method, path, err)
+		client.logRequest(ctx, slog.LevelError, "pacmanctl api request failed", method, path, startedAt, 0, err)
+		return err
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return decodeAPIError(method, path, response)
+		err = decodeAPIError(method, path, response)
+		level := slog.LevelWarn
+		if response.StatusCode >= http.StatusInternalServerError {
+			level = slog.LevelError
+		}
+		client.logRequest(ctx, level, "pacmanctl api request failed", method, path, startedAt, response.StatusCode, err)
+		return err
 	}
 
 	if target == nil {
+		client.logRequest(ctx, slog.LevelInfo, "completed pacmanctl api request", method, path, startedAt, response.StatusCode, nil)
 		return nil
 	}
 
 	if err := json.NewDecoder(response.Body).Decode(target); err != nil {
-		return fmt.Errorf("decode %s %s response: %w", method, path, err)
+		err = fmt.Errorf("decode %s %s response: %w", method, path, err)
+		client.logRequest(ctx, slog.LevelError, "pacmanctl api request failed", method, path, startedAt, response.StatusCode, err)
+		return err
 	}
 
+	client.logRequest(ctx, slog.LevelInfo, "completed pacmanctl api request", method, path, startedAt, response.StatusCode, nil)
 	return nil
+}
+
+func (client *apiClient) logRequest(ctx context.Context, level slog.Level, message, method, path string, startedAt time.Time, status int, err error) {
+	if client.logger == nil {
+		return
+	}
+
+	attributes := []slog.Attr{
+		slog.String("method", method),
+		slog.String("path", path),
+		slog.Duration("duration", time.Since(startedAt)),
+	}
+	if status > 0 {
+		attributes = append(attributes, slog.Int("status", status))
+	}
+	if err != nil {
+		attributes = append(attributes, slog.String("error", err.Error()))
+	}
+
+	client.logger.LogAttrs(ctx, level, message, attributes...)
 }
 
 func decodeAPIError(method, path string, response *http.Response) error {

@@ -162,10 +162,106 @@ func TestAccessLogMiddlewareLogsRequest(t *testing.T) {
 
 	for _, want := range []string{
 		`"component":"httpapi"`,
+		`"node":"alpha-1"`,
 		`"request_id":"req-456"`,
 		`"method":"GET"`,
 		`"path":"/health"`,
+		`"route":"/health"`,
 		`"status":503`,
+		`"response_bytes":`,
+	} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("expected access log to contain %q, got %q", want, logs)
+		}
+	}
+}
+
+func TestAccessLogMiddlewareLogsPrincipalCorrelationFields(t *testing.T) {
+	t.Parallel()
+
+	var buffer bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buffer, nil))
+
+	now := time.Now().UTC()
+	response := performRequestWithHeaders(t, New("alpha-1", testNodeStatusStore{
+		clusterStatus: cluster.ClusterStatus{
+			ClusterName:    "alpha",
+			Phase:          cluster.ClusterPhaseHealthy,
+			CurrentPrimary: "alpha-1",
+			CurrentEpoch:   3,
+			ObservedAt:     now,
+			Members:        []cluster.MemberStatus{},
+		},
+		hasClusterStatus: true,
+	}, logger, Config{
+		Authorizer: &testAuthorizer{
+			principal: &Principal{
+				Subject:   "ops@example",
+				Mechanism: "bearer",
+			},
+		},
+	}), http.MethodGet, "/api/v1/cluster", map[string]string{
+		headerRequestID:           "req-789",
+		fiber.HeaderUserAgent:     "pacmanctl/test",
+		fiber.HeaderAuthorization: "Bearer token",
+	})
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	logs := buffer.String()
+	for _, want := range []string{
+		`"request_id":"req-789"`,
+		`"path":"/api/v1/cluster"`,
+		`"route":"/api/v1/cluster"`,
+		`"principal_subject":"ops@example"`,
+		`"principal_mechanism":"bearer"`,
+		`"user_agent":"pacmanctl/test"`,
+		`"status":200`,
+		`"response_bytes":`,
+	} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("expected access log to contain %q, got %q", want, logs)
+		}
+	}
+}
+
+func TestAccessLogMiddlewareLogsUnhandledRouteErrors(t *testing.T) {
+	t.Parallel()
+
+	var buffer bytes.Buffer
+	srv := &Server{
+		nodeName: "alpha-1",
+		logger:   slog.New(slog.NewJSONHandler(&buffer, nil)),
+	}
+
+	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app.Use(srv.requestIDMiddleware())
+	app.Use(srv.accessLogMiddleware())
+	app.Get("/boom", func(c *fiber.Ctx) error {
+		return errors.New("boom")
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/boom", nil)
+	response, err := app.Test(request, int(time.Second.Milliseconds()))
+	if err != nil {
+		t.Fatalf("perform GET %q: %v", "/boom", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusInternalServerError)
+	}
+
+	logs := buffer.String()
+	for _, want := range []string{
+		`"msg":"handled http request"`,
+		`"path":"/boom"`,
+		`"route":"/boom"`,
+		`"status":500`,
+		`"error":"boom"`,
 	} {
 		if !strings.Contains(logs, want) {
 			t.Fatalf("expected access log to contain %q, got %q", want, logs)
