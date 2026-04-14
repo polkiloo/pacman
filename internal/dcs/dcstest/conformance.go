@@ -3,6 +3,7 @@ package dcstest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -22,58 +23,16 @@ type Config struct {
 func Run(t *testing.T, config Config) {
 	t.Helper()
 
-	if config.New == nil {
-		t.Fatal("dcstest config requires a backend constructor")
-	}
-
-	if config.TTL <= 0 {
-		t.Fatal("dcstest config requires a positive ttl")
+	if err := validateConfig(config); err != nil {
+		t.Fatal(err)
 	}
 
 	t.Run("GetSetDelete", func(t *testing.T) {
 		t.Parallel()
 
 		backend := newBackend(t, config)
-		ctx := context.Background()
-		key := "/pacman/alpha/config"
-
-		if err := backend.Set(ctx, key, []byte("value")); err != nil {
-			t.Fatalf("set key: %v", err)
-		}
-
-		got, err := backend.Get(ctx, key)
-		if err != nil {
-			t.Fatalf("get key: %v", err)
-		}
-
-		if got.Key != key {
-			t.Fatalf("unexpected key: got %q, want %q", got.Key, key)
-		}
-
-		if string(got.Value) != "value" {
-			t.Fatalf("unexpected value: got %q, want %q", string(got.Value), "value")
-		}
-
-		if got.Revision != 1 {
-			t.Fatalf("unexpected revision: got %d, want %d", got.Revision, 1)
-		}
-
-		if got.TTL != 0 {
-			t.Fatalf("unexpected ttl: got %s, want %s", got.TTL, time.Duration(0))
-		}
-
-		if err := backend.Delete(ctx, key); err != nil {
-			t.Fatalf("delete key: %v", err)
-		}
-
-		_, err = backend.Get(ctx, key)
-		if !errors.Is(err, dcs.ErrKeyNotFound) {
-			t.Fatalf("unexpected get-after-delete error: got %v, want %v", err, dcs.ErrKeyNotFound)
-		}
-
-		err = backend.Delete(ctx, key)
-		if !errors.Is(err, dcs.ErrKeyNotFound) {
-			t.Fatalf("unexpected delete-missing error: got %v, want %v", err, dcs.ErrKeyNotFound)
+		if err := exerciseGetSetDelete(context.Background(), backend, "/pacman/alpha/config"); err != nil {
+			t.Fatal(err)
 		}
 	})
 
@@ -81,38 +40,8 @@ func Run(t *testing.T, config Config) {
 		t.Parallel()
 
 		backend := newBackend(t, config)
-		ctx := context.Background()
-		key := "/pacman/alpha/config"
-
-		if err := backend.Set(ctx, key, []byte("v1")); err != nil {
-			t.Fatalf("seed key: %v", err)
-		}
-
-		current, err := backend.Get(ctx, key)
-		if err != nil {
-			t.Fatalf("get seeded key: %v", err)
-		}
-
-		if err := backend.CompareAndSet(ctx, key, []byte("v2"), current.Revision); err != nil {
-			t.Fatalf("compare-and-set success: %v", err)
-		}
-
-		updated, err := backend.Get(ctx, key)
-		if err != nil {
-			t.Fatalf("get updated key: %v", err)
-		}
-
-		if string(updated.Value) != "v2" {
-			t.Fatalf("unexpected updated value: got %q, want %q", string(updated.Value), "v2")
-		}
-
-		if updated.Revision != current.Revision+1 {
-			t.Fatalf("unexpected updated revision: got %d, want %d", updated.Revision, current.Revision+1)
-		}
-
-		err = backend.CompareAndSet(ctx, key, []byte("stale"), current.Revision)
-		if !errors.Is(err, dcs.ErrRevisionMismatch) {
-			t.Fatalf("unexpected stale revision error: got %v, want %v", err, dcs.ErrRevisionMismatch)
+		if err := exerciseCompareAndSet(context.Background(), backend, "/pacman/alpha/config"); err != nil {
+			t.Fatal(err)
 		}
 	})
 
@@ -120,46 +49,8 @@ func Run(t *testing.T, config Config) {
 		t.Parallel()
 
 		backend := newBackend(t, config)
-		ctx := context.Background()
-
-		if err := backend.Set(ctx, "/pacman/alpha/members/alpha-2", []byte("second")); err != nil {
-			t.Fatalf("seed alpha-2: %v", err)
-		}
-
-		if err := backend.Set(ctx, "/pacman/alpha/status/alpha-1", []byte("status")); err != nil {
-			t.Fatalf("seed status key: %v", err)
-		}
-
-		if err := backend.Set(ctx, "/pacman/alpha/members/alpha-1", []byte("first")); err != nil {
-			t.Fatalf("seed alpha-1: %v", err)
-		}
-
-		listed, err := backend.List(ctx, "/pacman/alpha/members/")
-		if err != nil {
-			t.Fatalf("list members: %v", err)
-		}
-
-		if len(listed) != 2 {
-			t.Fatalf("unexpected listed entry count: got %d, want %d", len(listed), 2)
-		}
-
-		gotKeys := []string{listed[0].Key, listed[1].Key}
-		wantKeys := []string{
-			"/pacman/alpha/members/alpha-1",
-			"/pacman/alpha/members/alpha-2",
-		}
-		if !slices.Equal(gotKeys, wantKeys) {
-			t.Fatalf("unexpected listed keys: got %v, want %v", gotKeys, wantKeys)
-		}
-
-		listed[0].Value[0] = 'X'
-		stored, err := backend.Get(ctx, "/pacman/alpha/members/alpha-1")
-		if err != nil {
-			t.Fatalf("get listed key: %v", err)
-		}
-
-		if string(stored.Value) != "first" {
-			t.Fatalf("expected list results to be detached copies, got %q", string(stored.Value))
+		if err := exerciseListPrefix(context.Background(), backend); err != nil {
+			t.Fatal(err)
 		}
 	})
 
@@ -167,86 +58,8 @@ func Run(t *testing.T, config Config) {
 		t.Parallel()
 
 		backend := newBackend(t, config)
-		ctx := context.Background()
-
-		_, ok, err := backend.Leader(ctx)
-		if err != nil {
-			t.Fatalf("initial leader lookup: %v", err)
-		}
-
-		if ok {
-			t.Fatal("expected no leader before campaigning")
-		}
-
-		lease, held, err := backend.Campaign(ctx, "alpha-1")
-		if err != nil {
-			t.Fatalf("campaign leader: %v", err)
-		}
-
-		if !held {
-			t.Fatal("expected first candidate to hold leader lease")
-		}
-
-		if lease.Leader != "alpha-1" {
-			t.Fatalf("unexpected leader after campaign: got %q, want %q", lease.Leader, "alpha-1")
-		}
-
-		if lease.Term != 1 {
-			t.Fatalf("unexpected initial term: got %d, want %d", lease.Term, 1)
-		}
-
-		current, ok, err := backend.Leader(ctx)
-		if err != nil {
-			t.Fatalf("leader after campaign: %v", err)
-		}
-
-		if !ok || current.Leader != "alpha-1" {
-			t.Fatalf("unexpected leader state after campaign: got %+v, ok=%t", current, ok)
-		}
-
-		losingLease, held, err := backend.Campaign(ctx, "beta-1")
-		if err != nil {
-			t.Fatalf("campaign competing leader: %v", err)
-		}
-
-		if held {
-			t.Fatal("expected competing candidate to lose active lease")
-		}
-
-		if losingLease.Leader != "alpha-1" {
-			t.Fatalf("unexpected competing lease view: got %q, want %q", losingLease.Leader, "alpha-1")
-		}
-
-		time.Sleep(expiryWait(config.TTL))
-
-		lease, held, err = backend.Campaign(ctx, "beta-1")
-		if err != nil {
-			t.Fatalf("campaign after lease expiry: %v", err)
-		}
-
-		if !held {
-			t.Fatal("expected candidate to win after lease expiry")
-		}
-
-		if lease.Leader != "beta-1" {
-			t.Fatalf("unexpected leader after expiry: got %q, want %q", lease.Leader, "beta-1")
-		}
-
-		if lease.Term != 2 {
-			t.Fatalf("unexpected incremented term: got %d, want %d", lease.Term, 2)
-		}
-
-		if err := backend.Resign(ctx); err != nil {
-			t.Fatalf("resign leader: %v", err)
-		}
-
-		_, ok, err = backend.Leader(ctx)
-		if err != nil {
-			t.Fatalf("leader after resign: %v", err)
-		}
-
-		if ok {
-			t.Fatal("expected no leader after resign")
+		if err := exerciseCampaignLeaderResign(context.Background(), backend, config.TTL); err != nil {
+			t.Fatal(err)
 		}
 	})
 
@@ -254,46 +67,8 @@ func Run(t *testing.T, config Config) {
 		t.Parallel()
 
 		backend := newBackend(t, config)
-		ctx := context.Background()
-
-		alive, err := backend.Alive(ctx, "alpha-1")
-		if err != nil {
-			t.Fatalf("alive before touch: %v", err)
-		}
-
-		if alive {
-			t.Fatal("expected untouched member to be reported dead")
-		}
-
-		if err := backend.Touch(ctx, "alpha-1"); err != nil {
-			t.Fatalf("touch member: %v", err)
-		}
-
-		alive, err = backend.Alive(ctx, "alpha-1")
-		if err != nil {
-			t.Fatalf("alive after touch: %v", err)
-		}
-
-		if !alive {
-			t.Fatal("expected touched member to be reported alive")
-		}
-
-		deadline := time.Now().Add(4 * config.TTL)
-		for {
-			alive, err = backend.Alive(ctx, "alpha-1")
-			if err != nil {
-				t.Fatalf("alive during expiry wait: %v", err)
-			}
-
-			if !alive {
-				break
-			}
-
-			if time.Now().After(deadline) {
-				t.Fatal("expected touched member session to expire")
-			}
-
-			time.Sleep(config.TTL / 4)
+		if err := exerciseTouchAliveTTL(context.Background(), backend, config.TTL); err != nil {
+			t.Fatal(err)
 		}
 	})
 
@@ -301,50 +76,346 @@ func Run(t *testing.T, config Config) {
 		t.Parallel()
 
 		backend := newBackend(t, config)
-		ctx := context.Background()
-		watchCtx, cancel := context.WithCancel(ctx)
-		defer cancel()
-
-		events, err := backend.Watch(watchCtx, "/pacman/alpha/status/")
-		if err != nil {
-			t.Fatalf("watch status prefix: %v", err)
-		}
-
-		if err := backend.Set(ctx, "/pacman/alpha/status/alpha-1", []byte("up")); err != nil {
-			t.Fatalf("set watched key: %v", err)
-		}
-
-		putEvent := waitForEvent(t, events, 4*config.TTL)
-		if putEvent.Type != dcs.EventPut || putEvent.Key != "/pacman/alpha/status/alpha-1" || string(putEvent.Value) != "up" {
-			t.Fatalf("unexpected put event: %+v", putEvent)
-		}
-
-		if err := backend.Delete(ctx, "/pacman/alpha/status/alpha-1"); err != nil {
-			t.Fatalf("delete watched key: %v", err)
-		}
-
-		deleteEvent := waitForEvent(t, events, 4*config.TTL)
-		if deleteEvent.Type != dcs.EventDelete || deleteEvent.Key != "/pacman/alpha/status/alpha-1" {
-			t.Fatalf("unexpected delete event: %+v", deleteEvent)
-		}
-
-		if err := backend.Set(ctx, "/pacman/alpha/status/alpha-2", []byte("ttl"), dcs.WithTTL(config.TTL)); err != nil {
-			t.Fatalf("set ttl watched key: %v", err)
-		}
-
-		ttlPutEvent := waitForEvent(t, events, 4*config.TTL)
-		if ttlPutEvent.Type != dcs.EventPut || ttlPutEvent.Key != "/pacman/alpha/status/alpha-2" {
-			t.Fatalf("unexpected ttl put event: %+v", ttlPutEvent)
-		}
-
-		expiredEvent := waitForEvent(t, events, 6*config.TTL)
-		if expiredEvent.Type != dcs.EventExpired || expiredEvent.Key != "/pacman/alpha/status/alpha-2" {
-			t.Fatalf("unexpected expired event: %+v", expiredEvent)
+		if err := exerciseWatchEventDelivery(context.Background(), backend, config.TTL); err != nil {
+			t.Fatal(err)
 		}
 	})
 }
 
+func validateConfig(config Config) error {
+	if config.New == nil {
+		return errors.New("dcstest config requires a backend constructor")
+	}
+
+	if config.TTL <= 0 {
+		return errors.New("dcstest config requires a positive ttl")
+	}
+
+	return nil
+}
+
+func exerciseGetSetDelete(ctx context.Context, backend dcs.DCS, key string) error {
+	if err := backend.Set(ctx, key, []byte("value")); err != nil {
+		return fmt.Errorf("set key: %w", err)
+	}
+
+	got, err := backend.Get(ctx, key)
+	if err != nil {
+		return fmt.Errorf("get key: %w", err)
+	}
+
+	if got.Key != key {
+		return fmt.Errorf("unexpected key: got %q, want %q", got.Key, key)
+	}
+
+	if string(got.Value) != "value" {
+		return fmt.Errorf("unexpected value: got %q, want %q", string(got.Value), "value")
+	}
+
+	if got.Revision != 1 {
+		return fmt.Errorf("unexpected revision: got %d, want %d", got.Revision, 1)
+	}
+
+	if got.TTL != 0 {
+		return fmt.Errorf("unexpected ttl: got %s, want %s", got.TTL, time.Duration(0))
+	}
+
+	if err := backend.Delete(ctx, key); err != nil {
+		return fmt.Errorf("delete key: %w", err)
+	}
+
+	_, err = backend.Get(ctx, key)
+	if !errors.Is(err, dcs.ErrKeyNotFound) {
+		return fmt.Errorf("unexpected get-after-delete error: got %w, want %w", err, dcs.ErrKeyNotFound)
+	}
+
+	err = backend.Delete(ctx, key)
+	if !errors.Is(err, dcs.ErrKeyNotFound) {
+		return fmt.Errorf("unexpected delete-missing error: got %w, want %w", err, dcs.ErrKeyNotFound)
+	}
+
+	return nil
+}
+
+func exerciseCompareAndSet(ctx context.Context, backend dcs.DCS, key string) error {
+	if err := backend.Set(ctx, key, []byte("v1")); err != nil {
+		return fmt.Errorf("seed key: %w", err)
+	}
+
+	current, err := backend.Get(ctx, key)
+	if err != nil {
+		return fmt.Errorf("get seeded key: %w", err)
+	}
+
+	if err := backend.CompareAndSet(ctx, key, []byte("v2"), current.Revision); err != nil {
+		return fmt.Errorf("compare-and-set success: %w", err)
+	}
+
+	updated, err := backend.Get(ctx, key)
+	if err != nil {
+		return fmt.Errorf("get updated key: %w", err)
+	}
+
+	if string(updated.Value) != "v2" {
+		return fmt.Errorf("unexpected updated value: got %q, want %q", string(updated.Value), "v2")
+	}
+
+	if updated.Revision != current.Revision+1 {
+		return fmt.Errorf("unexpected updated revision: got %d, want %d", updated.Revision, current.Revision+1)
+	}
+
+	err = backend.CompareAndSet(ctx, key, []byte("stale"), current.Revision)
+	if !errors.Is(err, dcs.ErrRevisionMismatch) {
+		return fmt.Errorf("unexpected stale revision error: got %w, want %w", err, dcs.ErrRevisionMismatch)
+	}
+
+	return nil
+}
+
+func exerciseListPrefix(ctx context.Context, backend dcs.DCS) error {
+	if err := backend.Set(ctx, "/pacman/alpha/members/alpha-2", []byte("second")); err != nil {
+		return fmt.Errorf("seed alpha-2: %w", err)
+	}
+
+	if err := backend.Set(ctx, "/pacman/alpha/status/alpha-1", []byte("status")); err != nil {
+		return fmt.Errorf("seed status key: %w", err)
+	}
+
+	if err := backend.Set(ctx, "/pacman/alpha/members/alpha-1", []byte("first")); err != nil {
+		return fmt.Errorf("seed alpha-1: %w", err)
+	}
+
+	listed, err := backend.List(ctx, "/pacman/alpha/members/")
+	if err != nil {
+		return fmt.Errorf("list members: %w", err)
+	}
+
+	if len(listed) != 2 {
+		return fmt.Errorf("unexpected listed entry count: got %d, want %d", len(listed), 2)
+	}
+
+	gotKeys := []string{listed[0].Key, listed[1].Key}
+	wantKeys := []string{
+		"/pacman/alpha/members/alpha-1",
+		"/pacman/alpha/members/alpha-2",
+	}
+	if !slices.Equal(gotKeys, wantKeys) {
+		return fmt.Errorf("unexpected listed keys: got %v, want %v", gotKeys, wantKeys)
+	}
+
+	listed[0].Value[0] = 'X'
+	stored, err := backend.Get(ctx, "/pacman/alpha/members/alpha-1")
+	if err != nil {
+		return fmt.Errorf("get listed key: %w", err)
+	}
+
+	if string(stored.Value) != "first" {
+		return fmt.Errorf("expected list results to be detached copies, got %q", string(stored.Value))
+	}
+
+	return nil
+}
+
+func exerciseCampaignLeaderResign(ctx context.Context, backend dcs.DCS, ttl time.Duration) error {
+	_, ok, err := backend.Leader(ctx)
+	if err != nil {
+		return fmt.Errorf("initial leader lookup: %w", err)
+	}
+
+	if ok {
+		return errors.New("expected no leader before campaigning")
+	}
+
+	lease, held, err := backend.Campaign(ctx, "alpha-1")
+	if err != nil {
+		return fmt.Errorf("campaign leader: %w", err)
+	}
+
+	if !held {
+		return errors.New("expected first candidate to hold leader lease")
+	}
+
+	if lease.Leader != "alpha-1" {
+		return fmt.Errorf("unexpected leader after campaign: got %q, want %q", lease.Leader, "alpha-1")
+	}
+
+	if lease.Term != 1 {
+		return fmt.Errorf("unexpected initial term: got %d, want %d", lease.Term, 1)
+	}
+
+	current, ok, err := backend.Leader(ctx)
+	if err != nil {
+		return fmt.Errorf("leader after campaign: %w", err)
+	}
+
+	if !ok || current.Leader != "alpha-1" {
+		return fmt.Errorf("unexpected leader state after campaign: got %+v, ok=%t", current, ok)
+	}
+
+	losingLease, held, err := backend.Campaign(ctx, "beta-1")
+	if err != nil {
+		return fmt.Errorf("campaign competing leader: %w", err)
+	}
+
+	if held {
+		return errors.New("expected competing candidate to lose active lease")
+	}
+
+	if losingLease.Leader != "alpha-1" {
+		return fmt.Errorf("unexpected competing lease view: got %q, want %q", losingLease.Leader, "alpha-1")
+	}
+
+	time.Sleep(expiryWait(ttl))
+
+	lease, held, err = backend.Campaign(ctx, "beta-1")
+	if err != nil {
+		return fmt.Errorf("campaign after lease expiry: %w", err)
+	}
+
+	if !held {
+		return errors.New("expected candidate to win after lease expiry")
+	}
+
+	if lease.Leader != "beta-1" {
+		return fmt.Errorf("unexpected leader after expiry: got %q, want %q", lease.Leader, "beta-1")
+	}
+
+	if lease.Term != 2 {
+		return fmt.Errorf("unexpected incremented term: got %d, want %d", lease.Term, 2)
+	}
+
+	if err := backend.Resign(ctx); err != nil {
+		return fmt.Errorf("resign leader: %w", err)
+	}
+
+	_, ok, err = backend.Leader(ctx)
+	if err != nil {
+		return fmt.Errorf("leader after resign: %w", err)
+	}
+
+	if ok {
+		return errors.New("expected no leader after resign")
+	}
+
+	return nil
+}
+
+func exerciseTouchAliveTTL(ctx context.Context, backend dcs.DCS, ttl time.Duration) error {
+	alive, err := backend.Alive(ctx, "alpha-1")
+	if err != nil {
+		return fmt.Errorf("alive before touch: %w", err)
+	}
+
+	if alive {
+		return errors.New("expected untouched member to be reported dead")
+	}
+
+	if err := backend.Touch(ctx, "alpha-1"); err != nil {
+		return fmt.Errorf("touch member: %w", err)
+	}
+
+	alive, err = backend.Alive(ctx, "alpha-1")
+	if err != nil {
+		return fmt.Errorf("alive after touch: %w", err)
+	}
+
+	if !alive {
+		return errors.New("expected touched member to be reported alive")
+	}
+
+	deadline := time.Now().Add(4 * ttl)
+	for {
+		alive, err = backend.Alive(ctx, "alpha-1")
+		if err != nil {
+			return fmt.Errorf("alive during expiry wait: %w", err)
+		}
+
+		if !alive {
+			break
+		}
+
+		if time.Now().After(deadline) {
+			return errors.New("expected touched member session to expire")
+		}
+
+		time.Sleep(ttl / 4)
+	}
+
+	return nil
+}
+
+func exerciseWatchEventDelivery(ctx context.Context, backend dcs.DCS, ttl time.Duration) error {
+	watchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	events, err := backend.Watch(watchCtx, "/pacman/alpha/status/")
+	if err != nil {
+		return fmt.Errorf("watch status prefix: %w", err)
+	}
+
+	if err := backend.Set(ctx, "/pacman/alpha/status/alpha-1", []byte("up")); err != nil {
+		return fmt.Errorf("set watched key: %w", err)
+	}
+
+	putEvent, err := waitForEventResult(events, 4*ttl)
+	if err != nil {
+		return err
+	}
+
+	if putEvent.Type != dcs.EventPut || putEvent.Key != "/pacman/alpha/status/alpha-1" || string(putEvent.Value) != "up" {
+		return fmt.Errorf("unexpected put event: %+v", putEvent)
+	}
+
+	if err := backend.Delete(ctx, "/pacman/alpha/status/alpha-1"); err != nil {
+		return fmt.Errorf("delete watched key: %w", err)
+	}
+
+	deleteEvent, err := waitForEventResult(events, 4*ttl)
+	if err != nil {
+		return err
+	}
+
+	if deleteEvent.Type != dcs.EventDelete || deleteEvent.Key != "/pacman/alpha/status/alpha-1" {
+		return fmt.Errorf("unexpected delete event: %+v", deleteEvent)
+	}
+
+	if err := backend.Set(ctx, "/pacman/alpha/status/alpha-2", []byte("ttl"), dcs.WithTTL(ttl)); err != nil {
+		return fmt.Errorf("set ttl watched key: %w", err)
+	}
+
+	ttlPutEvent, err := waitForEventResult(events, 4*ttl)
+	if err != nil {
+		return err
+	}
+
+	if ttlPutEvent.Type != dcs.EventPut || ttlPutEvent.Key != "/pacman/alpha/status/alpha-2" {
+		return fmt.Errorf("unexpected ttl put event: %+v", ttlPutEvent)
+	}
+
+	expiredEvent, err := waitForEventResult(events, 6*ttl)
+	if err != nil {
+		return err
+	}
+
+	if expiredEvent.Type != dcs.EventExpired || expiredEvent.Key != "/pacman/alpha/status/alpha-2" {
+		return fmt.Errorf("unexpected expired event: %+v", expiredEvent)
+	}
+
+	return nil
+}
+
 func newBackend(t *testing.T, config Config) dcs.DCS {
+	t.Helper()
+
+	backend, err := openBackend(t, config)
+	if err != nil {
+		t.Fatalf("initialize backend: %v", err)
+	}
+
+	return backend
+}
+
+func openBackend(t *testing.T, config Config) (dcs.DCS, error) {
 	t.Helper()
 
 	backend := config.New(t)
@@ -355,28 +426,36 @@ func newBackend(t *testing.T, config Config) dcs.DCS {
 	})
 
 	if err := backend.Initialize(context.Background()); err != nil {
-		t.Fatalf("initialize backend: %v", err)
+		return nil, err
 	}
 
-	return backend
+	return backend, nil
 }
 
 func waitForEvent(t *testing.T, events <-chan dcs.WatchEvent, timeout time.Duration) dcs.WatchEvent {
 	t.Helper()
 
+	event, err := waitForEventResult(events, timeout)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return event
+}
+
+func waitForEventResult(events <-chan dcs.WatchEvent, timeout time.Duration) (dcs.WatchEvent, error) {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
 	select {
 	case event, ok := <-events:
 		if !ok {
-			t.Fatal("watch channel closed before delivering expected event")
+			return dcs.WatchEvent{}, errors.New("watch channel closed before delivering expected event")
 		}
 
-		return event
+		return event, nil
 	case <-timer.C:
-		t.Fatalf("timed out waiting for watch event after %s", timeout)
-		return dcs.WatchEvent{}
+		return dcs.WatchEvent{}, fmt.Errorf("timed out waiting for watch event after %s", timeout)
 	}
 }
 
