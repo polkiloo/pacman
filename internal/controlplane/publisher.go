@@ -70,7 +70,21 @@ func (store *MemoryStateStore) RegisterMember(ctx context.Context, registration 
 	store.registrations[cloned.NodeName] = cloned
 	store.mu.Unlock()
 
-	return store.refreshCache(ctx)
+	if err := store.refreshCache(ctx); err != nil {
+		return err
+	}
+
+	store.logLifecycle(
+		ctx,
+		"registered cluster member",
+		slog.String("node", cloned.NodeName),
+		slog.String("member", cloned.NodeName),
+		slog.String("node_role", string(cloned.NodeRole)),
+		slog.String("api_address", cloned.APIAddress),
+		slog.String("control_address", cloned.ControlAddress),
+	)
+
+	return nil
 }
 
 // CampaignLeader tries to acquire or renew the control-plane leader lease for
@@ -105,8 +119,23 @@ func (store *MemoryStateStore) CampaignLeader(ctx context.Context, nodeName stri
 	converted := leaderLeaseFromDCS(lease)
 
 	store.mu.Lock()
+	previousLease := store.leaderLease.Clone()
 	store.leaderLease = converted
 	store.mu.Unlock()
+
+	if previousLease.LeaderNode != converted.LeaderNode || previousLease.Term != converted.Term {
+		store.logTransition(
+			ctx,
+			"updated control-plane leader lease",
+			controlPlaneTransitionLeaderLease,
+			slog.String("node", candidate),
+			slog.String("leader", converted.LeaderNode),
+			slog.Uint64("term", converted.Term),
+			slog.Bool("elected", elected),
+			slog.String("previous_leader", previousLease.LeaderNode),
+			slog.Uint64("previous_term", previousLease.Term),
+		)
+	}
 
 	return converted.Clone(), elected, nil
 }
@@ -171,16 +200,67 @@ func (store *MemoryStateStore) PublishNodeStatus(ctx context.Context, status age
 	}
 
 	store.mu.Lock()
+	previousStatus, hadPreviousStatus := store.nodeStatuses[cloned.NodeName]
+	previousMember, hadPreviousMember := store.memberLocked(cloned.NodeName)
 	if store.nodeStatusRevisions == nil {
 		store.nodeStatusRevisions = make(map[string]int64)
 	}
 	store.nodeStatuses[cloned.NodeName] = cloned
 	store.nodeStatusRevisions[cloned.NodeName] = nextRevision(store.nodeStatusRevisions[cloned.NodeName])
 	store.refreshSourceOfTruthLocked(cloned.ObservedAt.UTC())
+	currentStatus := store.nodeStatuses[cloned.NodeName].Clone()
+	currentMember, hasCurrentMember := store.memberLocked(cloned.NodeName)
 	store.mu.Unlock()
 
 	if err := store.refreshCache(ctx); err != nil {
 		return agentmodel.ControlPlaneStatus{ClusterReachable: false}, err
+	}
+
+	if !hadPreviousStatus ||
+		previousStatus.Role != currentStatus.Role ||
+		previousStatus.State != currentStatus.State ||
+		previousStatus.NeedsRejoin != currentStatus.NeedsRejoin ||
+		previousStatus.PendingRestart != currentStatus.PendingRestart ||
+		previousStatus.Postgres.Details.PendingRestart != currentStatus.Postgres.Details.PendingRestart ||
+		previousStatus.ControlPlane.Leader != currentStatus.ControlPlane.Leader ||
+		observedMemberHealthy(previousStatus) != observedMemberHealthy(currentStatus) {
+		attributes := []slog.Attr{
+			slog.String("node", currentStatus.NodeName),
+			slog.String("member", currentStatus.MemberName),
+			slog.String("role", string(currentStatus.Role)),
+			slog.String("state", string(currentStatus.State)),
+			slog.Bool("healthy", observedMemberHealthy(currentStatus)),
+			slog.Bool("needs_rejoin", currentStatus.NeedsRejoin),
+			slog.Bool("pending_restart", currentStatus.PendingRestart || currentStatus.Postgres.Details.PendingRestart),
+			slog.Bool("leader", currentStatus.ControlPlane.Leader),
+		}
+		if hasCurrentMember {
+			attributes = append(
+				attributes,
+				slog.Int64("timeline", currentMember.Timeline),
+				slog.Int64("lag_bytes", currentMember.LagBytes),
+			)
+		}
+		if hadPreviousStatus {
+			attributes = append(
+				attributes,
+				slog.String("previous_role", string(previousStatus.Role)),
+				slog.String("previous_state", string(previousStatus.State)),
+				slog.Bool("previous_healthy", observedMemberHealthy(previousStatus)),
+				slog.Bool("previous_needs_rejoin", previousStatus.NeedsRejoin),
+				slog.Bool("previous_pending_restart", previousStatus.PendingRestart || previousStatus.Postgres.Details.PendingRestart),
+				slog.Bool("previous_leader", previousStatus.ControlPlane.Leader),
+			)
+		}
+		if hadPreviousMember {
+			attributes = append(
+				attributes,
+				slog.Int64("previous_timeline", previousMember.Timeline),
+				slog.Int64("previous_lag_bytes", previousMember.LagBytes),
+			)
+		}
+
+		store.logTransition(ctx, "observed member state change", controlPlaneTransitionMemberState, attributes...)
 	}
 
 	return published, nil
@@ -263,6 +343,11 @@ func (store *MemoryStateStore) StoreClusterSpec(ctx context.Context, spec cluste
 	now := store.now().UTC()
 
 	store.mu.Lock()
+	var previousSpec *cluster.ClusterSpec
+	if store.clusterSpec != nil {
+		clonedPrevious := store.clusterSpec.Clone()
+		previousSpec = &clonedPrevious
+	}
 	cloned = store.storeClusterSpecLocked(cloned)
 	revision := store.clusterSpecRevision
 	store.refreshSourceOfTruthLocked(now)
@@ -274,6 +359,26 @@ func (store *MemoryStateStore) StoreClusterSpec(ctx context.Context, spec cluste
 
 	if err := store.refreshCache(ctx); err != nil {
 		return cluster.ClusterSpec{}, err
+	}
+
+	addedMembers, removedMembers, updatedMembers := clusterSpecTopologyDiff(previousSpec, cloned)
+	if previousSpec == nil || len(addedMembers) > 0 || len(removedMembers) > 0 || len(updatedMembers) > 0 {
+		attributes := []slog.Attr{
+			slog.Int64("generation", int64(cloned.Generation)),
+			slog.Int("member_count", len(cloned.Members)),
+			slog.Any("added_members", addedMembers),
+			slog.Any("removed_members", removedMembers),
+			slog.Any("updated_members", updatedMembers),
+		}
+		if previousSpec != nil {
+			attributes = append(
+				attributes,
+				slog.Int64("previous_generation", int64(previousSpec.Generation)),
+				slog.Int("previous_member_count", len(previousSpec.Members)),
+			)
+		}
+
+		store.logAudit(ctx, "stored cluster topology", "cluster_topology.update", attributes...)
 	}
 
 	return cloned.Clone(), nil

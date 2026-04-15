@@ -318,9 +318,9 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] expand `pacmand` runtime `slog` coverage and field consistency
 - [x] expand `pacmanctl` runtime `slog` coverage and field consistency
 - [x] add `slog`-backed HTTP access logging
-- [ ] add structured event logs for cluster lifecycle and state transitions
-- [ ] add request, node, member, and operation correlation fields across API and control-plane logs
-- [ ] add audit logging for topology changes and maintenance mode changes
+- [x] add structured event logs for cluster lifecycle and state transitions
+- [x] add request, node, member, and operation correlation fields across API and control-plane logs
+- [x] add audit logging for topology changes and maintenance mode changes
 - [ ] add reconciliation debug logging with safe verbosity controls
 - [ ] define embedded-worker logging, error propagation, and failure-isolation rules
 - [ ] add secret redaction rules and logging-focused test coverage inspired by Patroni `tests/test_log.py` and `tests/test_utils.py`
