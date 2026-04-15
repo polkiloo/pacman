@@ -35,9 +35,13 @@ func (store *MemoryStateStore) Reconcile(ctx context.Context) (ClusterSourceOfTr
 	}
 
 	if err := store.forceRefreshCache(ctx); err != nil {
+		if store.debugEnabled(ctx) {
+			store.logDebug(ctx, "reconciliation refresh failed", slog.String("component", "reconciler"), slog.String("error", err.Error()))
+		}
 		return ClusterSourceOfTruth{}, err
 	}
 
+	startedAt := time.Now()
 	now := store.now().UTC()
 
 	store.mu.Lock()
@@ -47,7 +51,21 @@ func (store *MemoryStateStore) Reconcile(ctx context.Context) (ClusterSourceOfTr
 
 	truth := store.sourceOfTruthLocked()
 	if truth.Desired == nil && truth.Observed == nil {
+		if store.debugEnabled(ctx) {
+			store.logDebug(ctx, "reconciliation produced no source of truth state", slog.String("component", "reconciler"))
+		}
 		return ClusterSourceOfTruth{}, ErrSourceOfTruthStateRequired
+	}
+
+	if store.debugEnabled(ctx) {
+		attrs := append(
+			[]slog.Attr{
+				slog.String("component", "reconciler"),
+				slog.Duration("duration", time.Since(startedAt)),
+			},
+			reconcileDebugAttrs(truth)...,
+		)
+		store.logDebug(ctx, "reconciled cluster source of truth", attrs...)
 	}
 
 	return truth, nil

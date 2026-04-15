@@ -265,12 +265,114 @@ func TestMemoryStateStoreCreateSwitchoverIntentLogsAuditAndOperationState(t *tes
 	assertControlPlaneLogString(t, clusterEntry, "operation_state", "accepted")
 }
 
+func TestMemoryStateStoreReconcileLogsDebugSummaryOnlyAtDebugLevel(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.April, 15, 15, 0, 0, 0, time.UTC)
+	newStore := func(t *testing.T) *MemoryStateStore {
+		t.Helper()
+
+		clock := newMutableTestClock(now)
+		store := NewMemoryStateStore()
+		setTestLeaseDuration(store, time.Hour)
+		setTestNow(store, clock.Now)
+
+		if _, err := store.StoreClusterSpec(context.Background(), cluster.ClusterSpec{
+			ClusterName: "alpha",
+			Members: []cluster.MemberSpec{
+				{Name: "alpha-1"},
+				{Name: "alpha-2"},
+				{Name: "alpha-3"},
+			},
+		}); err != nil {
+			t.Fatalf("store cluster spec: %v", err)
+		}
+
+		for _, status := range []agentmodel.NodeStatus{
+			readyPrimaryStatus("alpha-1", now, 20),
+			readyStandbyStatus("alpha-2", now.Add(time.Second), 20, 32),
+		} {
+			if _, err := store.PublishNodeStatus(context.Background(), status); err != nil {
+				t.Fatalf("publish node status for %q: %v", status.NodeName, err)
+			}
+		}
+
+		clock.Set(now.Add(30 * time.Second))
+		return store
+	}
+
+	t.Run("info level suppresses reconcile debug log", func(t *testing.T) {
+		t.Parallel()
+
+		var buffer safeBuffer
+		store := newStore(t)
+		store.logger = paclog.NewWithOptions("pacmand", &buffer, paclog.Options{Level: slog.LevelInfo})
+
+		if _, err := store.Reconcile(context.Background()); err != nil {
+			t.Fatalf("reconcile at info level: %v", err)
+		}
+
+		if strings.Contains(buffer.String(), `"msg":"reconciled cluster source of truth"`) {
+			t.Fatalf("expected no reconcile debug entry at info level, got %q", buffer.String())
+		}
+	})
+
+	t.Run("debug level emits safe reconcile summary", func(t *testing.T) {
+		t.Parallel()
+
+		var buffer safeBuffer
+		store := newStore(t)
+		store.logger = paclog.NewWithOptions("pacmand", &buffer, paclog.Options{Level: slog.LevelDebug})
+
+		truth, err := store.Reconcile(context.Background())
+		if err != nil {
+			t.Fatalf("reconcile at debug level: %v", err)
+		}
+
+		if truth.Observed == nil {
+			t.Fatalf("expected observed truth after reconcile, got %+v", truth)
+		}
+
+		entry := findLastControlPlaneLogEntryByMessage(t, buffer.String(), "reconciled cluster source of truth")
+		assertControlPlaneLogString(t, entry, "component", "reconciler")
+		assertControlPlaneLogString(t, entry, "cluster_name", "alpha")
+		assertControlPlaneLogString(t, entry, "observed_phase", "degraded")
+		assertControlPlaneLogString(t, entry, "observed_primary", "alpha-1")
+		assertControlPlaneLogFloat(t, entry, "desired_member_count", 3)
+		assertControlPlaneLogFloat(t, entry, "observed_member_count", 2)
+		assertControlPlaneLogFloat(t, entry, "missing_expected_member_count", 1)
+		assertControlPlaneLogStrings(t, entry, "missing_expected_members", []string{"alpha-3"})
+		assertControlPlaneLogFloat(t, entry, "unhealthy_member_count", 0)
+
+		if _, ok := entry["members"]; ok {
+			t.Fatalf("expected reconcile debug log to avoid raw member payloads, got %+v", entry)
+		}
+		if _, ok := entry["desired"]; ok {
+			t.Fatalf("expected reconcile debug log to avoid raw desired payloads, got %+v", entry)
+		}
+	})
+}
+
 func findControlPlaneLogEntryByMessage(t *testing.T, payload, message string) map[string]any {
 	t.Helper()
 
 	for _, entry := range parseControlPlaneLogEntries(t, payload) {
 		if got, _ := entry["msg"].(string); got == message {
 			return entry
+		}
+	}
+
+	t.Fatalf("control-plane log message %q not found in %q", message, payload)
+	return nil
+}
+
+func findLastControlPlaneLogEntryByMessage(t *testing.T, payload, message string) map[string]any {
+	t.Helper()
+
+	entries := parseControlPlaneLogEntries(t, payload)
+	for i := len(entries) - 1; i >= 0; i-- {
+		if got, _ := entries[i]["msg"].(string); got == message {
+			return entries[i]
 		}
 	}
 

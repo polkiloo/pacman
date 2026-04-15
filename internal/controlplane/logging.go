@@ -36,6 +36,14 @@ func (store *MemoryStateStore) log(ctx context.Context, level slog.Level, msg st
 	store.logger.LogAttrs(contextOrBackground(ctx), level, msg, base...)
 }
 
+func (store *MemoryStateStore) debugEnabled(ctx context.Context) bool {
+	return store.logger != nil && store.logger.Enabled(contextOrBackground(ctx), slog.LevelDebug)
+}
+
+func (store *MemoryStateStore) logDebug(ctx context.Context, msg string, attrs ...slog.Attr) {
+	store.log(ctx, slog.LevelDebug, msg, attrs...)
+}
+
 func (store *MemoryStateStore) logAudit(ctx context.Context, msg, action string, attrs ...slog.Attr) {
 	base := []slog.Attr{
 		slog.String("event_category", controlPlaneEventCategoryAudit),
@@ -202,4 +210,85 @@ func clusterSpecTopologyDiff(previous *cluster.ClusterSpec, current cluster.Clus
 	sort.Strings(updated)
 
 	return added, removed, updated
+}
+
+func reconcileDebugAttrs(truth ClusterSourceOfTruth) []slog.Attr {
+	attrs := []slog.Attr{
+		slog.String("cluster_name", truth.ClusterName()),
+	}
+
+	if truth.Desired != nil {
+		attrs = append(
+			attrs,
+			slog.Int64("desired_generation", int64(truth.Desired.Generation)),
+			slog.Int("desired_member_count", len(truth.Desired.Members)),
+		)
+	}
+
+	if truth.Observed != nil {
+		attrs = append(
+			attrs,
+			slog.String("observed_phase", string(truth.Observed.Phase)),
+			slog.String("observed_primary", truth.Observed.CurrentPrimary),
+			slog.Int64("observed_epoch", int64(truth.Observed.CurrentEpoch)),
+			slog.Int("observed_member_count", len(truth.Observed.Members)),
+			slog.Bool("maintenance_enabled", truth.Observed.Maintenance.Enabled),
+		)
+		if truth.Observed.ActiveOperation != nil {
+			attrs = append(
+				attrs,
+				slog.String("operation_id", truth.Observed.ActiveOperation.ID),
+				slog.String("operation_kind", string(truth.Observed.ActiveOperation.Kind)),
+				slog.String("operation_state", string(truth.Observed.ActiveOperation.State)),
+			)
+		}
+	}
+
+	missingExpected, unhealthyMembers, rejoinMembers := reconcileMemberSummary(truth)
+	attrs = append(
+		attrs,
+		slog.Int("missing_expected_member_count", len(missingExpected)),
+		slog.Int("unhealthy_member_count", len(unhealthyMembers)),
+		slog.Int("needs_rejoin_member_count", len(rejoinMembers)),
+	)
+	if len(missingExpected) > 0 {
+		attrs = append(attrs, slog.Any("missing_expected_members", missingExpected))
+	}
+	if len(unhealthyMembers) > 0 {
+		attrs = append(attrs, slog.Any("unhealthy_members", unhealthyMembers))
+	}
+	if len(rejoinMembers) > 0 {
+		attrs = append(attrs, slog.Any("needs_rejoin_members", rejoinMembers))
+	}
+
+	return attrs
+}
+
+func reconcileMemberSummary(truth ClusterSourceOfTruth) (missingExpected []string, unhealthyMembers []string, rejoinMembers []string) {
+	if truth.Observed != nil {
+		observedMembers := make(map[string]struct{}, len(truth.Observed.Members))
+		for _, member := range truth.Observed.Members {
+			observedMembers[member.Name] = struct{}{}
+			if !member.Healthy {
+				unhealthyMembers = append(unhealthyMembers, member.Name)
+			}
+			if member.NeedsRejoin {
+				rejoinMembers = append(rejoinMembers, member.Name)
+			}
+		}
+
+		if truth.Desired != nil {
+			for _, member := range truth.Desired.Members {
+				if _, ok := observedMembers[member.Name]; !ok {
+					missingExpected = append(missingExpected, member.Name)
+				}
+			}
+		}
+	}
+
+	sort.Strings(missingExpected)
+	sort.Strings(unhealthyMembers)
+	sort.Strings(rejoinMembers)
+
+	return missingExpected, unhealthyMembers, rejoinMembers
 }
