@@ -9,6 +9,8 @@ require (
 	github.com/hashicorp/raft v1.7.3
 	github.com/hashicorp/raft-boltdb/v2 v2.3.1
 	github.com/lib/pq v1.10.9
+	github.com/prometheus/client_golang v1.20.5
+	github.com/prometheus/common v0.62.0
 	github.com/testcontainers/testcontainers-go v0.41.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.41.0
 	go.etcd.io/etcd/api/v3 v3.6.10
@@ -93,9 +95,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
-	github.com/prometheus/client_golang v1.20.5 // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect
-	github.com/prometheus/common v0.62.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect
 	github.com/shirou/gopsutil/v4 v4.26.2 // indirect

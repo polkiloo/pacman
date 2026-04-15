@@ -39,6 +39,7 @@ type Daemon struct {
 	apiServer           httpServer
 	apiTLSConfig        *tls.Config
 	apiAuthorizer       httpapi.Authorizer
+	apiMiddlewares      []httpapi.MiddlewareFactory
 	apiServerDisabled   bool
 	peerServer          httpServer
 	peerServerTLSConfig *tls.Config
@@ -121,9 +122,19 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 	}
 
 	if !daemon.apiServerDisabled && daemon.apiServer == nil {
+		apiMiddlewares := make([]httpapi.Middleware, 0, len(daemon.apiMiddlewares))
+		for _, factory := range daemon.apiMiddlewares {
+			if factory == nil {
+				continue
+			}
+
+			apiMiddlewares = append(apiMiddlewares, factory(store))
+		}
+
 		daemon.apiServer = httpapi.New(defaulted.Node.Name, store, logger, httpapi.Config{
-			TLSConfig:  daemon.apiTLSConfig,
-			Authorizer: daemon.apiAuthorizer,
+			TLSConfig:   daemon.apiTLSConfig,
+			Authorizer:  daemon.apiAuthorizer,
+			Middlewares: apiMiddlewares,
 		})
 	}
 

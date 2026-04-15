@@ -37,6 +37,14 @@ type NodeStatusReader interface {
 // OpenAPIDocumentProvider returns the published OpenAPI YAML served by pacmand.
 type OpenAPIDocumentProvider func() ([]byte, error)
 
+// Middleware decorates the Fiber app before PACMAN registers its built-in
+// routes. Middleware may short-circuit requests or add supplemental endpoints.
+type Middleware func(*fiber.Ctx) error
+
+// MiddlewareFactory constructs an HTTP API middleware using the live state
+// source bound to the current daemon.
+type MiddlewareFactory func(NodeStatusReader) Middleware
+
 // Config carries optional Server parameters.
 type Config struct {
 	// LivenessWindow is the maximum allowed age of the last heartbeat before
@@ -51,6 +59,8 @@ type Config struct {
 	// OpenAPIDocument optionally overrides the published OpenAPI document
 	// served by GET /openapi.yaml.
 	OpenAPIDocument OpenAPIDocumentProvider
+	// Middlewares are applied before built-in PACMAN routes are registered.
+	Middlewares []Middleware
 }
 
 var errServerAlreadyStarted = errors.New("http api server is already started")
@@ -107,6 +117,13 @@ func New(nodeName string, store NodeStatusReader, logger *slog.Logger, cfg Confi
 	srv.app.Use(srv.requestIDMiddleware())
 	srv.app.Use(srv.accessLogMiddleware())
 	srv.app.Use(recover.New())
+	for _, middleware := range cfg.Middlewares {
+		if middleware == nil {
+			continue
+		}
+
+		srv.app.Use(fiber.Handler(middleware))
+	}
 	srv.registerRoutes()
 
 	return srv
