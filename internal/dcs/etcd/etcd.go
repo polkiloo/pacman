@@ -325,29 +325,33 @@ func (backend *Backend) Campaign(ctx context.Context, candidate string) (dcs.Lea
 		return dcs.LeaderLease{}, false, err
 	}
 
-	requestCtx, cancel := backend.requestContext(ctx)
-	defer cancel()
-
 	trimmedCandidate := strings.TrimSpace(candidate)
 
 	for {
+		requestCtx, cancel := backend.requestContext(ctx)
+
 		current, ok, err := backend.loadLeader(requestCtx)
 		if err != nil {
+			cancel()
 			return dcs.LeaderLease{}, false, err
 		}
 
 		if ok {
 			alive, err := backend.leaseAlive(requestCtx, current.leaseID)
 			if err != nil {
+				cancel()
 				return dcs.LeaderLease{}, false, err
 			}
 
 			if alive && current.record.Leader != trimmedCandidate {
+				cancel()
 				return current.record.toLease(), false, nil
 			}
 
 			if !alive || current.record.toLease().ExpiresAt.Before(time.Now().UTC()) {
-				if err := backend.deleteIfCurrent(requestCtx, backend.leaderKey, current.modRevision); err != nil {
+				err := backend.deleteIfCurrent(requestCtx, backend.leaderKey, current.modRevision)
+				cancel()
+				if err != nil {
 					return dcs.LeaderLease{}, false, err
 				}
 
@@ -355,6 +359,7 @@ func (backend *Backend) Campaign(ctx context.Context, candidate string) (dcs.Lea
 			}
 
 			if err := backend.refreshLease(requestCtx, current.leaseID); err != nil {
+				cancel()
 				if errors.Is(err, dcs.ErrSessionExpired) {
 					continue
 				}
@@ -365,6 +370,7 @@ func (backend *Backend) Campaign(ctx context.Context, candidate string) (dcs.Lea
 			renewed := current.record.renew(trimmedCandidate, backend.config.TTL, time.Now().UTC())
 			encoded, err := marshalLeader(renewed)
 			if err != nil {
+				cancel()
 				return dcs.LeaderLease{}, false, err
 			}
 
@@ -373,6 +379,7 @@ func (backend *Backend) Campaign(ctx context.Context, candidate string) (dcs.Lea
 				If(compareCurrent(backend.leaderKey, true, current.modRevision)).
 				Then(putOperation(backend.leaderKey, encoded, current.leaseID)).
 				Commit()
+			cancel()
 			if err != nil {
 				return dcs.LeaderLease{}, false, backend.mapError(err)
 			}
@@ -386,6 +393,7 @@ func (backend *Backend) Campaign(ctx context.Context, candidate string) (dcs.Lea
 
 		lastTerm, termModRevision, termExists, err := backend.loadLeaderTerm(requestCtx)
 		if err != nil {
+			cancel()
 			return dcs.LeaderLease{}, false, err
 		}
 
@@ -396,6 +404,7 @@ func (backend *Backend) Campaign(ctx context.Context, candidate string) (dcs.Lea
 
 		leaseID, err := backend.grantLease(requestCtx, backend.config.TTL)
 		if err != nil {
+			cancel()
 			return dcs.LeaderLease{}, false, err
 		}
 
@@ -410,6 +419,7 @@ func (backend *Backend) Campaign(ctx context.Context, candidate string) (dcs.Lea
 
 		encodedLeader, err := marshalLeader(nextLeader)
 		if err != nil {
+			cancel()
 			return dcs.LeaderLease{}, false, err
 		}
 
@@ -424,6 +434,7 @@ func (backend *Backend) Campaign(ctx context.Context, candidate string) (dcs.Lea
 				clientv3.OpPut(backend.leaderTermKey, strconv.FormatUint(nextTerm, 10)),
 			).
 			Commit()
+		cancel()
 		if err != nil {
 			return dcs.LeaderLease{}, false, backend.mapError(err)
 		}

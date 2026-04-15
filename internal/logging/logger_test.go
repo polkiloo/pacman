@@ -87,6 +87,58 @@ func TestModuleProvidesLoggerUsingRegisteredStderr(t *testing.T) {
 	assertField(t, entry, "msg", "module logger ready")
 }
 
+func TestModuleAppliesRegisteredMiddlewareInOrder(t *testing.T) {
+	t.Parallel()
+
+	var stderr bytes.Buffer
+	type resolved struct {
+		fx.In
+
+		Logger *slog.Logger
+	}
+
+	var deps resolved
+	app := fx.New(
+		fx.NopLogger,
+		fx.Provide(func() struct {
+			fx.Out
+
+			Stderr io.Writer `name:"stderr"`
+		} {
+			return struct {
+				fx.Out
+
+				Stderr io.Writer `name:"stderr"`
+			}{Stderr: &stderr}
+		}),
+		Module("pacmand"),
+		ProvideMiddleware(WithAttrs(
+			slog.String("component", "middleware"),
+			slog.String("scope", "logging"),
+		)),
+		ProvideMiddleware(func(logger *slog.Logger) *slog.Logger {
+			if logger == nil {
+				return nil
+			}
+
+			return logger.With(slog.String("phase", "post-module"))
+		}),
+		fx.Populate(&deps),
+	)
+	if err := app.Err(); err != nil {
+		t.Fatalf("build fx app: %v", err)
+	}
+
+	deps.Logger.Info("module logger with middleware")
+
+	entry := decodeEntry(t, stderr.Bytes())
+	assertField(t, entry, "service", "pacmand")
+	assertField(t, entry, "msg", "module logger with middleware")
+	assertField(t, entry, "component", "middleware")
+	assertField(t, entry, "scope", "logging")
+	assertField(t, entry, "phase", "post-module")
+}
+
 func TestModuleReturnsLoggerRegistrationError(t *testing.T) {
 	t.Parallel()
 

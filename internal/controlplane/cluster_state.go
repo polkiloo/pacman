@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -34,9 +35,13 @@ func (store *MemoryStateStore) Reconcile(ctx context.Context) (ClusterSourceOfTr
 	}
 
 	if err := store.forceRefreshCache(ctx); err != nil {
+		if store.debugEnabled(ctx) {
+			store.logDebug(ctx, "reconciliation refresh failed", slog.String("component", "reconciler"), slog.String("error", err.Error()))
+		}
 		return ClusterSourceOfTruth{}, err
 	}
 
+	startedAt := time.Now()
 	now := store.now().UTC()
 
 	store.mu.Lock()
@@ -46,7 +51,21 @@ func (store *MemoryStateStore) Reconcile(ctx context.Context) (ClusterSourceOfTr
 
 	truth := store.sourceOfTruthLocked()
 	if truth.Desired == nil && truth.Observed == nil {
+		if store.debugEnabled(ctx) {
+			store.logDebug(ctx, "reconciliation produced no source of truth state", slog.String("component", "reconciler"))
+		}
 		return ClusterSourceOfTruth{}, ErrSourceOfTruthStateRequired
+	}
+
+	if store.debugEnabled(ctx) {
+		attrs := append(
+			[]slog.Attr{
+				slog.String("component", "reconciler"),
+				slog.Duration("duration", time.Since(startedAt)),
+			},
+			reconcileDebugAttrs(truth)...,
+		)
+		store.logDebug(ctx, "reconciled cluster source of truth", attrs...)
 	}
 
 	return truth, nil
@@ -83,6 +102,7 @@ func (store *MemoryStateStore) UpdateMaintenanceMode(ctx context.Context, reques
 	now := store.now().UTC()
 
 	store.mu.Lock()
+	previousMaintenance := store.maintenance
 	if store.clusterSpec == nil {
 		store.mu.Unlock()
 		return cluster.MaintenanceModeStatus{}, ErrClusterSpecRequired
@@ -142,6 +162,19 @@ func (store *MemoryStateStore) UpdateMaintenanceMode(ctx context.Context, reques
 	if err := store.refreshCache(ctx); err != nil {
 		return cluster.MaintenanceModeStatus{}, err
 	}
+
+	store.logAudit(
+		ctx,
+		"updated maintenance mode",
+		"maintenance_mode.update",
+		append(
+			operationLogAttrs(operation),
+			slog.Bool("previous_enabled", previousMaintenance.Enabled),
+			slog.Bool("maintenance_enabled", status.Enabled),
+			slog.String("reason", status.Reason),
+			slog.String("requested_by", status.RequestedBy),
+		)...,
+	)
 
 	return status, nil
 }
@@ -226,10 +259,20 @@ func (store *MemoryStateStore) refreshSourceOfTruthLocked(now time.Time) {
 		return
 	}
 
+	var previousStatus *cluster.ClusterStatus
+	if store.clusterStatus != nil {
+		clonedPrevious := store.clusterStatus.Clone()
+		previousStatus = &clonedPrevious
+	}
+
 	store.reconcileMaintenanceLocked(now)
 	status := store.aggregateClusterStatusLocked(now)
 	store.clusterStatus = &status
 	store.sourceUpdated = now
+
+	if clusterStatusChanged(previousStatus, status) {
+		store.logTransition(context.Background(), "cluster source of truth updated", controlPlaneTransitionCluster, clusterStatusTransitionAttrs(previousStatus, status)...)
+	}
 }
 
 func (store *MemoryStateStore) sourceOfTruthLocked() ClusterSourceOfTruth {
@@ -405,6 +448,11 @@ func currentPrimaryMember(members []cluster.MemberStatus) (cluster.MemberStatus,
 
 func (store *MemoryStateStore) journalOperationLocked(operation cluster.Operation, now time.Time) {
 	cloned := operation.Clone()
+	var previousOperation *cluster.Operation
+	if store.activeOperation != nil {
+		existing := store.activeOperation.Clone()
+		previousOperation = &existing
+	}
 
 	if cloned.State.IsTerminal() {
 		entry := store.historyEntryForOperationLocked(cloned, now)
@@ -412,10 +460,26 @@ func (store *MemoryStateStore) journalOperationLocked(operation cluster.Operatio
 		if store.activeOperation != nil && store.activeOperation.ID == cloned.ID {
 			store.activeOperation = nil
 		}
-		return
+	} else {
+		store.activeOperation = &cloned
 	}
 
-	store.activeOperation = &cloned
+	if previousOperation == nil || !sameOperationState(previousOperation, &cloned) {
+		attributes := operationLogAttrs(cloned)
+		if previousOperation != nil {
+			attributes = append(
+				attributes,
+				slog.String("previous_operation_id", previousOperation.ID),
+				slog.String("previous_operation_kind", string(previousOperation.Kind)),
+				slog.String("previous_operation_state", string(previousOperation.State)),
+			)
+			if !previousOperation.Result.IsZero() {
+				attributes = append(attributes, slog.String("previous_operation_result", string(previousOperation.Result)))
+			}
+		}
+
+		store.logTransition(context.Background(), "operation state changed", controlPlaneTransitionOperationState, attributes...)
+	}
 }
 
 func (store *MemoryStateStore) historyEntryForOperationLocked(operation cluster.Operation, now time.Time) cluster.HistoryEntry {

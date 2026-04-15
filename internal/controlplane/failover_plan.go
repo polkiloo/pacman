@@ -100,6 +100,8 @@ func (store *MemoryStateStore) CreateFailoverIntent(ctx context.Context, request
 		return FailoverIntent{}, err
 	}
 
+	store.logAudit(ctx, "accepted failover intent", "failover.requested", operationLogAttrs(operation)...)
+
 	return FailoverIntent{
 		Operation:      operation.Clone(),
 		CurrentPrimary: confirmation.CurrentPrimary,

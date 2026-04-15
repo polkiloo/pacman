@@ -241,27 +241,35 @@ func (backend *Backend) Campaign(ctx context.Context, candidate string) (dcs.Lea
 		return dcs.LeaderLease{}, false, err
 	}
 
-	if backend.raft.State() != hraft.Leader {
-		lease, _ := backend.fsm.Leader(backend.config.nowUTC())
-		return lease, false, nil
-	}
+	for {
+		if backend.raft.State() != hraft.Leader {
+			lease, _ := backend.fsm.Leader(backend.config.nowUTC())
+			return lease, false, nil
+		}
 
-	response, err := backend.apply(ctx, command{
-		Type:      commandCampaign,
-		Candidate: candidate,
-		TTL:       backend.config.TTL,
-		Now:       backend.config.nowUTC(),
-	})
-	if err != nil {
-		return dcs.LeaderLease{}, false, err
-	}
+		response, err := backend.apply(ctx, command{
+			Type:      commandCampaign,
+			Candidate: candidate,
+			TTL:       backend.config.TTL,
+			Now:       backend.config.nowUTC(),
+		})
+		if err != nil {
+			return dcs.LeaderLease{}, false, err
+		}
 
-	result, ok := response.(campaignResult)
-	if !ok {
-		return dcs.LeaderLease{}, false, fmt.Errorf("unexpected campaign response type %T", response)
-	}
+		result, ok := response.(campaignResult)
+		if !ok {
+			return dcs.LeaderLease{}, false, fmt.Errorf("unexpected campaign response type %T", response)
+		}
 
-	return result.Lease, result.Held, nil
+		if !result.Held || campaignLeaseUsable(result.Lease, backend.config.nowUTC(), backend.minimumLeaseRemaining()) {
+			return result.Lease, result.Held, nil
+		}
+
+		if err := ctx.Err(); err != nil {
+			return dcs.LeaderLease{}, false, err
+		}
+	}
 }
 
 // Leader returns the current logical PACMAN leader lease, if any.
@@ -503,6 +511,27 @@ func (backend *Backend) logWarn(message string, args ...any) {
 	}
 
 	backend.config.Logger.Warn(message, args...)
+}
+
+func (backend *Backend) minimumLeaseRemaining() time.Duration {
+	ttlQuarter := backend.config.TTL / 4
+	if ttlQuarter <= 0 {
+		return 0
+	}
+
+	if backend.config.ExpiryInterval <= 0 || ttlQuarter <= backend.config.ExpiryInterval {
+		return ttlQuarter
+	}
+
+	return backend.config.ExpiryInterval
+}
+
+func campaignLeaseUsable(lease dcs.LeaderLease, now time.Time, minimumRemaining time.Duration) bool {
+	if lease.Leader == "" || !lease.ExpiresAt.After(now) {
+		return false
+	}
+
+	return lease.ExpiresAt.Sub(now) > minimumRemaining
 }
 
 type watchBroker struct {

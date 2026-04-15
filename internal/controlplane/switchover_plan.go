@@ -93,6 +93,8 @@ func (store *MemoryStateStore) CreateSwitchoverIntent(ctx context.Context, reque
 		return SwitchoverIntent{}, err
 	}
 
+	store.logAudit(ctx, "accepted switchover intent", "switchover.requested", operationLogAttrs(operation)...)
+
 	return SwitchoverIntent{
 		Operation:  operation.Clone(),
 		Validation: validation.Clone(),

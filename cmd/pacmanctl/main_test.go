@@ -27,9 +27,7 @@ func TestRunReturnsSuccessForHelp(t *testing.T) {
 		t.Fatalf("unexpected stdout output: got %q, want %q", got, want)
 	}
 
-	if stderr != "" {
-		t.Fatalf("expected no stderr output, got %q", stderr)
-	}
+	assertNoErrorLogs(t, stderr)
 }
 
 func TestRunReturnsSuccessForClusterStatus(t *testing.T) {
@@ -75,9 +73,7 @@ func TestRunReturnsSuccessForClusterStatus(t *testing.T) {
 		t.Fatalf("expected cluster status json output, got %q", stdout)
 	}
 
-	if stderr != "" {
-		t.Fatalf("expected no stderr output, got %q", stderr)
-	}
+	assertNoErrorLogs(t, stderr)
 }
 
 func TestRunReturnsSuccessForMaintenanceEnable(t *testing.T) {
@@ -119,9 +115,7 @@ func TestRunReturnsSuccessForMaintenanceEnable(t *testing.T) {
 		t.Fatalf("expected maintenance text output, got %q", stdout)
 	}
 
-	if stderr != "" {
-		t.Fatalf("expected no stderr output, got %q", stderr)
-	}
+	assertNoErrorLogs(t, stderr)
 }
 
 func TestRunReturnsSuccessForNodeStatus(t *testing.T) {
@@ -167,9 +161,7 @@ func TestRunReturnsSuccessForNodeStatus(t *testing.T) {
 		t.Fatalf("expected node status output, got %q", stdout)
 	}
 
-	if stderr != "" {
-		t.Fatalf("expected no stderr output, got %q", stderr)
-	}
+	assertNoErrorLogs(t, stderr)
 }
 
 func TestRunReturnsErrorForInvalidFlag(t *testing.T) {
@@ -255,5 +247,15 @@ func assertContains(t *testing.T, got, want string) {
 
 	if !strings.Contains(got, want) {
 		t.Fatalf("expected %q to contain %q", got, want)
+	}
+}
+
+func assertNoErrorLogs(t *testing.T, stderr string) {
+	t.Helper()
+
+	for _, level := range []string{`"level":"ERROR"`, `"level":"WARN"`} {
+		if strings.Contains(stderr, level) {
+			t.Fatalf("expected no error or warning log output on stderr, got %q", stderr)
+		}
 	}
 }

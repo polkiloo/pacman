@@ -44,6 +44,8 @@ func (store *MemoryStateStore) CancelSwitchover(ctx context.Context) (cluster.Op
 		return cluster.Operation{}, err
 	}
 
+	store.logAudit(ctx, "cancelled switchover intent", "switchover.cancelled", operationLogAttrs(cancelled)...)
+
 	return cancelled.Clone(), nil
 }
 

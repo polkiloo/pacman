@@ -9,6 +9,7 @@ import (
 
 	"github.com/polkiloo/pacman/internal/cluster"
 	"github.com/polkiloo/pacman/internal/controlplane"
+	paclog "github.com/polkiloo/pacman/internal/logging"
 )
 
 func (srv *Server) handleSwitchoverCreate(c *fiber.Ctx) error {
@@ -30,10 +31,22 @@ func (srv *Server) handleSwitchoverCreate(c *fiber.Ctx) error {
 		request.ScheduledAt = requestBody.ScheduledAt.UTC()
 	}
 
-	intent, err := srv.store.CreateSwitchoverIntent(c.UserContext(), request)
+	requestContext := paclog.WithMember(srv.requestContext(c), request.Candidate)
+	c.SetUserContext(requestContext)
+
+	intent, err := srv.store.CreateSwitchoverIntent(requestContext, request)
 	if err != nil {
 		return writeSwitchoverCreateError(c, err)
 	}
+
+	requestContext = paclog.WithOperation(requestContext, intent.Operation.ID, string(intent.Operation.Kind))
+	c.SetUserContext(requestContext)
+	srv.logRequest(
+		c,
+		slog.LevelInfo,
+		"accepted switchover request",
+		append(auditLogAttrs("switchover.requested"), operationLogAttrs(intent.Operation)...)...,
+	)
 
 	return c.Status(fiber.StatusAccepted).JSON(buildOperationAcceptedResponse(intent.Operation))
 }
@@ -43,6 +56,15 @@ func (srv *Server) handleSwitchoverCancel(c *fiber.Ctx) error {
 	if err != nil {
 		return writeSwitchoverCancelError(c, err)
 	}
+
+	requestContext := paclog.WithOperation(srv.requestContext(c), cancelled.ID, string(cancelled.Kind))
+	c.SetUserContext(requestContext)
+	srv.logRequest(
+		c,
+		slog.LevelInfo,
+		"cancelled switchover request",
+		append(auditLogAttrs("switchover.cancelled"), operationLogAttrs(cancelled)...)...,
+	)
 
 	return c.JSON(buildOperationAcceptedResponse(cancelled))
 }
@@ -57,10 +79,22 @@ func (srv *Server) handleFailoverCreate(c *fiber.Ctx) error {
 		return writeAPIError(c, fiber.StatusBadRequest, "invalid_failover_request", "failover request body must be valid JSON")
 	}
 
-	intent, err := srv.store.CreateFailoverIntent(c.UserContext(), normalizeFailoverRequest(requestBody))
+	requestContext := paclog.WithMember(srv.requestContext(c), strings.TrimSpace(requestBody.Candidate))
+	c.SetUserContext(requestContext)
+
+	intent, err := srv.store.CreateFailoverIntent(requestContext, normalizeFailoverRequest(requestBody))
 	if err != nil {
 		return writeFailoverCreateError(c, err)
 	}
+
+	requestContext = paclog.WithOperation(requestContext, intent.Operation.ID, string(intent.Operation.Kind))
+	c.SetUserContext(requestContext)
+	srv.logRequest(
+		c,
+		slog.LevelInfo,
+		"accepted failover request",
+		append(auditLogAttrs("failover.requested"), operationLogAttrs(intent.Operation)...)...,
+	)
 
 	return c.Status(fiber.StatusAccepted).JSON(buildOperationAcceptedResponse(intent.Operation))
 }
@@ -68,14 +102,7 @@ func (srv *Server) handleFailoverCreate(c *fiber.Ctx) error {
 func (srv *Server) handleOpenAPIDocument(c *fiber.Ctx) error {
 	document, err := srv.publishedOpenAPIDocument()
 	if err != nil {
-		if srv.logger != nil {
-			srv.logger.Error(
-				"published openapi document unavailable",
-				slog.String("component", "httpapi"),
-				slog.String("path", c.Path()),
-				slog.String("error", err.Error()),
-			)
-		}
+		srv.logRequest(c, slog.LevelError, "published openapi document unavailable", slog.String("error", err.Error()))
 
 		applyAPIResponseHeaders(c)
 		return writeAPIError(c, fiber.StatusServiceUnavailable, "openapi_unavailable", "openapi document unavailable")

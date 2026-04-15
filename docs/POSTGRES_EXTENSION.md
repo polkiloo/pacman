@@ -82,6 +82,29 @@ The extension worker now:
 That makes the background worker a thin supervisor around the shared PACMAN
 local-agent lifecycle.
 
+## Logging and Failure Isolation
+
+The helper process emits the same JSON `slog` stream as normal `pacmand`
+process mode, but PostgreSQL extension mode adds explicit runtime metadata:
+
+- `runtime_mode=embedded_worker`
+- `failure_isolation=helper_process`
+- `error_propagation=structured_stderr_and_exit_status`
+
+Those fields define the operating contract for background-worker mode:
+
+- helper-process failures stay isolated from PostgreSQL backend sessions
+- startup/configuration failures surface in PostgreSQL logs through the helper's
+  structured stderr stream and non-zero exit status
+- the C background worker remains responsible for supervision and restart, while
+  the Go helper owns only PACMAN runtime behavior
+
+To troubleshoot reconcile and state-aggregation decisions, set
+`PACMAN_LOG_LEVEL=debug` before PostgreSQL starts. The helper process inherits
+that setting and emits reconciliation summaries with counts, cluster phase, and
+member names only; it does not dump full desired/observed state payloads or
+secret-bearing config values.
+
 ## Packaging and Images
 
 Top-level build/install targets now cover both the extension assets and the

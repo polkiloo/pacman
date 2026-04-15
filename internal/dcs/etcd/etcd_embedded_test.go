@@ -32,7 +32,7 @@ func TestBackendConformanceWithEmbeddedEtcd(t *testing.T) {
 				Backend:      dcs.BackendEtcd,
 				ClusterName:  embeddedTestClusterName(t.Name()),
 				TTL:          ttl,
-				RetryTimeout: 2 * time.Second,
+				RetryTimeout: 5 * time.Second,
 				Etcd: &dcs.EtcdConfig{
 					Endpoints: endpoints,
 				},

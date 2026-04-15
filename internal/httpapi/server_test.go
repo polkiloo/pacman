@@ -19,6 +19,7 @@ import (
 	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
 	"github.com/polkiloo/pacman/internal/cluster"
 	"github.com/polkiloo/pacman/internal/controlplane"
+	paclog "github.com/polkiloo/pacman/internal/logging"
 )
 
 // ---------------------------------------------------------------------------
@@ -162,15 +163,247 @@ func TestAccessLogMiddlewareLogsRequest(t *testing.T) {
 
 	for _, want := range []string{
 		`"component":"httpapi"`,
+		`"node":"alpha-1"`,
 		`"request_id":"req-456"`,
 		`"method":"GET"`,
 		`"path":"/health"`,
+		`"route":"/health"`,
 		`"status":503`,
+		`"response_bytes":`,
 	} {
 		if !strings.Contains(logs, want) {
 			t.Fatalf("expected access log to contain %q, got %q", want, logs)
 		}
 	}
+}
+
+func TestAccessLogMiddlewareLogsPrincipalCorrelationFields(t *testing.T) {
+	t.Parallel()
+
+	var buffer bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buffer, nil))
+
+	now := time.Now().UTC()
+	response := performRequestWithHeaders(t, New("alpha-1", testNodeStatusStore{
+		clusterStatus: cluster.ClusterStatus{
+			ClusterName:    "alpha",
+			Phase:          cluster.ClusterPhaseHealthy,
+			CurrentPrimary: "alpha-1",
+			CurrentEpoch:   3,
+			ObservedAt:     now,
+			Members:        []cluster.MemberStatus{},
+		},
+		hasClusterStatus: true,
+	}, logger, Config{
+		Authorizer: &testAuthorizer{
+			principal: &Principal{
+				Subject:   "ops@example",
+				Mechanism: "bearer",
+			},
+		},
+	}), http.MethodGet, "/api/v1/cluster", map[string]string{
+		headerRequestID:           "req-789",
+		fiber.HeaderUserAgent:     "pacmanctl/test",
+		fiber.HeaderAuthorization: "Bearer token",
+	})
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	logs := buffer.String()
+	for _, want := range []string{
+		`"request_id":"req-789"`,
+		`"path":"/api/v1/cluster"`,
+		`"route":"/api/v1/cluster"`,
+		`"principal_subject":"ops@example"`,
+		`"principal_mechanism":"bearer"`,
+		`"user_agent":"pacmanctl/test"`,
+		`"status":200`,
+		`"response_bytes":`,
+	} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("expected access log to contain %q, got %q", want, logs)
+		}
+	}
+}
+
+func TestAccessLogMiddlewareLogsUnhandledRouteErrors(t *testing.T) {
+	t.Parallel()
+
+	var buffer bytes.Buffer
+	srv := &Server{
+		nodeName: "alpha-1",
+		logger:   slog.New(slog.NewJSONHandler(&buffer, nil)),
+	}
+
+	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app.Use(srv.requestIDMiddleware())
+	app.Use(srv.accessLogMiddleware())
+	app.Get("/boom", func(c *fiber.Ctx) error {
+		return errors.New("boom")
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/boom", nil)
+	response, err := app.Test(request, int(time.Second.Milliseconds()))
+	if err != nil {
+		t.Fatalf("perform GET %q: %v", "/boom", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusInternalServerError)
+	}
+
+	logs := buffer.String()
+	for _, want := range []string{
+		`"msg":"handled http request"`,
+		`"path":"/boom"`,
+		`"route":"/boom"`,
+		`"status":500`,
+		`"error":"boom"`,
+	} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("expected access log to contain %q, got %q", want, logs)
+		}
+	}
+}
+
+func TestSwitchoverCreatePropagatesCorrelationContextToStore(t *testing.T) {
+	t.Parallel()
+
+	captured := map[string]string{}
+	response := performRequestBodyWithHeaders(t, New("alpha-1", testNodeStatusStore{
+		switchoverIntent: controlplane.SwitchoverIntent{
+			Operation: cluster.Operation{
+				ID:          "sw-1",
+				Kind:        cluster.OperationKindSwitchover,
+				State:       cluster.OperationStateAccepted,
+				RequestedAt: time.Date(2026, time.April, 15, 11, 0, 0, 0, time.UTC),
+				FromMember:  "alpha-1",
+				ToMember:    "alpha-2",
+				Result:      cluster.OperationResultPending,
+				Message:     "planned switchover accepted",
+			},
+		},
+		captureSwitchoverContext: func(ctx context.Context) {
+			captured = attrsToStringMap(paclog.AttrsFromContext(ctx))
+		},
+	}, discardLogger(), Config{
+		Authorizer: &testAuthorizer{
+			principal: &Principal{
+				Subject:   "ops@example",
+				Mechanism: "bearer",
+			},
+		},
+	}), http.MethodPost, "/api/v1/operations/switchover", []byte(`{"candidate":"alpha-2"}`), map[string]string{
+		headerRequestID:           "req-switchover",
+		fiber.HeaderContentType:   fiber.MIMEApplicationJSON,
+		fiber.HeaderAuthorization: "Bearer token",
+	})
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusAccepted)
+	}
+
+	for key, want := range map[string]string{
+		"request_id":          "req-switchover",
+		"node":                "alpha-1",
+		"principal_subject":   "ops@example",
+		"principal_mechanism": "bearer",
+		"member":              "alpha-2",
+	} {
+		if got := captured[key]; got != want {
+			t.Fatalf("context %s: got %q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestMaintenanceUpdateLogsAuditEvent(t *testing.T) {
+	t.Parallel()
+
+	var buffer bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buffer, nil))
+
+	updatedAt := time.Date(2026, time.April, 15, 12, 0, 0, 0, time.UTC)
+	response := performRequestBodyWithHeaders(t, New("alpha-1", testNodeStatusStore{
+		maintenanceUpdate: &cluster.MaintenanceModeStatus{
+			Enabled:     true,
+			Reason:      "weekly backup",
+			RequestedBy: "ops@example",
+			UpdatedAt:   updatedAt,
+		},
+	}, logger, Config{
+		Authorizer: &testAuthorizer{
+			principal: &Principal{
+				Subject:   "ops@example",
+				Mechanism: "bearer",
+			},
+		},
+	}), http.MethodPut, "/api/v1/maintenance", []byte(`{"enabled":true,"reason":"weekly backup","requestedBy":"ops@example"}`), map[string]string{
+		headerRequestID:           "req-maintenance",
+		fiber.HeaderContentType:   fiber.MIMEApplicationJSON,
+		fiber.HeaderAuthorization: "Bearer token",
+	})
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	entry := findLogEntryByMessage(t, buffer.String(), "updated maintenance mode")
+	assertLogString(t, entry, "event_category", "audit")
+	assertLogString(t, entry, "audit_action", "maintenance_mode.update")
+	assertLogString(t, entry, "request_id", "req-maintenance")
+	assertLogString(t, entry, "node", "alpha-1")
+	assertLogString(t, entry, "principal_subject", "ops@example")
+	assertLogString(t, entry, "principal_mechanism", "bearer")
+	assertLogBool(t, entry, "maintenance_enabled", true)
+	assertLogString(t, entry, "reason", "weekly backup")
+}
+
+func TestSwitchoverCreateLogsAuditEventWithOperationCorrelation(t *testing.T) {
+	t.Parallel()
+
+	var buffer bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buffer, nil))
+
+	response := performRequestBodyWithHeaders(t, New("alpha-1", testNodeStatusStore{
+		switchoverIntent: controlplane.SwitchoverIntent{
+			Operation: cluster.Operation{
+				ID:          "switchover-1",
+				Kind:        cluster.OperationKindSwitchover,
+				State:       cluster.OperationStateAccepted,
+				RequestedBy: "operator",
+				RequestedAt: time.Date(2026, time.April, 15, 12, 15, 0, 0, time.UTC),
+				FromMember:  "alpha-1",
+				ToMember:    "alpha-2",
+				Result:      cluster.OperationResultPending,
+				Message:     "planned switchover accepted",
+			},
+		},
+	}, logger, Config{}), http.MethodPost, "/api/v1/operations/switchover", []byte(`{"candidate":"alpha-2"}`), map[string]string{
+		headerRequestID:         "req-op",
+		fiber.HeaderContentType: fiber.MIMEApplicationJSON,
+	})
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusAccepted)
+	}
+
+	entry := findLogEntryByMessage(t, buffer.String(), "accepted switchover request")
+	assertLogString(t, entry, "event_category", "audit")
+	assertLogString(t, entry, "audit_action", "switchover.requested")
+	assertLogString(t, entry, "request_id", "req-op")
+	assertLogString(t, entry, "node", "alpha-1")
+	assertLogString(t, entry, "operation_id", "switchover-1")
+	assertLogString(t, entry, "operation_kind", "switchover")
+	assertLogString(t, entry, "operation_state", "accepted")
+	assertLogString(t, entry, "member", "alpha-2")
+	assertLogString(t, entry, "to_member", "alpha-2")
 }
 
 func TestAPICommonMiddlewareSetsNoStoreHeaders(t *testing.T) {
@@ -3263,25 +3496,29 @@ func TestReplicaStateOK(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type testNodeStatusStore struct {
-	nodeStatus            agentmodel.NodeStatus
-	nodeStatuses          []agentmodel.NodeStatus
-	hasNode               bool
-	clusterSpec           cluster.ClusterSpec
-	hasSpec               bool
-	clusterStatus         cluster.ClusterStatus
-	hasClusterStatus      bool
-	maintenance           cluster.MaintenanceModeStatus
-	maintenanceUpdate     *cluster.MaintenanceModeStatus
-	maintenanceErr        error
-	history               []cluster.HistoryEntry
-	lastSwitchoverRequest *controlplane.SwitchoverRequest
-	switchoverIntent      controlplane.SwitchoverIntent
-	switchoverErr         error
-	cancelledSwitchover   cluster.Operation
-	cancelSwitchoverErr   error
-	lastFailoverRequest   *controlplane.FailoverIntentRequest
-	failoverIntent        controlplane.FailoverIntent
-	failoverErr           error
+	nodeStatus               agentmodel.NodeStatus
+	nodeStatuses             []agentmodel.NodeStatus
+	hasNode                  bool
+	clusterSpec              cluster.ClusterSpec
+	hasSpec                  bool
+	clusterStatus            cluster.ClusterStatus
+	hasClusterStatus         bool
+	maintenance              cluster.MaintenanceModeStatus
+	maintenanceUpdate        *cluster.MaintenanceModeStatus
+	maintenanceErr           error
+	captureMaintenanceCtx    func(context.Context)
+	history                  []cluster.HistoryEntry
+	lastSwitchoverRequest    *controlplane.SwitchoverRequest
+	switchoverIntent         controlplane.SwitchoverIntent
+	switchoverErr            error
+	captureSwitchoverContext func(context.Context)
+	cancelledSwitchover      cluster.Operation
+	cancelSwitchoverErr      error
+	captureCancelContext     func(context.Context)
+	lastFailoverRequest      *controlplane.FailoverIntentRequest
+	failoverIntent           controlplane.FailoverIntent
+	failoverErr              error
+	captureFailoverContext   func(context.Context)
 }
 
 func (store testNodeStatusStore) NodeStatus(nodeName string) (agentmodel.NodeStatus, bool) {
@@ -3342,6 +3579,9 @@ func (store testNodeStatusStore) UpdateMaintenanceMode(ctx context.Context, requ
 	if err := ctx.Err(); err != nil {
 		return cluster.MaintenanceModeStatus{}, err
 	}
+	if store.captureMaintenanceCtx != nil {
+		store.captureMaintenanceCtx(ctx)
+	}
 
 	if store.maintenanceErr != nil {
 		return cluster.MaintenanceModeStatus{}, store.maintenanceErr
@@ -3372,6 +3612,9 @@ func (store testNodeStatusStore) CreateSwitchoverIntent(ctx context.Context, req
 	if err := ctx.Err(); err != nil {
 		return controlplane.SwitchoverIntent{}, err
 	}
+	if store.captureSwitchoverContext != nil {
+		store.captureSwitchoverContext(ctx)
+	}
 
 	if store.lastSwitchoverRequest != nil {
 		captured := request.Clone()
@@ -3389,6 +3632,9 @@ func (store testNodeStatusStore) CancelSwitchover(ctx context.Context) (cluster.
 	if err := ctx.Err(); err != nil {
 		return cluster.Operation{}, err
 	}
+	if store.captureCancelContext != nil {
+		store.captureCancelContext(ctx)
+	}
 
 	if store.cancelSwitchoverErr != nil {
 		return cluster.Operation{}, store.cancelSwitchoverErr
@@ -3400,6 +3646,9 @@ func (store testNodeStatusStore) CancelSwitchover(ctx context.Context) (cluster.
 func (store testNodeStatusStore) CreateFailoverIntent(ctx context.Context, request controlplane.FailoverIntentRequest) (controlplane.FailoverIntent, error) {
 	if err := ctx.Err(); err != nil {
 		return controlplane.FailoverIntent{}, err
+	}
+	if store.captureFailoverContext != nil {
+		store.captureFailoverContext(ctx)
 	}
 
 	if store.lastFailoverRequest != nil {
@@ -3491,6 +3740,76 @@ func reserveLoopbackAddress(t *testing.T) string {
 	}
 
 	return address
+}
+
+func findLogEntryByMessage(t *testing.T, payload, message string) map[string]any {
+	t.Helper()
+
+	entries := parseLogEntries(t, payload)
+	for _, entry := range entries {
+		got, _ := entry["msg"].(string)
+		if got == message {
+			return entry
+		}
+	}
+
+	t.Fatalf("log message %q not found in %q", message, payload)
+	return nil
+}
+
+func parseLogEntries(t *testing.T, payload string) []map[string]any {
+	t.Helper()
+
+	lines := strings.Split(strings.TrimSpace(payload), "\n")
+	entries := make([]map[string]any, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(trimmed), &entry); err != nil {
+			t.Fatalf("unmarshal log entry %q: %v", trimmed, err)
+		}
+
+		entries = append(entries, entry)
+	}
+
+	return entries
+}
+
+func assertLogString(t *testing.T, entry map[string]any, key, want string) {
+	t.Helper()
+
+	got, ok := entry[key].(string)
+	if !ok {
+		t.Fatalf("log field %q missing or not a string: %+v", key, entry)
+	}
+	if got != want {
+		t.Fatalf("log field %q: got %q, want %q", key, got, want)
+	}
+}
+
+func assertLogBool(t *testing.T, entry map[string]any, key string, want bool) {
+	t.Helper()
+
+	got, ok := entry[key].(bool)
+	if !ok {
+		t.Fatalf("log field %q missing or not a bool: %+v", key, entry)
+	}
+	if got != want {
+		t.Fatalf("log field %q: got %v, want %v", key, got, want)
+	}
+}
+
+func attrsToStringMap(attrs []slog.Attr) map[string]string {
+	fields := make(map[string]string, len(attrs))
+	for _, attr := range attrs {
+		fields[attr.Key] = attr.Value.String()
+	}
+
+	return fields
 }
 
 func discardLogger() *slog.Logger {

@@ -402,11 +402,16 @@ func (fsm *fsm) applyResign(cmd command) interface{} {
 
 	fsm.mu.Lock()
 	leader := fsm.state.Leader
+	hadLeader := leader.Leader != ""
 	leader.expire(now)
 	if leader.Leader == "" {
 		fsm.state.Leader = leader
 		fsm.mu.Unlock()
-		return dcs.ErrNoLeader
+		if !hadLeader {
+			return dcs.ErrNoLeader
+		}
+
+		return nil
 	}
 
 	leader.Leader = ""
