@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -9,6 +8,8 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+
+	paclog "github.com/polkiloo/pacman/internal/logging"
 )
 
 const (
@@ -80,6 +81,12 @@ func (srv *Server) requestIDMiddleware() fiber.Handler {
 
 		c.Locals(requestIDLocalKey, requestID)
 		c.Set(headerRequestID, requestID)
+		c.SetUserContext(
+			paclog.WithRequestID(
+				paclog.WithNode(srv.requestContext(c), srv.nodeName),
+				requestID,
+			),
+		)
 
 		return c.Next()
 	}
@@ -113,31 +120,20 @@ func (srv *Server) accessLogMiddleware() fiber.Handler {
 			level = slog.LevelWarn
 		}
 
-		attributes := []slog.Attr{
-			slog.String("component", "httpapi"),
-			slog.String("node", srv.nodeName),
-			slog.String("request_id", RequestID(c)),
-			slog.String("method", c.Method()),
-			slog.String("path", c.Path()),
-			slog.String("route", currentRoutePattern(c)),
+		attributes := srv.requestLogAttrs(c)
+		attributes = append(
+			attributes,
 			slog.String("remote_addr", c.IP()),
 			slog.String("user_agent", c.Get(fiber.HeaderUserAgent)),
 			slog.Int("status", status),
 			slog.Duration("duration", duration),
 			slog.Int("response_bytes", len(c.Response().Body())),
-		}
-		if principal, ok := CurrentPrincipal(c); ok {
-			attributes = append(
-				attributes,
-				slog.String("principal_subject", principal.Subject),
-				slog.String("principal_mechanism", principal.Mechanism),
-			)
-		}
+		)
 		if err != nil {
 			attributes = append(attributes, slog.String("error", err.Error()))
 		}
 
-		srv.logger.LogAttrs(context.Background(), level, "handled http request", attributes...)
+		srv.logger.LogAttrs(srv.requestContext(c), level, "handled http request", attributes...)
 
 		return err
 	}
@@ -177,6 +173,12 @@ func (srv *Server) authMiddleware(scope AccessScope) fiber.Handler {
 
 		if principal != nil {
 			c.Locals(principalLocalKey, principal)
+			c.SetUserContext(
+				paclog.WithPrincipalMechanism(
+					paclog.WithPrincipalSubject(srv.requestContext(c), principal.Subject),
+					principal.Mechanism,
+				),
+			)
 		}
 
 		return c.Next()
@@ -231,12 +233,10 @@ func (srv *Server) writeAuthorizationError(c *fiber.Ctx, scope AccessScope, err 
 	}
 
 	if srv.logger != nil {
-		srv.logger.Error(
+		srv.logRequest(
+			c,
+			slog.LevelError,
 			"authorization hook failed",
-			slog.String("component", "httpapi"),
-			slog.String("request_id", RequestID(c)),
-			slog.String("method", c.Method()),
-			slog.String("path", c.Path()),
 			slog.String("scope", string(scope)),
 			slog.String("error", err.Error()),
 		)

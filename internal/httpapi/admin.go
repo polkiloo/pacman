@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"fmt"
+	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,6 +38,18 @@ func (srv *Server) handleMaintenanceUpdate(c *fiber.Ctx) error {
 	if err != nil {
 		return writeAPIError(c, fiber.StatusBadRequest, "invalid_maintenance_request", err.Error())
 	}
+
+	srv.logRequest(
+		c,
+		slog.LevelInfo,
+		"updated maintenance mode",
+		append(
+			auditLogAttrs("maintenance_mode.update"),
+			slog.Bool("maintenance_enabled", updated.Enabled),
+			slog.String("reason", updated.Reason),
+			slog.String("requested_by", updated.RequestedBy),
+		)...,
+	)
 
 	return c.JSON(buildMaintenanceModeStatusJSON(updated))
 }
