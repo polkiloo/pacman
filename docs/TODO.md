@@ -340,10 +340,16 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 
 ## 16. Observability
 
-- [ ] add Prometheus metrics
-- [ ] add health endpoints
-- [ ] add diagnostics dump
-- [ ] add trace points for failover / switchover / rejoin
+### Monitoring Surface
+
+- [x] add Prometheus metrics for cluster, member, node, and control-plane operation state
+- [x] add Patroni-compatible health endpoints (`/health`, `/liveness`, `/readiness`, `/primary`, `/replica`)
+- [x] add diagnostics dump via `GET /api/v1/diagnostics` and `pacmanctl diagnostics show`
+
+### Operation Visibility
+
+- [x] add trace-point counters for failover / switchover / rejoin lifecycle transitions
+- [x] add integration coverage that validates metrics collection and `/metrics` delivery from a running `pacmand`
 
 ---
 
