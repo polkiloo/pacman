@@ -116,6 +116,10 @@ func TestRunStartsLocalDaemonFromPostgresExtensionEnvironment(t *testing.T) {
 
 	assertContains(t, logs.String(), `"msg":"loaded node configuration"`)
 	assertContains(t, logs.String(), `"source":"pgext-env"`)
+	assertContains(t, logs.String(), `"runtime_mode":"embedded_worker"`)
+	assertContains(t, logs.String(), `"failure_isolation":"helper_process"`)
+	assertContains(t, logs.String(), `"error_propagation":"structured_stderr_and_exit_status"`)
+	assertContains(t, logs.String(), `"msg":"starting embedded worker runtime"`)
 	assertContains(t, logs.String(), `"node":"alpha-1"`)
 	assertContains(t, logs.String(), `"msg":"started local agent daemon"`)
 	assertContains(t, logs.String(), `"postgres_up":false`)
@@ -151,6 +155,12 @@ func TestRunReturnsPostgresExtensionEnvironmentError(t *testing.T) {
 	if !errors.Is(err, pgext.ErrPostgresManagedNodeRequired) {
 		t.Fatalf("expected ErrPostgresManagedNodeRequired, got %v", err)
 	}
+
+	assertContains(t, logs.String(), `"msg":"embedded worker runtime failed"`)
+	assertContains(t, logs.String(), `"runtime_mode":"embedded_worker"`)
+	assertContains(t, logs.String(), `"failure_isolation":"helper_process"`)
+	assertContains(t, logs.String(), `"error_propagation":"structured_stderr_and_exit_status"`)
+	assertContains(t, logs.String(), `"error":"postgres background worker mode requires a postgres-managing node role"`)
 }
 
 func TestRunStartsLocalDaemonAndHeartbeatLoopWhenProvided(t *testing.T) {
@@ -188,6 +198,7 @@ postgres:
 
 	assertContains(t, logs.String(), `"msg":"loaded node configuration"`)
 	assertContains(t, logs.String(), `"component":"config"`)
+	assertContains(t, logs.String(), `"runtime_mode":"process"`)
 	assertContains(t, logs.String(), `"path":"`+path+`"`)
 	assertContains(t, logs.String(), `"node":"alpha-1"`)
 	assertContains(t, logs.String(), `"node_role":"data"`)

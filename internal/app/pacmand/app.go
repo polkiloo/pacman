@@ -32,6 +32,13 @@ type App struct {
 	peerClientTLS *tls.Config
 }
 
+const (
+	runtimeModeProcess         = "process"
+	runtimeModeEmbeddedWorker  = "embedded_worker"
+	failureIsolationHelperProc = "helper_process"
+	errorPropagationExitStatus = "structured_stderr_and_exit_status"
+)
+
 // Params defines pacmand constructor dependencies.
 type Params struct {
 	fx.In
@@ -78,12 +85,14 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	if a.runtimeConfig.Err != nil {
+		a.logRuntimeError(ctx, a.runtimeConfig.Source, a.runtimeConfig.Path, a.runtimeConfig.Err)
 		return a.runtimeConfig.Err
 	}
 
 	a.logLoadedConfig(ctx, a.runtimeConfig.Config, a.runtimeConfig.Source, a.runtimeConfig.Path)
+	a.logRuntimeStart(ctx, a.runtimeConfig.Source)
 
-	return localagent.Run(
+	err := localagent.Run(
 		ctx,
 		a.logger,
 		a.runtimeConfig.Config,
@@ -91,6 +100,12 @@ func (a *App) Run(ctx context.Context) error {
 		agent.WithPeerServerTLSConfig(a.peerServerTLS),
 		agent.WithPeerClientTLSConfig(a.peerClientTLS),
 	)
+	if err != nil {
+		a.logRuntimeError(ctx, a.runtimeConfig.Source, a.runtimeConfig.Path, err)
+		return err
+	}
+
+	return nil
 }
 
 func (a *App) logLoadedConfig(ctx context.Context, loadedConfig config.Config, source, path string) {
@@ -104,9 +119,68 @@ func (a *App) logLoadedConfig(ctx context.Context, loadedConfig config.Config, s
 		slog.Bool("admin_auth_enabled", redactedConfig.Security.AdminAuthEnabled()),
 		slog.Bool("member_mtls_enabled", redactedConfig.Security.PeerMTLSEnabled()),
 	}
+	attributes = append(attributes, runtimeModeAttrs(source)...)
 	if path != "" {
 		attributes = append(attributes, slog.String("path", path))
 	}
 
 	a.logger.LogAttrs(ctx, slog.LevelInfo, "loaded node configuration", attributes...)
+}
+
+func (a *App) logRuntimeStart(ctx context.Context, source string) {
+	if runtimeModeForSource(source) != runtimeModeEmbeddedWorker {
+		return
+	}
+
+	a.logger.LogAttrs(
+		ctx,
+		slog.LevelInfo,
+		"starting embedded worker runtime",
+		append(
+			[]slog.Attr{slog.String("component", "embedded_worker")},
+			runtimeModeAttrs(source)...,
+		)...,
+	)
+}
+
+func (a *App) logRuntimeError(ctx context.Context, source, path string, err error) {
+	if a.logger == nil || err == nil || runtimeModeForSource(source) != runtimeModeEmbeddedWorker {
+		return
+	}
+
+	attributes := []slog.Attr{
+		slog.String("component", "runtime"),
+		slog.String("source", source),
+		slog.String("error", err.Error()),
+	}
+	attributes = append(attributes, runtimeModeAttrs(source)...)
+	if path != "" {
+		attributes = append(attributes, slog.String("path", path))
+	}
+
+	a.logger.LogAttrs(ctx, slog.LevelError, "embedded worker runtime failed", attributes...)
+}
+
+func runtimeModeForSource(source string) string {
+	if source == "pgext-env" {
+		return runtimeModeEmbeddedWorker
+	}
+
+	return runtimeModeProcess
+}
+
+func runtimeModeAttrs(source string) []slog.Attr {
+	attrs := []slog.Attr{
+		slog.String("runtime_mode", runtimeModeForSource(source)),
+	}
+
+	if runtimeModeForSource(source) == runtimeModeEmbeddedWorker {
+		attrs = append(
+			attrs,
+			slog.String("failure_isolation", failureIsolationHelperProc),
+			slog.String("error_propagation", errorPropagationExitStatus),
+		)
+	}
+
+	return attrs
 }
