@@ -289,6 +289,23 @@ func TestFSMApplyAdditionalBranches(t *testing.T) {
 			t.Fatalf("unexpected resign-without-leader response: %#v", response)
 		}
 
+		otherFSM.state.Leader = leaderState{
+			Leader:    "alpha-1",
+			Term:      7,
+			Acquired:  now.Add(-2 * time.Second),
+			Renewed:   now.Add(-1500 * time.Millisecond),
+			ExpiresAt: now.Add(-time.Second),
+		}
+		if response := applyFSMCommand(t, otherFSM, command{
+			Type: commandResign,
+			Now:  now,
+		}); response != nil {
+			t.Fatalf("expected resign to clear expired leader record, got %#v", response)
+		}
+		if lease, ok := otherFSM.Leader(now); ok || lease.Leader != "" {
+			t.Fatalf("expected expired leader record to be cleared, got ok=%t lease=%+v", ok, lease)
+		}
+
 		otherFSM.state.Sessions["alpha-1"] = sessionState{ExpiresAt: now.Add(-time.Second)}
 		if response := applyFSMCommand(t, otherFSM, command{
 			Type:              commandExpireSession,
@@ -314,6 +331,40 @@ func TestFSMApplyAdditionalBranches(t *testing.T) {
 
 		if otherFSM.Alive("alpha-1", now) {
 			t.Fatal("expected expired session to be removed")
+		}
+	})
+
+	t.Run("campaign lease usability helper", func(t *testing.T) {
+		t.Parallel()
+
+		now := time.Date(2026, time.April, 14, 12, 0, 0, 0, time.UTC)
+		backend := &Backend{
+			config: Config{
+				TTL:            120 * time.Millisecond,
+				ExpiryInterval: 40 * time.Millisecond,
+			},
+		}
+
+		if got := backend.minimumLeaseRemaining(); got != 30*time.Millisecond {
+			t.Fatalf("unexpected minimum lease remaining: got %s want %s", got, 30*time.Millisecond)
+		}
+
+		if campaignLeaseUsable(dcs.LeaderLease{}, now, backend.minimumLeaseRemaining()) {
+			t.Fatal("expected empty lease to be unusable")
+		}
+
+		if campaignLeaseUsable(dcs.LeaderLease{
+			Leader:    "alpha-1",
+			ExpiresAt: now.Add(20 * time.Millisecond),
+		}, now, backend.minimumLeaseRemaining()) {
+			t.Fatal("expected near-expiry lease to be unusable")
+		}
+
+		if !campaignLeaseUsable(dcs.LeaderLease{
+			Leader:    "alpha-1",
+			ExpiresAt: now.Add(50 * time.Millisecond),
+		}, now, backend.minimumLeaseRemaining()) {
+			t.Fatal("expected lease with sufficient remaining time to be usable")
 		}
 	})
 }
