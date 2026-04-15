@@ -16,6 +16,7 @@ func TestPacmandHTTPAPIServesHealth(t *testing.T) {
 	}
 
 	daemon := startSingleNodeDaemon(t, "alpha-http")
+	document := loadContractDocument(t)
 	waitForProbeStatus(t, daemon.Client, daemon.Base+"/health", http.StatusOK, pacmandStartupTimeout)
 
 	resp, err := daemon.Client.Get(daemon.Base + "/health")
@@ -45,6 +46,41 @@ func TestPacmandHTTPAPIServesHealth(t *testing.T) {
 	if payload.Patroni.Name != "alpha-http" {
 		t.Errorf("/health patroni.name: got %q, want %q", payload.Patroni.Name, "alpha-http")
 	}
+
+	t.Run("metrics", func(t *testing.T) {
+		metricsResp, err := daemon.Client.Get(daemon.Base + "/metrics")
+		if err != nil {
+			t.Fatalf("GET /metrics: %v", err)
+		}
+		defer metricsResp.Body.Close()
+
+		metricsBody, err := io.ReadAll(metricsResp.Body)
+		if err != nil {
+			t.Fatalf("read /metrics body: %v", err)
+		}
+
+		if metricsResp.StatusCode != http.StatusOK {
+			t.Fatalf("/metrics: got status %d, want %d", metricsResp.StatusCode, http.StatusOK)
+		}
+
+		requireResponseMatchesContract(t, document, "/metrics", "get", metricsResp, metricsBody)
+
+		text := string(metricsBody)
+		for _, want := range []string{
+			"pacman_cluster_spec_members_desired 1",
+			"pacman_cluster_members_observed 1",
+			`pacman_cluster_phase{phase="healthy"} 1`,
+			`pacman_cluster_primary{member="alpha-http"} 1`,
+			`pacman_member_info{member="alpha-http",role="primary",state="running"} 1`,
+			`pacman_node_info{member="alpha-http",node="alpha-http",role="primary",state="running"} 1`,
+			`pacman_node_postgres_up{node="alpha-http"} 1`,
+			`pacman_node_controlplane_reachable{node="alpha-http"} 1`,
+		} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("expected /metrics to contain %q, got:\n%s", want, text)
+			}
+		}
+	})
 }
 
 // TestPacmandPrimaryAndReplicaProbes verifies that the PACMAN daemon exposes

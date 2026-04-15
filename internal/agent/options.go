@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/polkiloo/pacman/internal/controlplane"
+	"github.com/polkiloo/pacman/internal/httpapi"
 	"github.com/polkiloo/pacman/internal/postgres"
 )
 
@@ -29,6 +30,17 @@ func WithNoAPIServer() Option {
 func WithAPIServerTLSConfig(tlsConfig *tls.Config) Option {
 	return func(daemon *Daemon) {
 		daemon.apiTLSConfig = tlsConfig
+	}
+}
+
+// WithHTTPAPIMiddlewareFactory registers an HTTP API middleware builder that
+// will be evaluated against the daemon's live state store when the API server
+// is constructed.
+func WithHTTPAPIMiddlewareFactory(factory httpapi.MiddlewareFactory) Option {
+	return func(daemon *Daemon) {
+		if factory != nil {
+			daemon.apiMiddlewares = append(daemon.apiMiddlewares, factory)
+		}
 	}
 }
 

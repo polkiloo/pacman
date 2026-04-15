@@ -27,6 +27,7 @@ type App struct {
 	logger        *slog.Logger
 	options       commandOptions
 	runtimeConfig *runtimeConfig
+	agentOptions  []agent.Option
 	apiTLSConfig  *tls.Config
 	peerServerTLS *tls.Config
 	peerClientTLS *tls.Config
@@ -47,9 +48,10 @@ type Params struct {
 	Logger        *slog.Logger
 	Options       commandOptions
 	RuntimeConfig *runtimeConfig
-	APITLSConfig  *tls.Config `name:"api_server_tls" optional:"true"`
-	PeerServerTLS *tls.Config `name:"member_peer_server_tls" optional:"true"`
-	PeerClientTLS *tls.Config `name:"member_peer_client_tls" optional:"true"`
+	AgentOptions  []agent.Option `group:"agent.option"`
+	APITLSConfig  *tls.Config    `name:"api_server_tls" optional:"true"`
+	PeerServerTLS *tls.Config    `name:"member_peer_server_tls" optional:"true"`
+	PeerClientTLS *tls.Config    `name:"member_peer_client_tls" optional:"true"`
 }
 
 // New constructs a pacmand application.
@@ -59,6 +61,7 @@ func New(params Params) *App {
 		logger:        params.Logger,
 		options:       params.Options,
 		runtimeConfig: params.RuntimeConfig,
+		agentOptions:  params.AgentOptions,
 		apiTLSConfig:  params.APITLSConfig,
 		peerServerTLS: params.PeerServerTLS,
 		peerClientTLS: params.PeerClientTLS,
@@ -92,13 +95,18 @@ func (a *App) Run(ctx context.Context) error {
 	a.logLoadedConfig(ctx, a.runtimeConfig.Config, a.runtimeConfig.Source, a.runtimeConfig.Path)
 	a.logRuntimeStart(ctx, a.runtimeConfig.Source)
 
+	options := []agent.Option{
+		agent.WithAPIServerTLSConfig(a.apiTLSConfig),
+		agent.WithPeerServerTLSConfig(a.peerServerTLS),
+		agent.WithPeerClientTLSConfig(a.peerClientTLS),
+	}
+	options = append(options, a.agentOptions...)
+
 	err := localagent.Run(
 		ctx,
 		a.logger,
 		a.runtimeConfig.Config,
-		agent.WithAPIServerTLSConfig(a.apiTLSConfig),
-		agent.WithPeerServerTLSConfig(a.peerServerTLS),
-		agent.WithPeerClientTLSConfig(a.peerClientTLS),
+		options...,
 	)
 	if err != nil {
 		a.logRuntimeError(ctx, a.runtimeConfig.Source, a.runtimeConfig.Path, err)

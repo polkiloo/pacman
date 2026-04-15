@@ -22,30 +22,31 @@ type NodeStatePublisher interface {
 // MemoryStateStore is an in-memory replicated control-plane state store used
 // until the distributed source of truth is implemented.
 type MemoryStateStore struct {
-	dcs                 dcs.DCS
-	keyspace            dcs.KeySpace
-	clusterName         string
-	logger              *slog.Logger
-	mu                  sync.RWMutex
-	registrations       map[string]MemberRegistration
-	nodeStatuses        map[string]agentmodel.NodeStatus
-	nodeStatusRevisions map[string]int64
-	clusterSpec         *cluster.ClusterSpec
-	clusterSpecRevision int64
-	clusterStatus       *cluster.ClusterStatus
-	maintenance         cluster.MaintenanceModeStatus
-	maintenanceRevision int64
-	activeOperation     *cluster.Operation
-	activeOpRevision    int64
-	history             []cluster.HistoryEntry
-	leaderLease         LeaderLease
-	now                 func() time.Time
-	leaseDuration       time.Duration
-	cacheRefreshedAt    time.Time
-	cacheMaxAge         time.Duration
-	cacheDirty          bool
-	sourceUpdated       time.Time
-	lastDCSSeenAt       time.Time
+	dcs                  dcs.DCS
+	keyspace             dcs.KeySpace
+	clusterName          string
+	logger               *slog.Logger
+	mu                   sync.RWMutex
+	registrations        map[string]MemberRegistration
+	nodeStatuses         map[string]agentmodel.NodeStatus
+	nodeStatusRevisions  map[string]int64
+	clusterSpec          *cluster.ClusterSpec
+	clusterSpecRevision  int64
+	clusterStatus        *cluster.ClusterStatus
+	maintenance          cluster.MaintenanceModeStatus
+	maintenanceRevision  int64
+	activeOperation      *cluster.Operation
+	activeOpRevision     int64
+	history              []cluster.HistoryEntry
+	operationTraceCounts map[operationTraceKey]uint64
+	leaderLease          LeaderLease
+	now                  func() time.Time
+	leaseDuration        time.Duration
+	cacheRefreshedAt     time.Time
+	cacheMaxAge          time.Duration
+	cacheDirty           bool
+	sourceUpdated        time.Time
+	lastDCSSeenAt        time.Time
 }
 
 // RegisterMember stores the static member identity published during daemon

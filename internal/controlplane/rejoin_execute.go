@@ -87,7 +87,7 @@ func (store *MemoryStateStore) prepareRejoinRewindExecution(request RejoinReques
 		return preparedRejoinExecution{}, err
 	}
 
-	store.activeOperation = &operation
+	store.journalOperationLocked(operation, executedAt)
 	store.refreshSourceOfTruthLocked(executedAt)
 
 	return preparedRejoinExecution{

@@ -52,20 +52,21 @@ func NewControlPlane(store dcs.DCS, clusterName string, logger *slog.Logger) *Co
 	}
 
 	controlPlane := &ControlPlane{
-		dcs:                 store,
-		keyspace:            space,
-		clusterName:         resolvedClusterName,
-		logger:              logger,
-		registrations:       make(map[string]MemberRegistration),
-		nodeStatuses:        make(map[string]agentmodel.NodeStatus),
-		nodeStatusRevisions: make(map[string]int64),
-		now:                 time.Now,
-		leaseDuration:       defaultLeaderLeaseDuration,
-		cacheMaxAge:         defaultCacheMaxAge,
-		clusterSpecRevision: -1,
-		maintenanceRevision: -1,
-		activeOpRevision:    -1,
-		cacheDirty:          true,
+		dcs:                  store,
+		keyspace:             space,
+		clusterName:          resolvedClusterName,
+		logger:               logger,
+		registrations:        make(map[string]MemberRegistration),
+		nodeStatuses:         make(map[string]agentmodel.NodeStatus),
+		nodeStatusRevisions:  make(map[string]int64),
+		now:                  time.Now,
+		leaseDuration:        defaultLeaderLeaseDuration,
+		cacheMaxAge:          defaultCacheMaxAge,
+		clusterSpecRevision:  -1,
+		maintenanceRevision:  -1,
+		activeOpRevision:     -1,
+		operationTraceCounts: make(map[operationTraceKey]uint64),
+		cacheDirty:           true,
 	}
 
 	controlPlane.startCacheWatch()
