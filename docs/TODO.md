@@ -315,15 +315,26 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 
 ## 15. Structured Logging (`slog`)
 
-- [x] expand `pacmand` runtime `slog` coverage and field consistency
-- [x] expand `pacmanctl` runtime `slog` coverage and field consistency
-- [x] add `slog`-backed HTTP access logging
-- [x] add structured event logs for cluster lifecycle and state transitions
-- [x] add request, node, member, and operation correlation fields across API and control-plane logs
-- [x] add audit logging for topology changes and maintenance mode changes
-- [ ] add reconciliation debug logging with safe verbosity controls
-- [ ] define embedded-worker logging, error propagation, and failure-isolation rules
-- [ ] add secret redaction rules and logging-focused test coverage inspired by Patroni `tests/test_log.py` and `tests/test_utils.py`
+### Logger Foundation
+- [x] standardize process logger construction around JSON `slog` output with stable build metadata fields (`service`, `version`, `commit`, `build_date`)
+- [x] support runtime log-level selection for the process logger so operators can switch between normal and debug verbosity without code changes
+- [x] provide the shared process logger through an Fx module (`internal/logging.Module`) so `pacmand` and `pacmanctl` resolve one canonical logger from DI
+- [x] support Fx-registered logger middleware/decorators so command/runtime-specific logger enrichment can be composed without rebuilding handlers
+
+### Runtime and API Coverage
+- [x] expand `pacmand` runtime `slog` coverage and field consistency for startup, config loading, local-agent runtime, and error paths
+- [x] expand `pacmanctl` runtime `slog` coverage and field consistency for command lifecycle and API-client request/result logging
+- [x] add `slog`-backed HTTP access logging middleware with method, route, path, request ID, status, duration, size, and error fields
+
+### Control-Plane Events and Correlation
+- [x] add structured event logs for control-plane lifecycle, state transitions, operation-state changes, and topology updates
+- [x] propagate correlation fields such as request, node, member, principal, and operation identifiers across API, agent, and control-plane logs
+- [x] add audit logging for topology changes, failover/switchover requests, and maintenance mode changes
+- [x] add reconciliation debug logging with safe verbosity controls so debug mode emits summarized truth/state deltas without dumping raw payloads
+
+### Embedded Worker and Safety
+- [x] define embedded-worker logging, error propagation, and failure-isolation rules for PostgreSQL extension mode
+- [x] add secret redaction rules for structured fields and inline secret-bearing strings, with logging-focused test coverage inspired by Patroni `tests/test_log.py` and `tests/test_utils.py`
 
 ---
 
