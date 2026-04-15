@@ -149,7 +149,7 @@ func TestPACMANClusterEnvironment(t *testing.T) {
 		t.Fatalf("unexpected patronictl-compatible topology output: %q", topologyOutput)
 	}
 
-	listJSONOutput := cli.RequireExec(t, "/bin/sh", "-lc", fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl list -f json", daemonAlias))
+	listJSONOutput := cli.RequireExec(t, "/bin/sh", "-lc", fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 pacmanctl list -f json 2>/dev/null", daemonAlias))
 	var listJSON struct {
 		Cluster string `json:"cluster"`
 		Members []struct {
