@@ -10,7 +10,8 @@ import (
 type moduleParams struct {
 	fx.In
 
-	Stderr io.Writer `name:"stderr"`
+	Stderr      io.Writer    `name:"stderr"`
+	Middlewares []Middleware `group:"logging.middleware"`
 }
 
 // Module provides the process logger into the Fx graph using the registered
@@ -19,7 +20,7 @@ func Module(service string) fx.Option {
 	return fx.Module(
 		"logging",
 		fx.Provide(func(params moduleParams) *slog.Logger {
-			return New(service, params.Stderr)
+			return applyMiddleware(New(service, params.Stderr), params.Middlewares)
 		}),
 	)
 }
