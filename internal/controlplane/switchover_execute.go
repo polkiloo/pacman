@@ -151,7 +151,7 @@ func validateSwitchoverExecutionIntent(operation cluster.Operation, validation S
 
 func (store *MemoryStateStore) startSwitchoverExecutionLocked(operation cluster.Operation, executedAt time.Time) cluster.Operation {
 	updated := beginSwitchoverExecution(operation, executedAt)
-	store.activeOperation = &updated
+	store.journalOperationLocked(updated, executedAt)
 	store.refreshSourceOfTruthLocked(executedAt)
 
 	return updated.Clone()

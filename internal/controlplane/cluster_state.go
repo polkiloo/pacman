@@ -465,6 +465,8 @@ func (store *MemoryStateStore) journalOperationLocked(operation cluster.Operatio
 	}
 
 	if previousOperation == nil || !sameOperationState(previousOperation, &cloned) {
+		store.recordOperationTraceLocked(cloned)
+
 		attributes := operationLogAttrs(cloned)
 		if previousOperation != nil {
 			attributes = append(

@@ -70,7 +70,7 @@ func (store *MemoryStateStore) prepareFailoverExecution(promoter PromotionExecut
 	}
 
 	operation = beginFailoverExecution(operation, executedAt)
-	store.activeOperation = &operation
+	store.journalOperationLocked(operation, executedAt)
 	store.refreshSourceOfTruthLocked(executedAt)
 	store.mu.Unlock()
 

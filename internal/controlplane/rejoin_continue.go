@@ -174,7 +174,7 @@ func (store *MemoryStateStore) startRejoinContinuationLocked(prepared preparedRe
 	}
 	updated.Result = cluster.OperationResultPending
 	updated.Message = message
-	store.activeOperation = &updated
+	store.journalOperationLocked(updated, prepared.executedAt)
 	store.refreshSourceOfTruthLocked(prepared.executedAt)
 
 	prepared.operation = updated.Clone()
