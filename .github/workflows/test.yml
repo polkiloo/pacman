@@ -71,3 +71,14 @@ jobs:
 
       - name: Run integration HA suite
         run: make test-integration-ha
+
+  test-rpm-packaging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate RPM install lifecycle
+        run: make rpm-validate

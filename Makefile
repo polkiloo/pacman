@@ -2,6 +2,15 @@ GOTOOLCHAIN ?= go1.26.1
 GO ?= go
 BIN_DIR ?= ./bin
 GOBIN ?= $(shell $(GO) env GOBIN)
+CONTAINER_RUNTIME ?= docker
+RPM_BUILDER_IMAGE ?= pacman-rpm-builder:el9
+RPM_OUTPUT_DIR ?= $(CURDIR)/bin/rpm
+RPM_VERSION ?= 0.1.0
+RPM_RELEASE ?= 1
+RPM_SOURCE_DATE_EPOCH ?= $(shell git log -1 --pretty=%ct 2>/dev/null || date +%s)
+RPM_VALIDATE_RELEASE1_DIR ?= $(CURDIR)/bin/rpm/release1
+RPM_VALIDATE_RELEASE2_DIR ?= $(CURDIR)/bin/rpm/release2
+RPM_VALIDATION_IMAGE ?= rockylinux:9
 
 export GOTOOLCHAIN
 
@@ -49,7 +58,7 @@ LDFLAGS := -X github.com/polkiloo/pacman/internal/version.Version=$(VERSION) \
 	-X github.com/polkiloo/pacman/internal/version.Commit=$(COMMIT) \
 	-X github.com/polkiloo/pacman/internal/version.BuildDate=$(BUILD_DATE)
 
-.PHONY: fmt test test-dcs-conformance test-integration test-integration-smoke test-integration-security test-integration-patroni test-integration-pgext test-integration-ha docker-build-test-image docker-build-pgext-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl build-pg-extension package-pg-extension install-pg-extension clean-pg-extension tidy clean openapi-codegen-check
+.PHONY: fmt test test-dcs-conformance test-integration test-integration-smoke test-integration-security test-integration-patroni test-integration-pgext test-integration-ha docker-build-test-image docker-build-pgext-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl build-pg-extension package-pg-extension install-pg-extension clean-pg-extension tidy clean openapi-codegen-check rpm rpm-builder-image rpm-validate
 
 fmt:
 	$(GO) fmt ./...
@@ -150,6 +159,30 @@ install-pg-extension: package-pg-extension
 
 clean-pg-extension:
 	$(PG_EXTENSION_MAKE) clean
+
+rpm: rpm-builder-image
+	mkdir -p $(RPM_OUTPUT_DIR)
+	$(CONTAINER_RUNTIME) run --rm \
+		-e WORKSPACE=/workspace \
+		-e OUTPUT_DIR=/out \
+		-e RPM_VERSION=$(RPM_VERSION) \
+		-e RPM_RELEASE=$(RPM_RELEASE) \
+		-e RPM_COMMIT=$(COMMIT) \
+		-e SOURCE_DATE_EPOCH=$(RPM_SOURCE_DATE_EPOCH) \
+		-v $(CURDIR):/workspace:ro \
+		-v $(RPM_OUTPUT_DIR):/out \
+		$(RPM_BUILDER_IMAGE) \
+		/workspace/packaging/rpm/build-rpm.sh
+
+rpm-builder-image:
+	$(CONTAINER_RUNTIME) build -f packaging/rpm/Containerfile -t $(RPM_BUILDER_IMAGE) .
+
+rpm-validate:
+	rm -rf $(RPM_VALIDATE_RELEASE1_DIR) $(RPM_VALIDATE_RELEASE2_DIR)
+	$(MAKE) rpm RPM_OUTPUT_DIR=$(RPM_VALIDATE_RELEASE1_DIR) RPM_RELEASE=1
+	$(MAKE) rpm RPM_OUTPUT_DIR=$(RPM_VALIDATE_RELEASE2_DIR) RPM_RELEASE=2
+	CONTAINER_RUNTIME=$(CONTAINER_RUNTIME) RPM_VALIDATION_IMAGE=$(RPM_VALIDATION_IMAGE) \
+		./packaging/rpm/validate-install-flow.sh $(RPM_VALIDATE_RELEASE1_DIR) $(RPM_VALIDATE_RELEASE2_DIR)
 
 build-pacmand:
 	mkdir -p $(BIN_DIR)
