@@ -1,0 +1,17 @@
+[Unit]
+Description=PACMAN local agent daemon
+Documentation=https://github.com/polkiloo/pacman
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/sysconfig/pacmand
+WorkingDirectory=/var/lib/pacman
+ExecStart=/usr/bin/pacmand -config ${PACMAND_CONFIG} ${PACMAND_EXTRA_ARGS}
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
