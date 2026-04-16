@@ -1,0 +1,140 @@
+---
+- name: Configure external etcd DCS node for PACMAN lab
+  hosts: dcs_nodes
+  become: true
+  tasks:
+    - name: Install etcd package
+      ansible.builtin.package:
+        name: "{{ etcd_package_name }}"
+        state: present
+
+    - name: Ensure etcd data directory exists
+      ansible.builtin.file:
+        path: "{{ etcd_data_dir }}"
+        state: directory
+        owner: "{{ etcd_user }}"
+        group: "{{ etcd_group }}"
+        mode: "0750"
+
+    - name: Ensure etcd systemd drop-in directory exists
+      ansible.builtin.file:
+        path: "/etc/systemd/system/{{ etcd_service_name }}.service.d"
+        state: directory
+        mode: "0755"
+
+    - name: Install etcd systemd override for single-node lab cluster
+      ansible.builtin.template:
+        src: templates/etcd-override.conf.j2
+        dest: "/etc/systemd/system/{{ etcd_service_name }}.service.d/override.conf"
+        mode: "0644"
+      notify:
+        - Restart etcd
+
+    - name: Ensure etcd service is enabled and started
+      ansible.builtin.systemd:
+        name: "{{ etcd_service_name }}"
+        daemon_reload: true
+        enabled: true
+        state: started
+
+  handlers:
+    - name: Restart etcd
+      ansible.builtin.systemd:
+        name: "{{ etcd_service_name }}"
+        daemon_reload: true
+        state: restarted
+
+- name: Configure PostgreSQL and pacmand lab nodes
+  hosts: postgres_nodes
+  become: true
+  vars:
+    pacman_install_target: "{{ pacman_download_path if (pacman_package_url | length > 0) else pacman_package_name }}"
+  tasks:
+    - name: Install PostgreSQL server and client packages
+      ansible.builtin.package:
+        name:
+          - "{{ postgres_server_package_name }}"
+          - "{{ postgres_client_package_name }}"
+        state: present
+
+    - name: Download PACMAN RPM when a package URL is provided
+      ansible.builtin.get_url:
+        url: "{{ pacman_package_url }}"
+        dest: "{{ pacman_download_path }}"
+        mode: "0644"
+      when: pacman_package_url | length > 0
+
+    - name: Install PACMAN package
+      ansible.builtin.package:
+        name: "{{ pacman_install_target }}"
+        state: present
+
+    - name: Ensure PACMAN config directory exists
+      ansible.builtin.file:
+        path: "{{ pacmand_config_dir }}"
+        state: directory
+        owner: root
+        group: "{{ pacmand_service_group }}"
+        mode: "0750"
+
+    - name: Ensure PACMAN local state directory exists
+      ansible.builtin.file:
+        path: "{{ pacmand_state_dir }}"
+        state: directory
+        owner: "{{ pacmand_service_user }}"
+        group: "{{ pacmand_service_group }}"
+        mode: "0750"
+
+    - name: Install PACMAN admin bearer token for the lab
+      ansible.builtin.copy:
+        dest: "{{ pacman_admin_token_path }}"
+        content: "{{ pacman_admin_token }}\n"
+        owner: root
+        group: "{{ pacmand_service_group }}"
+        mode: "0640"
+      no_log: true
+      notify:
+        - Restart pacmand
+
+    - name: Install PACMAN node config
+      ansible.builtin.template:
+        src: templates/pacmand.yml.j2
+        dest: "{{ pacmand_config_path }}"
+        owner: root
+        group: "{{ pacmand_service_group }}"
+        mode: "0640"
+      notify:
+        - Restart pacmand
+
+    - name: Install pacmand systemd unit
+      ansible.builtin.template:
+        src: templates/pacmand.service.j2
+        dest: "/etc/systemd/system/{{ pacmand_service_name }}.service"
+        mode: "0644"
+      notify:
+        - Restart pacmand
+
+    - name: Initialize PostgreSQL data directory when needed
+      ansible.builtin.command: "{{ postgres_initdb_command }}"
+      args:
+        creates: "{{ postgres_data_dir }}/PG_VERSION"
+
+    - name: Ensure PostgreSQL service is enabled and started
+      ansible.builtin.service:
+        name: "{{ postgres_service_name }}"
+        enabled: true
+        state: started
+
+    - name: Ensure pacmand service is enabled and started
+      ansible.builtin.systemd:
+        name: "{{ pacmand_service_name }}"
+        daemon_reload: true
+        enabled: true
+        state: started
+
+  handlers:
+    - name: Restart pacmand
+      ansible.builtin.systemd:
+        name: "{{ pacmand_service_name }}"
+        daemon_reload: true
+        state: restarted

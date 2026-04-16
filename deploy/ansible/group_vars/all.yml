@@ -1,0 +1,36 @@
+---
+pacman_cluster_name: alpha
+pacman_initial_primary: alpha-1
+pacman_package_name: pacman
+pacman_package_url: ""
+pacman_download_path: /var/tmp/pacman.rpm
+pacman_api_port: 8080
+pacman_control_port: 9090
+
+postgres_server_package_name: postgresql17-server
+postgres_client_package_name: postgresql17
+postgres_service_name: postgresql-17
+postgres_initdb_command: /usr/pgsql-17/bin/postgresql-17-setup initdb
+postgres_data_dir: /var/lib/pgsql/17/data
+postgres_bin_dir: /usr/pgsql-17/bin
+postgres_listen_address: 127.0.0.1
+postgres_port: 5432
+
+etcd_package_name: etcd
+etcd_service_name: etcd
+etcd_binary_path: /usr/bin/etcd
+etcd_user: etcd
+etcd_group: etcd
+etcd_data_dir: /var/lib/etcd/pacman
+etcd_client_port: 2379
+etcd_peer_port: 2380
+
+pacmand_service_name: pacmand
+pacmand_binary_path: /usr/bin/pacmand
+pacmand_service_user: postgres
+pacmand_service_group: postgres
+pacmand_config_dir: /etc/pacman
+pacmand_config_path: /etc/pacman/pacmand.yaml
+pacmand_state_dir: /var/lib/pacman
+pacman_admin_token_path: /etc/pacman/admin-token
+pacman_admin_token: change-me-before-production

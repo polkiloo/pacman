@@ -1,0 +1,16 @@
+[Unit]
+Description=PACMAN local agent daemon
+After=network-online.target {{ postgres_service_name }}.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ pacmand_service_user }}
+Group={{ pacmand_service_group }}
+WorkingDirectory={{ pacmand_state_dir }}
+ExecStart={{ pacmand_binary_path }} -config {{ pacmand_config_path }}
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,40 @@
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+
+node:
+  name: "{{ pacman_node_name | default(inventory_hostname) }}"
+  role: data
+  apiAddress: "{{ pacman_api_address | default((ansible_host | default(ansible_default_ipv4.address)) ~ ':' ~ pacman_api_port) }}"
+  controlAddress: "{{ pacman_control_address | default((ansible_host | default(ansible_default_ipv4.address)) ~ ':' ~ pacman_control_port) }}"
+
+dcs:
+  backend: etcd
+  clusterName: "{{ pacman_cluster_name }}"
+  ttl: 30s
+  retryTimeout: 10s
+  etcd:
+    endpoints:
+{% for host in groups['dcs_nodes'] %}
+      - "{{ hostvars[host].etcd_client_advertise_url | default('http://' ~ (hostvars[host].ansible_host | default(hostvars[host].ansible_default_ipv4.address | default(host))) ~ ':' ~ etcd_client_port) }}"
+{% endfor %}
+
+security:
+  adminBearerTokenFile: "{{ pacman_admin_token_path }}"
+
+postgres:
+  dataDir: "{{ postgres_data_dir }}"
+  binDir: "{{ postgres_bin_dir }}"
+  listenAddress: "{{ postgres_listen_address }}"
+  port: {{ postgres_port }}
+
+bootstrap:
+  clusterName: "{{ pacman_cluster_name }}"
+  initialPrimary: "{{ pacman_initial_primary | default(groups['postgres_nodes'][0]) }}"
+  seedAddresses:
+{% for host in groups['postgres_nodes'] %}
+    - "{{ hostvars[host].pacman_control_address | default((hostvars[host].ansible_host | default(hostvars[host].ansible_default_ipv4.address | default(host))) ~ ':' ~ pacman_control_port) }}"
+{% endfor %}
+  expectedMembers:
+{% for host in groups['postgres_nodes'] %}
+    - "{{ hostvars[host].pacman_node_name | default(host) }}"
+{% endfor %}
