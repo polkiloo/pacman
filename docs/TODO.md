@@ -357,15 +357,15 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 
 ### RPM Packaging
 
-- [ ] add `packaging/rpm/` sources and a reproducible RPM build recipe for `pacmand` and `pacmanctl`
-- [ ] add a dedicated `make rpm` target that cross-compiles and produces a CentOS-compatible RPM using a builder container (no host toolchain required)
-- [ ] decide whether the PostgreSQL extension ships in the same RPM or in a separate `pacman-postgresqlXX-agent` package
-- [ ] define RPM filesystem layout for binaries, config, state, logs, and PostgreSQL extension assets
-- [ ] mark shipped config files as upgrade-safe and document `%config(noreplace)` expectations for local edits
-- [ ] add RPM lifecycle scripts or equivalent hooks for users, directories, permissions, systemd reload, and first-install defaults
-- [ ] define package dependencies for PostgreSQL client tools, systemd units, and optional etcd / lab helpers
-- [ ] publish or document an RPM repository path for RHEL / Rocky / Alma style systems, including signing expectations
-- [ ] validate clean install, upgrade, rollback, and removal flows on an RPM-based distro in CI
+- [x] add `packaging/rpm/` sources and a reproducible RPM build recipe for `pacmand` and `pacmanctl`
+- [x] add a dedicated `make rpm` target that cross-compiles and produces a CentOS-compatible RPM using a builder container (no host toolchain required)
+- [x] decide whether the PostgreSQL extension ships in the same RPM or in a separate `pacman-postgresqlXX-agent` package
+- [x] define RPM filesystem layout for binaries, config, state, logs, and PostgreSQL extension assets
+- [x] mark shipped config files as upgrade-safe and document `%config(noreplace)` expectations for local edits
+- [x] add RPM lifecycle scripts or equivalent hooks for users, directories, permissions, systemd reload, and first-install defaults
+- [x] define package dependencies for PostgreSQL client tools, systemd units, and optional etcd / lab helpers
+- [x] publish or document an RPM repository path for RHEL / Rocky / Alma style systems, including signing expectations
+- [x] validate clean install, upgrade, rollback, and removal flows on an RPM-based distro in CI
 
 ### Deployment Automation
 
