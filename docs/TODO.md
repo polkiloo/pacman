@@ -407,9 +407,9 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] verify every `pacmand` container can resolve and probe its local `postgres:17` peer with `pg_isready` and `psql`
 - [x] verify every PostgreSQL sidecar reports a PostgreSQL 17 server version and remains attached to the shared cluster network with the expected alias mapping
 - [x] verify `pacmanctl -version` and `pacmanctl cluster status` execute successfully from the client container
-- [ ] wire the process-mode `pacmand` topology to a shared DCS backend instead of the per-process in-memory control-plane store
-- [ ] add daemon-side execution of accepted switchover, failover, and rejoin operations in the multi-container topology
-- [ ] extend the same topology with replication/bootstrap wiring and assert switchover, failover, and rejoin flows end to end through the real `pacmand` API
+- [x] wire the process-mode `pacmand` topology to a shared DCS backend instead of the per-process in-memory control-plane store
+- [x] add daemon-side execution of accepted switchover, failover, and rejoin operations in the multi-container topology
+- [x] extend the same topology with replication/bootstrap wiring and assert switchover, failover, and rejoin flows end to end through the real `pacmand` API
 
 
 ### Patroni Migration Compatibility
