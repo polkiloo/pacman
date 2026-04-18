@@ -1,0 +1,163 @@
+---
+- name: Resolve PACMAN package install target
+  ansible.builtin.set_fact:
+    pacman_install_target: "{{ pacman_download_path if (pacman_package_url | length > 0) else pacman_package_name }}"
+
+- name: Validate TLS secret inputs when PACMAN TLS is enabled
+  ansible.builtin.assert:
+    that:
+      - pacman_tls_ca_src | length > 0
+      - pacman_tls_cert_src | length > 0
+      - pacman_tls_key_src | length > 0
+    fail_msg: "PACMAN TLS is enabled but one or more TLS source files are missing"
+  when: pacman_tls_enabled | bool
+
+- name: Validate rotated admin token inputs
+  ansible.builtin.assert:
+    that:
+      - pacman_admin_token_active_id | length > 0
+      - pacman_admin_token_source_files | selectattr('id', 'equalto', pacman_admin_token_active_id) | list | length == 1
+    fail_msg: "pacman_admin_token_active_id must be set when pacman_admin_token_source_files are provided"
+  when: pacman_admin_token_source_files | length > 0
+
+- name: Download PACMAN RPM when a package URL is provided
+  ansible.builtin.get_url:
+    url: "{{ pacman_package_url }}"
+    dest: "{{ pacman_download_path }}"
+    mode: "0644"
+  when: pacman_package_url | length > 0
+
+- name: Install PACMAN package
+  ansible.builtin.package:
+    name: "{{ pacman_install_target }}"
+    state: present
+
+- name: Ensure PACMAN config directory exists
+  ansible.builtin.file:
+    path: "{{ pacmand_config_dir }}"
+    state: directory
+    owner: root
+    group: "{{ pacmand_service_group }}"
+    mode: "0750"
+
+- name: Ensure PACMAN local state directory exists
+  ansible.builtin.file:
+    path: "{{ pacmand_state_dir }}"
+    state: directory
+    owner: "{{ pacmand_service_user }}"
+    group: "{{ pacmand_service_group }}"
+    mode: "0750"
+
+- name: Ensure PACMAN token directory exists
+  ansible.builtin.file:
+    path: "{{ pacmand_token_dir }}"
+    state: directory
+    owner: root
+    group: "{{ pacmand_service_group }}"
+    mode: "0750"
+  when: pacman_admin_token_source_files | length > 0
+
+- name: Install staged PACMAN admin bearer tokens
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ pacmand_token_dir }}/{{ item.id }}.token"
+    owner: root
+    group: "{{ pacmand_service_group }}"
+    mode: "0640"
+  loop: "{{ pacman_admin_token_source_files }}"
+  loop_control:
+    label: "{{ item.id }}"
+  no_log: true
+  when: pacman_admin_token_source_files | length > 0
+  notify:
+    - Restart pacmand
+
+- name: Activate the selected PACMAN admin bearer token
+  ansible.builtin.file:
+    src: "{{ pacmand_token_dir }}/{{ pacman_admin_token_active_id }}.token"
+    dest: "{{ pacman_admin_token_path }}"
+    state: link
+    force: true
+  when: pacman_admin_token_source_files | length > 0
+  notify:
+    - Restart pacmand
+
+- name: Install inline PACMAN admin bearer token when no token files are supplied
+  ansible.builtin.copy:
+    dest: "{{ pacman_admin_token_path }}"
+    content: "{{ pacman_admin_token_inline }}\n"
+    owner: root
+    group: "{{ pacmand_service_group }}"
+    mode: "0640"
+  no_log: true
+  when: pacman_admin_token_source_files | length == 0
+  notify:
+    - Restart pacmand
+
+- name: Ensure PACMAN TLS directory exists
+  ansible.builtin.file:
+    path: "{{ pacman_tls_dir }}"
+    state: directory
+    owner: root
+    group: "{{ pacmand_service_group }}"
+    mode: "0750"
+  when: pacman_tls_enabled | bool
+
+- name: Install PACMAN TLS CA certificate
+  ansible.builtin.copy:
+    src: "{{ pacman_tls_ca_src }}"
+    dest: "{{ pacman_tls_ca_path }}"
+    owner: root
+    group: "{{ pacmand_service_group }}"
+    mode: "0644"
+  when: pacman_tls_enabled | bool
+  notify:
+    - Restart pacmand
+
+- name: Install PACMAN TLS certificate
+  ansible.builtin.copy:
+    src: "{{ pacman_tls_cert_src }}"
+    dest: "{{ pacman_tls_cert_path }}"
+    owner: root
+    group: "{{ pacmand_service_group }}"
+    mode: "0644"
+  when: pacman_tls_enabled | bool
+  notify:
+    - Restart pacmand
+
+- name: Install PACMAN TLS private key
+  ansible.builtin.copy:
+    src: "{{ pacman_tls_key_src }}"
+    dest: "{{ pacman_tls_key_path }}"
+    owner: root
+    group: "{{ pacmand_service_group }}"
+    mode: "0640"
+  no_log: true
+  when: pacman_tls_enabled | bool
+  notify:
+    - Restart pacmand
+
+- name: Install PACMAN node config
+  ansible.builtin.template:
+    src: pacmand.yml.j2
+    dest: "{{ pacmand_config_path }}"
+    owner: root
+    group: "{{ pacmand_service_group }}"
+    mode: "0640"
+  notify:
+    - Restart pacmand
+
+- name: Install pacmand systemd unit
+  ansible.builtin.template:
+    src: pacmand.service.j2
+    dest: "/etc/systemd/system/{{ pacmand_service_name }}.service"
+    mode: "0644"
+  notify:
+    - Restart pacmand
+
+- name: Ensure pacmand service is enabled and started
+  ansible.builtin.systemd:
+    name: "{{ pacmand_service_name }}"
+    daemon_reload: true
+    enabled: true
+    state: started

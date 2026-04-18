@@ -1,0 +1,21 @@
+---
+postgres_server_package_name: postgresql17-server
+postgres_client_package_name: postgresql17
+postgres_service_name: postgresql-17
+postgres_initdb_command: /usr/pgsql-17/bin/postgresql-17-setup initdb
+postgres_bin_dir: /usr/pgsql-17/bin
+postgres_data_dir: /var/lib/pgsql/17/data
+postgres_port: 5432
+postgres_server_listen_addresses: "*"
+postgres_os_user: postgres
+postgres_os_group: postgres
+postgres_manage_replication: true
+postgres_replication_user: replicator
+postgres_replication_password: replicator
+postgres_replication_hba_cidrs:
+  - 0.0.0.0/0
+postgres_replication_force_reclone: false
+postgres_max_wal_senders: 10
+postgres_max_replication_slots: 10
+postgres_wal_keep_size: 512MB
+postgres_extra_parameters: {}

@@ -1,0 +1,11 @@
+---
+etcd_package_name: etcd
+etcd_service_name: etcd
+etcd_binary_path: /usr/bin/etcd
+etcd_user: etcd
+etcd_group: etcd
+etcd_data_dir: /var/lib/etcd/pacman
+etcd_client_port: 2379
+etcd_peer_port: 2380
+etcd_initial_cluster_state: new
+etcd_initial_cluster_token: pacman-cluster

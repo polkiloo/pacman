@@ -4,8 +4,8 @@ kind: NodeConfig
 node:
   name: "{{ pacman_node_name | default(inventory_hostname) }}"
   role: data
-  apiAddress: "{{ pacman_api_address | default((ansible_host | default(ansible_default_ipv4.address)) ~ ':' ~ pacman_api_port) }}"
-  controlAddress: "{{ pacman_control_address | default((ansible_host | default(ansible_default_ipv4.address)) ~ ':' ~ pacman_control_port) }}"
+  apiAddress: "{{ pacman_api_address | default((ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))) ~ ':' ~ pacman_api_port) }}"
+  controlAddress: "{{ pacman_control_address | default((ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))) ~ ':' ~ pacman_control_port) }}"
 
 dcs:
   backend: etcd
@@ -18,8 +18,23 @@ dcs:
       - "{{ hostvars[host].etcd_client_advertise_url | default('http://' ~ (hostvars[host].ansible_host | default(hostvars[host].ansible_default_ipv4.address | default(host))) ~ ':' ~ etcd_client_port) }}"
 {% endfor %}
 
+{% if pacman_tls_enabled %}
+tls:
+  enabled: true
+  caFile: "{{ pacman_tls_ca_path }}"
+  certFile: "{{ pacman_tls_cert_path }}"
+  keyFile: "{{ pacman_tls_key_path }}"
+{% if pacman_tls_server_name | length > 0 %}
+  serverName: "{{ pacman_tls_server_name }}"
+{% endif %}
+  insecureSkipVerify: {{ pacman_tls_insecure_skip_verify | bool | lower }}
+
+{% endif %}
 security:
   adminBearerTokenFile: "{{ pacman_admin_token_path }}"
+{% if pacman_security_member_mtls_enabled | bool %}
+  memberMTLSEnabled: true
+{% endif %}
 
 postgres:
   dataDir: "{{ postgres_data_dir }}"
@@ -29,7 +44,7 @@ postgres:
 
 bootstrap:
   clusterName: "{{ pacman_cluster_name }}"
-  initialPrimary: "{{ pacman_initial_primary | default(groups['postgres_nodes'][0]) }}"
+  initialPrimary: "{{ pacman_initial_primary }}"
   seedAddresses:
 {% for host in groups['postgres_nodes'] %}
     - "{{ hostvars[host].pacman_control_address | default((hostvars[host].ansible_host | default(hostvars[host].ansible_default_ipv4.address | default(host))) ~ ':' ~ pacman_control_port) }}"

@@ -1,0 +1,97 @@
+---
+- name: Wait for the initial primary to accept replication connections
+  ansible.builtin.wait_for:
+    host: "{{ postgres_replication_primary_address }}"
+    port: "{{ postgres_port }}"
+    timeout: 120
+
+- name: Stop PostgreSQL before replica bootstrap
+  ansible.builtin.service:
+    name: "{{ postgres_service_name }}"
+    state: stopped
+  failed_when: false
+
+- name: Check whether the replica has already been bootstrapped
+  ansible.builtin.stat:
+    path: "{{ postgres_data_dir }}/standby.signal"
+  register: postgres_replica_standby_signal
+
+- name: Recreate PostgreSQL data directory before basebackup
+  ansible.builtin.file:
+    path: "{{ postgres_data_dir }}"
+    state: absent
+  when: (postgres_replication_force_reclone | bool) or not postgres_replica_standby_signal.stat.exists
+
+- name: Ensure empty PostgreSQL data directory exists for replica bootstrap
+  ansible.builtin.file:
+    path: "{{ postgres_data_dir }}"
+    state: directory
+    owner: "{{ postgres_os_user }}"
+    group: "{{ postgres_os_group }}"
+    mode: "0700"
+  when: (postgres_replication_force_reclone | bool) or not postgres_replica_standby_signal.stat.exists
+
+- name: Clone replica data directory from the initial primary
+  ansible.builtin.shell: |
+    set -euo pipefail
+    export PGPASSWORD='{{ postgres_replication_password | replace("'", "'\"'\"'") }}'
+    "{{ postgres_bin_dir }}/pg_basebackup" \
+      -h "{{ postgres_replication_primary_address }}" \
+      -p "{{ postgres_port }}" \
+      -U "{{ postgres_replication_user }}" \
+      -D "{{ postgres_data_dir }}" \
+      -R \
+      -X stream \
+      -C \
+      -S "{{ postgres_replication_slot_name }}"
+  args:
+    executable: /bin/bash
+  become_user: "{{ postgres_os_user }}"
+  no_log: true
+  when: (postgres_replication_force_reclone | bool) or not postgres_replica_standby_signal.stat.exists
+
+- name: Install PostgreSQL PACMAN tuning block on replicas
+  ansible.builtin.blockinfile:
+    path: "{{ postgres_data_dir }}/postgresql.auto.conf"
+    create: true
+    owner: "{{ postgres_os_user }}"
+    group: "{{ postgres_os_group }}"
+    mode: "0600"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK pacman-postgresql"
+    block: "{{ lookup('template', 'postgresql.auto.conf.j2') }}"
+  notify:
+    - Restart PostgreSQL
+
+- name: Install PostgreSQL PACMAN pg_hba rules on replicas
+  ansible.builtin.blockinfile:
+    path: "{{ postgres_data_dir }}/pg_hba.conf"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK pacman-pg-hba"
+    block: "{{ lookup('template', 'pg_hba.conf.j2') }}"
+  notify:
+    - Restart PostgreSQL
+
+- name: Ensure PostgreSQL service is enabled and started on replicas
+  ansible.builtin.service:
+    name: "{{ postgres_service_name }}"
+    enabled: true
+    state: started
+
+- name: Wait for PostgreSQL to accept connections on replicas
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ postgres_port }}"
+    timeout: 120
+
+- name: Verify the replica enters streaming recovery
+  ansible.builtin.command:
+    argv:
+      - "{{ postgres_bin_dir }}/psql"
+      - --dbname=postgres
+      - -tAc
+      - SELECT CASE WHEN pg_is_in_recovery() AND EXISTS (SELECT 1 FROM pg_stat_wal_receiver WHERE status = 'streaming') THEN 'ready' ELSE 'not-ready' END
+  become_user: "{{ postgres_os_user }}"
+  register: postgres_replica_ready
+  changed_when: false
+  retries: 30
+  delay: 3
+  until: postgres_replica_ready.stdout | trim == "ready"

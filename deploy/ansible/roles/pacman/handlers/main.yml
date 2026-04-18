@@ -1,0 +1,6 @@
+---
+- name: Restart pacmand
+  ansible.builtin.systemd:
+    name: "{{ pacmand_service_name }}"
+    daemon_reload: true
+    state: restarted
