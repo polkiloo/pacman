@@ -1,0 +1,2 @@
+PACMAND_CONFIG=/etc/pacman/pacmand.yaml
+PACMAND_EXTRA_ARGS=
