@@ -395,19 +395,21 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] add PostgreSQL 17 sidecar fixture per `pacmand` node
 - [x] add local `make test-integration` target for Docker-backed test runs
 - [x] add cluster-layout smoke test for `pacmand`, `pacmanctl`, and `postgres:17`
-- [ ] extend PostgreSQL-backed fixture with replication/bootstrap orchestration
-- [ ] add CI job for Docker-backed integration and cluster smoke tests
+- [x] extend PostgreSQL-backed fixture with replication/bootstrap orchestration
+- [x] add CI job for Docker-backed integration and cluster smoke tests
 
 ### Cluster Configuration Validation Tasks
 - [x] build the PACMAN test image and create an isolated Docker network for the scenario
 - [x] start three `postgres:17` containers with stable aliases `pacmand-1-postgres`, `pacmand-2-postgres`, and `pacmand-3-postgres`
-- [] start three `pacmand` containers on the same network, one per PostgreSQL node, with each `pacmand` pointed at its neighboring PostgreSQL container
-- [] start one `pacmanctl` container on the same network so that control commands run from the same cluster context
-- [] verify every `pacmand` node can execute the daemon binary and return build metadata through `pacmand -version`
-- [] verify every `pacmand` container can resolve and probe its local `postgres:17` peer with `pg_isready` and `psql`
-- [] verify every PostgreSQL sidecar reports a PostgreSQL 17 server version and remains attached to the shared cluster network with the expected alias mapping
-- [] verify `pacmanctl -version` and `pacmanctl cluster status` execute successfully from the client container
-- [ ] extend the same topology with replication/bootstrap wiring and assert switchover, failover, and rejoin flows after the control-plane API and local agent logic are implemented
+- [x] start three `pacmand` containers on the same network, one per PostgreSQL node, with each `pacmand` pointed at its neighboring PostgreSQL container
+- [x] start one `pacmanctl` container on the same network so that control commands run from the same cluster context
+- [x] verify every `pacmand` node can execute the daemon binary and return build metadata through `pacmand -version`
+- [x] verify every `pacmand` container can resolve and probe its local `postgres:17` peer with `pg_isready` and `psql`
+- [x] verify every PostgreSQL sidecar reports a PostgreSQL 17 server version and remains attached to the shared cluster network with the expected alias mapping
+- [x] verify `pacmanctl -version` and `pacmanctl cluster status` execute successfully from the client container
+- [x] wire the process-mode `pacmand` topology to a shared DCS backend instead of the per-process in-memory control-plane store
+- [x] add daemon-side execution of accepted switchover, failover, and rejoin operations in the multi-container topology
+- [x] extend the same topology with replication/bootstrap wiring and assert switchover, failover, and rejoin flows end to end through the real `pacmand` API
 
 
 ### Patroni Migration Compatibility
@@ -531,10 +533,10 @@ This track captures the Kubernetes-native operator model described in [ARCHITECT
 ## Suggested Milestones
 
 ## Milestone 1 — Local Agent
-- [ ] implement daemon process
-- [ ] implement PostgreSQL state detection
-- [ ] expose local API
-- [ ] implement lifecycle management
+- [x] implement daemon process
+- [x] implement PostgreSQL state detection
+- [x] expose local API
+- [x] implement lifecycle management
 
 ## Milestone 2 — Cluster View
 - [ ] implement multi-node membership

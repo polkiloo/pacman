@@ -188,6 +188,7 @@ func (store *MemoryStateStore) PublishNodeStatus(ctx context.Context, status age
 	}
 
 	store.mu.RLock()
+	expectedRevision := nextRevision(store.nodeStatusRevisions[cloned.NodeName])
 	published.LastDCSSeenAt = store.lastDCSSeenAt
 	if previous, ok := store.nodeStatuses[cloned.NodeName]; ok {
 		cloned = mergeControlPlaneManagedNodeFlags(previous, cloned)
@@ -207,7 +208,9 @@ func (store *MemoryStateStore) PublishNodeStatus(ctx context.Context, status age
 		store.nodeStatusRevisions = make(map[string]int64)
 	}
 	store.nodeStatuses[cloned.NodeName] = cloned
-	store.nodeStatusRevisions[cloned.NodeName] = nextRevision(store.nodeStatusRevisions[cloned.NodeName])
+	if store.nodeStatusRevisions[cloned.NodeName] < expectedRevision {
+		store.nodeStatusRevisions[cloned.NodeName] = expectedRevision
+	}
 	store.refreshSourceOfTruthLocked(cloned.ObservedAt.UTC())
 	currentStatus := store.nodeStatuses[cloned.NodeName].Clone()
 	currentMember, hasCurrentMember := store.memberLocked(cloned.NodeName)
