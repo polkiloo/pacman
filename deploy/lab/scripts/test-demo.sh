@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+demo_script="${script_dir}/demo.sh"
+
+assert_contains() {
+	local haystack=$1
+	local needle=$2
+
+	if [[ "${haystack}" != *"${needle}"* ]]; then
+		printf 'expected output to contain %q\n' "${needle}" >&2
+		printf 'actual output:\n%s\n' "${haystack}" >&2
+		exit 1
+	fi
+}
+
+run_and_capture() {
+	local output
+	output=$("$@")
+	printf '%s' "${output}"
+}
+
+printf '==> bash syntax check\n'
+bash -n "${demo_script}"
+
+printf '==> list stages\n'
+list_output=$(run_and_capture "${demo_script}" list)
+assert_contains "${list_output}" "prepare"
+assert_contains "${list_output}" "full-demo"
+assert_contains "${list_output}" "watch-members"
+
+printf '==> dry-run prepare\n'
+prepare_output=$(run_and_capture "${demo_script}" --dry-run prepare)
+assert_contains "${prepare_output}" "make rpm"
+assert_contains "${prepare_output}" "RPM_OUTPUT_DIR="
+
+printf '==> dry-run bootstrap\n'
+bootstrap_output=$(run_and_capture "${demo_script}" --dry-run bootstrap)
+assert_contains "${bootstrap_output}" "bootstrap-cluster.sh"
+
+printf '==> dry-run verify\n'
+verify_output=$(run_and_capture "${demo_script}" --dry-run verify)
+assert_contains "${verify_output}" "/health"
+assert_contains "${verify_output}" "/api/v1/cluster"
+assert_contains "${verify_output}" "/api/v1/members"
+
+printf '==> dry-run metrics\n'
+metrics_output=$(run_and_capture "${demo_script}" --dry-run metrics)
+assert_contains "${metrics_output}" "/metrics"
+assert_contains "${metrics_output}" "pacman_cluster_"
+
+printf '==> dry-run maintenance enable\n'
+maintenance_enable_output=$(run_and_capture "${demo_script}" --dry-run maintenance-enable)
+assert_contains "${maintenance_enable_output}" "/api/v1/maintenance"
+assert_contains "${maintenance_enable_output}" "enabled"
+assert_contains "${maintenance_enable_output}" "demo-maintenance"
+
+printf '==> dry-run maintenance disable\n'
+maintenance_disable_output=$(run_and_capture "${demo_script}" --dry-run maintenance-disable)
+assert_contains "${maintenance_disable_output}" "/api/v1/maintenance"
+assert_contains "${maintenance_disable_output}" "enabled"
+assert_contains "${maintenance_disable_output}" "demo-maintenance-complete"
+
+printf '==> dry-run switchover\n'
+switchover_output=$(run_and_capture "${demo_script}" --dry-run switchover alpha-2)
+assert_contains "${switchover_output}" "/api/v1/operations/switchover"
+assert_contains "${switchover_output}" "candidate"
+assert_contains "${switchover_output}" "alpha-2"
+
+printf '==> dry-run history\n'
+history_output=$(run_and_capture "${demo_script}" --dry-run history)
+assert_contains "${history_output}" "/api/v1/history"
+
+printf '==> dry-run watch-members\n'
+watch_output=$(run_and_capture "${demo_script}" --dry-run watch-members 2)
+assert_contains "${watch_output}" "/api/v1/members"
+assert_contains "${watch_output}" "sleep"
+
+printf '==> dry-run destroy/reset\n'
+destroy_output=$(run_and_capture "${demo_script}" --dry-run destroy)
+assert_contains "${destroy_output}" "destroy-cluster.sh"
+reset_output=$(run_and_capture "${demo_script}" --dry-run reset)
+assert_contains "${reset_output}" "reset-state.sh"
+
+printf '==> dry-run full demo\n'
+full_demo_output=$(run_and_capture "${demo_script}" --dry-run full-demo)
+assert_contains "${full_demo_output}" "bootstrap-cluster.sh"
+assert_contains "${full_demo_output}" "/api/v1/operations/switchover"
+assert_contains "${full_demo_output}" "/api/v1/history"
+
+printf 'demo script dry-run verification passed\n'

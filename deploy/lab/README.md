@@ -35,6 +35,9 @@ make rpm
 - `scripts/bootstrap-cluster.sh`
   creates runtime directories, starts containers, applies Ansible, and starts
   etcd + `pacmand`
+- `scripts/demo.sh`
+  step-by-step local demo runner with safe stage commands for bootstrap,
+  verification, maintenance mode, and planned switchover
 - `scripts/destroy-cluster.sh`
   stops the lab containers but preserves local state
 - `scripts/reset-state.sh`
@@ -46,6 +49,21 @@ make rpm
 
 ```bash
 deploy/lab/scripts/bootstrap-cluster.sh
+```
+
+For a stage-driven local demo runbook:
+
+```bash
+deploy/lab/scripts/demo.sh list
+deploy/lab/scripts/demo.sh prepare
+deploy/lab/scripts/demo.sh bootstrap
+deploy/lab/scripts/demo.sh verify
+deploy/lab/scripts/demo.sh metrics
+deploy/lab/scripts/demo.sh maintenance-enable
+deploy/lab/scripts/demo.sh maintenance-disable
+deploy/lab/scripts/demo.sh switchover alpha-2
+deploy/lab/scripts/demo.sh watch-members 5
+deploy/lab/scripts/demo.sh history
 ```
 
 That flow:
