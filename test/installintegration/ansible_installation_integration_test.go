@@ -327,7 +327,7 @@ func preparePacmandSmokeConfig(t *testing.T, svc *testenv.Service) {
 			"        lines.append(f'{indent}controlAddress: \"0.0.0.0:%s\"')\n"+
 			"    else:\n"+
 			"        lines.append(raw)\n"+
-			"dst.write_text(\"\\\\n\".join(lines) + \"\\\\n\")\n"+
+			"dst.write_text(\"\\n\".join(lines) + \"\\n\")\n"+
 			"PY",
 		pacmandConfigPath,
 		pacmandSmokeConfigPath,
@@ -365,7 +365,7 @@ except Exception as err:
 				lastProbeError,
 				serviceCommandOutput(t, svc, "/bin/sh", "-lc", "ss -lnt"),
 				serviceCommandOutput(t, svc, "/bin/sh", "-lc", "ps -ef | grep '[p]acmand'"),
-				serviceLogTail(t, svc, "/var/log/pacmand.log"))
+				serviceLogTail(t, svc, "/var/log/pacmand.log")+"\nsmoke config:\n"+serviceCommandOutput(t, svc, "cat", pacmandSmokeConfigPath))
 		}
 		time.Sleep(2 * time.Second)
 	}
