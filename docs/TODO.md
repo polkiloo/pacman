@@ -355,6 +355,28 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 
 ## 17. Packaging and Operations
 
+### RPM Packaging
+
+- [x] add `packaging/rpm/` sources and a reproducible RPM build recipe for `pacmand` and `pacmanctl`
+- [x] add a dedicated `make rpm` target that cross-compiles and produces a CentOS-compatible RPM using a builder container (no host toolchain required)
+- [x] decide whether the PostgreSQL extension ships in the same RPM or in a separate `pacman-postgresqlXX-agent` package
+- [x] define RPM filesystem layout for binaries, config, state, logs, and PostgreSQL extension assets
+- [x] mark shipped config files as upgrade-safe and document `%config(noreplace)` expectations for local edits
+- [x] add RPM lifecycle scripts or equivalent hooks for users, directories, permissions, systemd reload, and first-install defaults
+- [x] define package dependencies for PostgreSQL client tools, systemd units, and optional etcd / lab helpers
+- [x] publish or document an RPM repository path for RHEL / Rocky / Alma style systems, including signing expectations
+- [x] validate clean install, upgrade, rollback, and removal flows on an RPM-based distro in CI
+
+### Deployment Automation
+
+- [x] add a simple Ansible lab playbook for two PostgreSQL nodes plus one external etcd node
+- [x] split the lab playbook into reusable Ansible roles for `pacman`, `postgresql`, and external `etcd`
+- [x] add inventory and variable examples for both package-name installs and direct RPM URL installs
+- [x] extend the Ansible deployment to configure TLS, bearer auth rotation, and secret distribution
+- [x] extend the Ansible deployment to bootstrap PostgreSQL replication and PACMAN failover prerequisites
+- [x] add a variant that deploys a three-node external etcd cluster instead of the single-node lab DCS
+- [x] add automated validation for the Ansible deployment path
+
 - [ ] add systemd unit files
 - [x] add example configs
 - [ ] add local lab environment

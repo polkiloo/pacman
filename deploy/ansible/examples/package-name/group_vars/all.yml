@@ -1,0 +1,4 @@
+---
+pacman_cluster_name: alpha
+pacman_initial_primary: alpha-1
+pacman_package_name: pacman

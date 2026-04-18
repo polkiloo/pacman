@@ -1,0 +1,4 @@
+---
+pacman_cluster_name: alpha
+pacman_initial_primary: alpha-1
+pacman_package_url: https://packages.pacman.io/rpm/el/9/x86_64/pacman-0.1.0-1.el9.x86_64.rpm

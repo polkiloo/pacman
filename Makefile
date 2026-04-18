@@ -2,6 +2,15 @@ GOTOOLCHAIN ?= go1.26.1
 GO ?= go
 BIN_DIR ?= ./bin
 GOBIN ?= $(shell $(GO) env GOBIN)
+CONTAINER_RUNTIME ?= docker
+RPM_BUILDER_IMAGE ?= pacman-rpm-builder:el9
+RPM_OUTPUT_DIR ?= $(CURDIR)/bin/rpm
+RPM_VERSION ?= 0.1.0
+RPM_RELEASE ?= 1
+RPM_SOURCE_DATE_EPOCH ?= $(shell git log -1 --pretty=%ct 2>/dev/null || date +%s)
+RPM_VALIDATE_RELEASE1_DIR ?= $(CURDIR)/bin/rpm/release1
+RPM_VALIDATE_RELEASE2_DIR ?= $(CURDIR)/bin/rpm/release2
+RPM_VALIDATION_IMAGE ?= rockylinux:9
 
 export GOTOOLCHAIN
 
@@ -20,9 +29,12 @@ COVERAGE_CHECK_PACKAGE_LIST_CMD = $(GO) list ./... | grep -v '/test/' | grep -v 
 PACMAN_TEST_IMAGE ?= pacman-test:local
 PACMAN_TEST_PGEXT_IMAGE ?= pacman-pgext-postgres:local
 PACMAN_TEST_POSTGRES_IMAGE ?= $(PACMAN_TEST_PGEXT_IMAGE)
+PACMAN_ANSIBLE_INSTALL_IMAGE ?= pacman-ansible-install:local
+PACMAN_ANSIBLE_INSTALL_RPM_DIR ?= $(CURDIR)/bin/ansible-install-rpm
 DOCKER_BUILD_PROGRESS ?= plain
 GO_TEST_INTEGRATION_FLAGS ?= -v
 GO_TEST_INTEGRATION_PACKAGE ?= ./test/integration
+GO_TEST_INSTALL_PACKAGE ?= ./test/installintegration
 TESTCONTAINERS_RYUK_DISABLED ?=
 PG_EXTENSION_DIR ?= ./postgresql/pacman_agent
 PG_EXTENSION_IMAGE ?= postgres:17-bookworm
@@ -32,6 +44,7 @@ PG_CONFIG ?= pg_config
 INTEGRATION_TEST_ENV = PACMAN_TEST_IMAGE=$(PACMAN_TEST_IMAGE) \
 	PACMAN_TEST_PGEXT_IMAGE=$(PACMAN_TEST_PGEXT_IMAGE) \
 	PACMAN_TEST_POSTGRES_IMAGE=$(PACMAN_TEST_POSTGRES_IMAGE) \
+	PACMAN_ANSIBLE_INSTALL_IMAGE=$(PACMAN_ANSIBLE_INSTALL_IMAGE) \
 	TESTCONTAINERS_RYUK_DISABLED=$(TESTCONTAINERS_RYUK_DISABLED)
 
 INTEGRATION_GROUP_SMOKE := ^(TestPACMANClusterEnvironment|TestControlPlaneAggregatesSharedDaemonStateWithRealPostgres|TestPacmandDaemonStartupMatrix|TestPacmandHTTPAPIServesHealth|TestPacmandPrimaryAndReplicaProbes|TestPacmandNativeNodeAndMembersAPIWithRealPostgresOperation|TestPacmandHistoryMaintenanceAndDiagnosticsAPI|TestPacmandOperationsAndPublishedOpenAPI)$
@@ -39,6 +52,7 @@ INTEGRATION_GROUP_SECURITY := ^(TestPacmandHTTPAPIServesHealthOverTLS|TestPacman
 INTEGRATION_GROUP_PATRONI := ^(TestPatroniProbeCompatibilityWithContainerFixture|TestPatroniMonitoringDocumentsWithContainerFixture|TestPatroniAdminCompatibilityWithContainerFixture)$
 INTEGRATION_GROUP_PGEXT := ^(TestPostgresExtensionStartupPublishesAPIAndInstallsSQLAssets|TestPostgresExtensionRestartsPACMANHelperAfterUnexpectedExit|TestPostgresExtensionInvalidConfigKeepsAPIUnavailable|TestPostgresExtensionLocalStateObservationWithRealSQL|TestPostgresExtensionStopsPACMANHelperWhenPostgresStops)$
 INTEGRATION_GROUP_HA := ^(TestFailoverPromotesRealStandbyAndRecordsHistory|TestFailoverIntentRejectsHealthyPrimaryWithRealStreamingStandby|TestRejoinOperationProjectsRecoveringPhaseWithRealTopology|TestMaintenanceOverridesActiveFailoverPhaseWithRealTopology|TestConfirmPrimaryFailureConfiguredQuorumMatrixWithRealTopology|TestConfirmPrimaryFailureObservedQuorumMatrixWithRealTopology|TestConfiguredQuorumIgnoresObservedMembersOutsideSpecWithRealTopology|TestCreateFailoverIntentObservedQuorumMatrixWithRealTopology|TestRejoinStrategySelectsRewindAfterRealFailover|TestExecuteRejoinRewindKeepsClusterRecoveringWithRealTopology|TestSwitchoverValidationUsesRealStreamingStandby|TestSwitchoverIntentSchedulesRealStreamingStandby|TestSwitchoverPromotesRealStandbyAndRecordsHistory|TestSwitchoverValidationRejectsUnavailableRealStandby|TestSwitchoverExecutionRejectsFutureScheduledIntentWithRealStandby)$
+INTEGRATION_GROUP_INSTALL := ^(TestAnsibleThreeNodeInstallationUsingTestcontainers)$
 INTEGRATION_GROUP_DCS_CONFORMANCE := ^(TestEtcdDCSConformanceInRunner|TestRaftThreeNodeReplicationAndWatch|TestRaftThreeNodeLeaderFailover)$
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -49,7 +63,7 @@ LDFLAGS := -X github.com/polkiloo/pacman/internal/version.Version=$(VERSION) \
 	-X github.com/polkiloo/pacman/internal/version.Commit=$(COMMIT) \
 	-X github.com/polkiloo/pacman/internal/version.BuildDate=$(BUILD_DATE)
 
-.PHONY: fmt test test-dcs-conformance test-integration test-integration-smoke test-integration-security test-integration-patroni test-integration-pgext test-integration-ha docker-build-test-image docker-build-pgext-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl build-pg-extension package-pg-extension install-pg-extension clean-pg-extension tidy clean openapi-codegen-check
+.PHONY: fmt test test-dcs-conformance test-integration test-integration-smoke test-integration-security test-integration-patroni test-integration-pgext test-integration-ha test-integration-install docker-build-test-image docker-build-pgext-image docker-build-ansible-install-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl build-pg-extension package-pg-extension install-pg-extension clean-pg-extension tidy clean openapi-codegen-check rpm rpm-builder-image rpm-validate ansible-validate
 
 fmt:
 	$(GO) fmt ./...
@@ -83,7 +97,10 @@ docker-build-test-image:
 docker-build-pgext-image:
 	docker build --progress=$(DOCKER_BUILD_PROGRESS) -f test/docker/pacman-pgext-postgres.Dockerfile -t $(PACMAN_TEST_PGEXT_IMAGE) .
 
-test-integration: docker-build-test-image docker-build-pgext-image test-integration-smoke test-integration-security test-integration-patroni test-integration-pgext test-integration-ha
+docker-build-ansible-install-image:
+	docker build --progress=$(DOCKER_BUILD_PROGRESS) -f test/docker/pacman-ansible-install.Dockerfile -t $(PACMAN_ANSIBLE_INSTALL_IMAGE) .
+
+test-integration: docker-build-test-image docker-build-pgext-image docker-build-ansible-install-image test-integration-smoke test-integration-security test-integration-patroni test-integration-pgext test-integration-ha test-integration-install
 
 test-integration-smoke:
 	$(INTEGRATION_TEST_ENV) $(GO) test $(GO_TEST_INTEGRATION_FLAGS) -tags=integration -run '$(INTEGRATION_GROUP_SMOKE)' $(GO_TEST_INTEGRATION_PACKAGE)
@@ -99,6 +116,12 @@ test-integration-pgext:
 
 test-integration-ha:
 	$(INTEGRATION_TEST_ENV) $(GO) test $(GO_TEST_INTEGRATION_FLAGS) -tags=integration -run '$(INTEGRATION_GROUP_HA)' $(GO_TEST_INTEGRATION_PACKAGE)
+
+test-integration-install: docker-build-ansible-install-image
+	rm -rf $(PACMAN_ANSIBLE_INSTALL_RPM_DIR)
+	$(MAKE) rpm RPM_OUTPUT_DIR=$(PACMAN_ANSIBLE_INSTALL_RPM_DIR)
+	PACMAN_ANSIBLE_INSTALL_RPM_DIR=$(PACMAN_ANSIBLE_INSTALL_RPM_DIR) \
+		$(INTEGRATION_TEST_ENV) $(GO) test $(GO_TEST_INTEGRATION_FLAGS) -tags=integration -run '$(INTEGRATION_GROUP_INSTALL)' $(GO_TEST_INSTALL_PACKAGE)
 
 coverage:
 	@set -- $$($(FULL_COVERAGE_PACKAGE_LIST_CMD)); \
@@ -150,6 +173,34 @@ install-pg-extension: package-pg-extension
 
 clean-pg-extension:
 	$(PG_EXTENSION_MAKE) clean
+
+rpm: rpm-builder-image
+	mkdir -p $(RPM_OUTPUT_DIR)
+	$(CONTAINER_RUNTIME) run --rm \
+		-e WORKSPACE=/workspace \
+		-e OUTPUT_DIR=/out \
+		-e RPM_VERSION=$(RPM_VERSION) \
+		-e RPM_RELEASE=$(RPM_RELEASE) \
+		-e RPM_COMMIT=$(COMMIT) \
+		-e SOURCE_DATE_EPOCH=$(RPM_SOURCE_DATE_EPOCH) \
+		-v $(CURDIR):/workspace:ro \
+		-v $(RPM_OUTPUT_DIR):/out \
+		$(RPM_BUILDER_IMAGE) \
+		/workspace/packaging/rpm/build-rpm.sh
+
+rpm-builder-image:
+	$(CONTAINER_RUNTIME) build -f packaging/rpm/Containerfile -t $(RPM_BUILDER_IMAGE) .
+
+rpm-validate:
+	rm -rf $(RPM_VALIDATE_RELEASE1_DIR) $(RPM_VALIDATE_RELEASE2_DIR)
+	$(MAKE) rpm RPM_OUTPUT_DIR=$(RPM_VALIDATE_RELEASE1_DIR) RPM_RELEASE=1
+	$(MAKE) rpm RPM_OUTPUT_DIR=$(RPM_VALIDATE_RELEASE2_DIR) RPM_RELEASE=2
+	CONTAINER_RUNTIME=$(CONTAINER_RUNTIME) RPM_VALIDATION_IMAGE=$(RPM_VALIDATION_IMAGE) \
+		./packaging/rpm/validate-install-flow.sh $(RPM_VALIDATE_RELEASE1_DIR) $(RPM_VALIDATE_RELEASE2_DIR)
+
+ansible-validate:
+	bash -n deploy/ansible/validate.sh
+	./deploy/ansible/validate.sh
 
 build-pacmand:
 	mkdir -p $(BIN_DIR)

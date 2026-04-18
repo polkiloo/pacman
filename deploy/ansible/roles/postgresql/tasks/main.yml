@@ -1,0 +1,50 @@
+---
+- name: Determine whether this PostgreSQL host is the initial primary
+  ansible.builtin.set_fact:
+    postgres_is_initial_primary: "{{ inventory_hostname == (pacman_initial_primary_host | default(pacman_initial_primary)) or (pacman_node_name | default(inventory_hostname)) == pacman_initial_primary }}"
+    postgres_replication_primary_address: "{{ hostvars[pacman_initial_primary_host | default(pacman_initial_primary)].ansible_host | default(pacman_initial_primary_host | default(pacman_initial_primary)) }}"
+    postgres_replication_slot_name: "{{ (('pacman_' ~ (pacman_node_name | default(inventory_hostname) | lower | regex_replace('[^a-z0-9_]', '_')))[:63]) }}"
+
+- name: Install PostgreSQL server and client packages
+  ansible.builtin.package:
+    name:
+      - "{{ postgres_server_package_name }}"
+      - "{{ postgres_client_package_name }}"
+    state: present
+
+- name: Ensure PostgreSQL data directory parent exists
+  ansible.builtin.file:
+    path: "{{ postgres_data_dir }}"
+    state: directory
+    owner: "{{ postgres_os_user }}"
+    group: "{{ postgres_os_group }}"
+    mode: "0700"
+
+- name: Initialize PostgreSQL data directory for standalone or primary nodes via system service helper
+  when:
+    - postgres_manage_service | bool
+    - postgres_is_initial_primary or not (postgres_manage_replication | bool)
+  ansible.builtin.command: "{{ postgres_initdb_command }}"
+  args:
+    creates: "{{ postgres_data_dir }}/PG_VERSION"
+
+- name: Initialize PostgreSQL data directory for standalone or primary nodes via initdb
+  when:
+    - not (postgres_manage_service | bool)
+    - postgres_is_initial_primary or not (postgres_manage_replication | bool)
+  ansible.builtin.command:
+    argv:
+      - "{{ postgres_bin_dir }}/initdb"
+      - -D
+      - "{{ postgres_data_dir }}"
+  args:
+    creates: "{{ postgres_data_dir }}/PG_VERSION"
+  become_user: "{{ postgres_os_user }}"
+
+- name: Configure primary or standalone PostgreSQL node
+  ansible.builtin.include_tasks: primary.yml
+  when: postgres_is_initial_primary or not (postgres_manage_replication | bool)
+
+- name: Configure streaming replica PostgreSQL node
+  ansible.builtin.include_tasks: replica.yml
+  when: (postgres_manage_replication | bool) and not postgres_is_initial_primary

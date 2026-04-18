@@ -1,0 +1,45 @@
+ARG ROCKY_TAG=9
+FROM rockylinux:${ROCKY_TAG}
+
+ARG TARGETARCH
+ARG GO_VERSION=1.26.1
+
+RUN set -eux; \
+    case "${TARGETARCH:-amd64}" in \
+        amd64) GO_ARCH=amd64; RPM_ARCH=x86_64 ;; \
+        arm64) GO_ARCH=arm64; RPM_ARCH=aarch64 ;; \
+        *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    for repo in /etc/yum.repos.d/*.repo; do \
+        sed -ri \
+            -e 's|^mirrorlist=|#mirrorlist=|g' \
+            -e 's|^metalink=|#metalink=|g' \
+            -e 's|^#[[:space:]]*baseurl=https?://dl\.rockylinux\.org/\$contentdir/\$releasever/|baseurl=https://dl.rockylinux.org/\$contentdir/\$releasever/|g' \
+            "$repo"; \
+    done; \
+    DNF_OPTS='--setopt=retries=20 --setopt=timeout=30 --setopt=minrate=1k --setopt=max_parallel_downloads=1'; \
+    dnf ${DNF_OPTS} install -y dnf-plugins-core; \
+    dnf ${DNF_OPTS} config-manager --set-enabled crb; \
+    dnf ${DNF_OPTS} install -y \
+        "https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-${RPM_ARCH}/pgdg-redhat-repo-latest.noarch.rpm"; \
+    dnf ${DNF_OPTS} -qy module disable postgresql; \
+    dnf ${DNF_OPTS} install -y \
+        ca-certificates \
+        findutils \
+        gcc \
+        golang \
+        gzip \
+        make \
+        postgresql17 \
+        postgresql17-devel \
+        redhat-rpm-config \
+        rpm-build \
+        systemd-rpm-macros \
+        tar \
+        which; \
+    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" | tar -C /usr/local -xz; \
+    dnf clean all; \
+    rm -rf /var/cache/dnf
+
+ENV PATH=/usr/local/go/bin:${PATH}
+WORKDIR /workspace

@@ -1,0 +1,13 @@
+listen_addresses = '{{ postgres_server_listen_addresses }}'
+port = '{{ postgres_port }}'
+wal_level = 'replica'
+max_wal_senders = '{{ postgres_max_wal_senders }}'
+max_replication_slots = '{{ postgres_max_replication_slots }}'
+hot_standby = 'on'
+wal_keep_size = '{{ postgres_wal_keep_size }}'
+{% if (postgres_manage_replication | bool) and (not postgres_is_initial_primary) %}
+primary_slot_name = '{{ postgres_replication_slot_name }}'
+{% endif %}
+{% for key, value in postgres_extra_parameters | dictsort %}
+{{ key }} = '{{ value }}'
+{% endfor %}

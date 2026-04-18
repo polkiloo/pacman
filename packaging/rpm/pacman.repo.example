@@ -1,0 +1,9 @@
+[pacman]
+name=PACMAN EL $releasever - $basearch
+baseurl=https://packages.pacman.io/rpm/el/$releasever/$basearch/
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.pacman.io/keys/RPM-GPG-KEY-pacman
+sslverify=1
+metadata_expire=6h

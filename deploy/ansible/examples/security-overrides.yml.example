@@ -1,0 +1,14 @@
+---
+pacman_tls_enabled: true
+pacman_tls_server_name: alpha.internal
+pacman_tls_ca_src: "{{ playbook_dir }}/secrets/ca.crt"
+pacman_tls_cert_src: "{{ playbook_dir }}/secrets/{{ inventory_hostname }}.crt"
+pacman_tls_key_src: "{{ playbook_dir }}/secrets/{{ inventory_hostname }}.key"
+pacman_security_member_mtls_enabled: true
+
+pacman_admin_token_source_files:
+  - id: 2026-04
+    src: "{{ playbook_dir }}/secrets/admin-token-2026-04.txt"
+  - id: 2026-05
+    src: "{{ playbook_dir }}/secrets/admin-token-2026-05.txt"
+pacman_admin_token_active_id: 2026-04

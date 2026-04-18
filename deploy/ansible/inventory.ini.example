@@ -1,0 +1,11 @@
+[dcs_nodes]
+alpha-dcs ansible_host=10.0.0.13 etcd_name=alpha-dcs
+
+[postgres_nodes]
+alpha-1 ansible_host=10.0.0.11 pacman_node_name=alpha-1
+alpha-2 ansible_host=10.0.0.12 pacman_node_name=alpha-2
+
+[all:vars]
+ansible_user=rocky
+pacman_cluster_name=alpha
+pacman_initial_primary=alpha-1

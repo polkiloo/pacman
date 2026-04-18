@@ -1,0 +1,79 @@
+---
+- name: Install PostgreSQL PACMAN tuning block
+  ansible.builtin.blockinfile:
+    path: "{{ postgres_data_dir }}/postgresql.auto.conf"
+    create: true
+    owner: "{{ postgres_os_user }}"
+    group: "{{ postgres_os_group }}"
+    mode: "0600"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK pacman-postgresql"
+    block: "{{ lookup('template', 'postgresql.auto.conf.j2') }}"
+  notify:
+    - Restart PostgreSQL
+
+- name: Install PostgreSQL PACMAN pg_hba rules
+  ansible.builtin.blockinfile:
+    path: "{{ postgres_data_dir }}/pg_hba.conf"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK pacman-pg-hba"
+    block: "{{ lookup('template', 'pg_hba.conf.j2') }}"
+  notify:
+    - Restart PostgreSQL
+
+- name: Ensure PostgreSQL service is enabled and started
+  when: postgres_manage_service | bool
+  ansible.builtin.service:
+    name: "{{ postgres_service_name }}"
+    enabled: true
+    state: started
+
+- name: Ensure PostgreSQL is running via pg_ctl on the primary node
+  when: not (postgres_manage_service | bool)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if "{{ postgres_bin_dir }}/pg_ctl" -D "{{ postgres_data_dir }}" status >/dev/null 2>&1; then
+      exit 0
+    fi
+    "{{ postgres_bin_dir }}/pg_ctl" -D "{{ postgres_data_dir }}" -w -l "{{ postgres_runtime_log_path }}" start
+  args:
+    executable: /bin/bash
+  become_user: "{{ postgres_os_user }}"
+
+- name: Wait for PostgreSQL to accept connections on the primary node
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ postgres_port }}"
+    timeout: 60
+
+- name: Ensure replication role exists on the initial primary
+  ansible.builtin.shell: |
+    set -euo pipefail
+    "{{ postgres_bin_dir }}/psql" -v ON_ERROR_STOP=1 --dbname postgres <<'SQL'
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{{ postgres_replication_user }}') THEN
+        CREATE ROLE {{ postgres_replication_user }} WITH REPLICATION LOGIN PASSWORD '{{ postgres_replication_password | replace("'", "''") }}';
+      ELSE
+        ALTER ROLE {{ postgres_replication_user }} WITH REPLICATION LOGIN PASSWORD '{{ postgres_replication_password | replace("'", "''") }}';
+      END IF;
+    END
+    $$;
+    SQL
+  args:
+    executable: /bin/bash
+  become_user: "{{ postgres_os_user }}"
+  no_log: true
+  when: postgres_manage_replication | bool
+
+- name: Verify the initial primary is writable
+  ansible.builtin.command:
+    argv:
+      - "{{ postgres_bin_dir }}/psql"
+      - --dbname=postgres
+      - -tAc
+      - SELECT CASE WHEN NOT pg_is_in_recovery() THEN 'ready' ELSE 'not-ready' END
+  become_user: "{{ postgres_os_user }}"
+  register: postgres_primary_ready
+  changed_when: false
+  retries: 20
+  delay: 3
+  until: postgres_primary_ready.stdout | trim == "ready"

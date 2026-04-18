@@ -1,0 +1,35 @@
+---
+- name: Install etcd package
+  ansible.builtin.package:
+    name: "{{ etcd_package_name }}"
+    state: present
+
+- name: Ensure etcd data directory exists
+  ansible.builtin.file:
+    path: "{{ etcd_data_dir }}"
+    state: directory
+    owner: "{{ etcd_user }}"
+    group: "{{ etcd_group }}"
+    mode: "0750"
+
+- name: Ensure etcd systemd drop-in directory exists
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ etcd_service_name }}.service.d"
+    state: directory
+    mode: "0755"
+
+- name: Install etcd systemd override for PACMAN DCS cluster
+  ansible.builtin.template:
+    src: override.conf.j2
+    dest: "/etc/systemd/system/{{ etcd_service_name }}.service.d/override.conf"
+    mode: "0644"
+  notify:
+    - Restart etcd
+
+- name: Ensure etcd service is enabled and started
+  when: etcd_manage_service | bool
+  ansible.builtin.systemd:
+    name: "{{ etcd_service_name }}"
+    daemon_reload: true
+    enabled: true
+    state: started

@@ -6,6 +6,7 @@ Local prerequisites:
 
 - `make docker-build-test-image`
 - `make docker-build-pgext-image`
+- `make docker-build-ansible-install-image`
 
 Grouped targets:
 
@@ -14,6 +15,8 @@ Grouped targets:
 - `make test-integration-patroni`
 - `make test-integration-pgext`
 - `make test-integration-ha`
+- `make test-integration-install`
+  `test-integration-install` compiles and runs the dedicated `./test/installintegration` package, so it does not affect `./test/integration` compile scope.
 
 Run the full grouped suite:
 
@@ -34,3 +37,4 @@ Current grouping:
 - `patroni`: Patroni compatibility and fixture-backed monitoring endpoints
 - `pgext`: PostgreSQL extension lifecycle and SQL-backed observation
 - `ha`: failover, switchover, quorum, and rejoin flows
+- `install`: 3-node installation and bootstrap validation for the Ansible deployment path
