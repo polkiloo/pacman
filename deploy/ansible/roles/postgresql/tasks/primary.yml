@@ -20,10 +20,23 @@
     - Restart PostgreSQL
 
 - name: Ensure PostgreSQL service is enabled and started
+  when: postgres_manage_service | bool
   ansible.builtin.service:
     name: "{{ postgres_service_name }}"
     enabled: true
     state: started
+
+- name: Ensure PostgreSQL is running via pg_ctl on the primary node
+  when: not (postgres_manage_service | bool)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if "{{ postgres_bin_dir }}/pg_ctl" -D "{{ postgres_data_dir }}" status >/dev/null 2>&1; then
+      exit 0
+    fi
+    "{{ postgres_bin_dir }}/pg_ctl" -D "{{ postgres_data_dir }}" -w -l "{{ postgres_runtime_log_path }}" start
+  args:
+    executable: /bin/bash
+  become_user: "{{ postgres_os_user }}"
 
 - name: Wait for PostgreSQL to accept connections on the primary node
   ansible.builtin.wait_for:

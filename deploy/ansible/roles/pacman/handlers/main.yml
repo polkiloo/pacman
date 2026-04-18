@@ -1,5 +1,6 @@
 ---
 - name: Restart pacmand
+  when: pacman_manage_service | bool
   ansible.builtin.systemd:
     name: "{{ pacmand_service_name }}"
     daemon_reload: true

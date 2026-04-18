@@ -1,5 +1,6 @@
 ---
 - name: Restart etcd
+  when: etcd_manage_service | bool
   ansible.builtin.systemd:
     name: "{{ etcd_service_name }}"
     daemon_reload: true

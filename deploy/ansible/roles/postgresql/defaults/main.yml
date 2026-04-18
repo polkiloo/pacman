@@ -19,3 +19,6 @@ postgres_max_wal_senders: 10
 postgres_max_replication_slots: 10
 postgres_wal_keep_size: 512MB
 postgres_extra_parameters: {}
+postgres_manage_service: true
+postgres_runtime_log_path: "{{ postgres_data_dir }}/pacman-postgresql.log"
+postgres_listen_address: "127.0.0.1"

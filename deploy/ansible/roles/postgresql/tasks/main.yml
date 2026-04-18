@@ -20,11 +20,26 @@
     group: "{{ postgres_os_group }}"
     mode: "0700"
 
-- name: Initialize PostgreSQL data directory for standalone or primary nodes
+- name: Initialize PostgreSQL data directory for standalone or primary nodes via system service helper
+  when:
+    - postgres_manage_service | bool
+    - postgres_is_initial_primary or not (postgres_manage_replication | bool)
   ansible.builtin.command: "{{ postgres_initdb_command }}"
   args:
     creates: "{{ postgres_data_dir }}/PG_VERSION"
-  when: postgres_is_initial_primary or not (postgres_manage_replication | bool)
+
+- name: Initialize PostgreSQL data directory for standalone or primary nodes via initdb
+  when:
+    - not (postgres_manage_service | bool)
+    - postgres_is_initial_primary or not (postgres_manage_replication | bool)
+  ansible.builtin.command:
+    argv:
+      - "{{ postgres_bin_dir }}/initdb"
+      - -D
+      - "{{ postgres_data_dir }}"
+  args:
+    creates: "{{ postgres_data_dir }}/PG_VERSION"
+  become_user: "{{ postgres_os_user }}"
 
 - name: Configure primary or standalone PostgreSQL node
   ansible.builtin.include_tasks: primary.yml

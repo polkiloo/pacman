@@ -2,6 +2,7 @@
 pacman_package_name: pacman
 pacman_package_url: ""
 pacman_download_path: /var/tmp/pacman.rpm
+pacman_disable_gpg_check: false
 pacman_api_port: 8080
 pacman_control_port: 9090
 
@@ -30,3 +31,4 @@ pacmand_config_dir: /etc/pacman
 pacmand_config_path: /etc/pacman/pacmand.yaml
 pacmand_state_dir: /var/lib/pacman
 pacmand_token_dir: "{{ pacmand_config_dir }}/tokens"
+pacman_manage_service: true

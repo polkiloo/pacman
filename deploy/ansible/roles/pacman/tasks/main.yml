@@ -28,9 +28,10 @@
   when: pacman_package_url | length > 0
 
 - name: Install PACMAN package
-  ansible.builtin.package:
+  ansible.builtin.dnf:
     name: "{{ pacman_install_target }}"
     state: present
+    disable_gpg_check: "{{ pacman_disable_gpg_check | bool }}"
 
 - name: Ensure PACMAN config directory exists
   ansible.builtin.file:
@@ -156,6 +157,7 @@
     - Restart pacmand
 
 - name: Ensure pacmand service is enabled and started
+  when: pacman_manage_service | bool
   ansible.builtin.systemd:
     name: "{{ pacmand_service_name }}"
     daemon_reload: true
