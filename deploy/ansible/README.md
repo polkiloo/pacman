@@ -43,6 +43,14 @@ extension package is not used here.
   validates the checked-in inventories with `ansible-inventory`,
   `ansible-playbook --syntax-check`, and `ansible-playbook --list-tasks`
 
+Related deployment assets:
+
+- `deploy/lab/`
+  local Docker Compose lab that applies this Ansible automation to three
+  persistent container nodes
+- `deploy/systemd/`
+  canonical `systemd` service assets for non-RPM or vendored installs
+
 `inventory.ini.example` remains as a simple top-level compatibility inventory
 for the original two-postgres-plus-one-etcd lab.
 
