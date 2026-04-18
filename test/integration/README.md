@@ -16,6 +16,7 @@ Grouped targets:
 - `make test-integration-pgext`
 - `make test-integration-ha`
 - `make test-integration-install`
+  `test-integration-install` compiles and runs the dedicated `./test/installintegration` package, so it does not affect `./test/integration` compile scope.
 
 Run the full grouped suite:
 

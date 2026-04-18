@@ -1,6 +1,6 @@
 //go:build integration
 
-package integration_test
+package installintegration_test
 
 import (
 	"io/fs"
@@ -23,8 +23,8 @@ const (
 	pacmandConfigPath    = "/etc/pacman/pacmand.yaml"
 	pacmandAdminToken    = "integration-token"
 	pacmandAPIPort       = "8080"
-	psqlBinary          = psqlBinary
-	psqlDBFlag          = psqlDBFlag
+	psqlBinary           = "/usr/pgsql-17/bin/psql"
+	psqlDBFlag           = "--dbname=postgres"
 )
 
 func TestAnsibleThreeNodeInstallationUsingTestcontainers(t *testing.T) {
