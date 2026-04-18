@@ -1,0 +1,62 @@
+name: pacman-lab
+
+services:
+  pacman-dcs:
+    image: ${PACMAN_LAB_IMAGE:-pacman-lab:local}
+    build:
+      context: ../..
+      dockerfile: test/docker/pacman-ansible-install.Dockerfile
+    container_name: pacman-lab-dcs
+    hostname: pacman-dcs
+    working_dir: /workspace
+    command: ["/bin/sh", "-lc", "sleep infinity"]
+    ports:
+      - "2379:2379"
+    volumes:
+      - ../..:/workspace:ro
+      - ../../bin/ansible-install-rpm:/artifacts:ro
+      - ./.local/alpha-dcs/etc/pacman:/etc/pacman
+      - ./.local/alpha-dcs/var/lib/etcd:/var/lib/etcd
+      - ./.local/alpha-dcs/var/log:/var/log
+
+  pacman-primary:
+    image: ${PACMAN_LAB_IMAGE:-pacman-lab:local}
+    build:
+      context: ../..
+      dockerfile: test/docker/pacman-ansible-install.Dockerfile
+    container_name: pacman-lab-primary
+    hostname: pacman-primary
+    working_dir: /workspace
+    command: ["/bin/sh", "-lc", "sleep infinity"]
+    ports:
+      - "5433:5432"
+      - "8081:8080"
+      - "9091:9090"
+    volumes:
+      - ../..:/workspace:ro
+      - ../../bin/ansible-install-rpm:/artifacts:ro
+      - ./.local/alpha-1/etc/pacman:/etc/pacman
+      - ./.local/alpha-1/var/lib/pacman:/var/lib/pacman
+      - ./.local/alpha-1/var/lib/pgsql:/var/lib/pgsql
+      - ./.local/alpha-1/var/log:/var/log
+
+  pacman-replica:
+    image: ${PACMAN_LAB_IMAGE:-pacman-lab:local}
+    build:
+      context: ../..
+      dockerfile: test/docker/pacman-ansible-install.Dockerfile
+    container_name: pacman-lab-replica
+    hostname: pacman-replica
+    working_dir: /workspace
+    command: ["/bin/sh", "-lc", "sleep infinity"]
+    ports:
+      - "5434:5432"
+      - "8082:8080"
+      - "9092:9090"
+    volumes:
+      - ../..:/workspace:ro
+      - ../../bin/ansible-install-rpm:/artifacts:ro
+      - ./.local/alpha-2/etc/pacman:/etc/pacman
+      - ./.local/alpha-2/var/lib/pacman:/var/lib/pacman
+      - ./.local/alpha-2/var/lib/pgsql:/var/lib/pgsql
+      - ./.local/alpha-2/var/log:/var/log
