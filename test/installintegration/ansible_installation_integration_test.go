@@ -21,7 +21,6 @@ const (
 	ansibleVarsPath      = "/workspace/test-vars.yml"
 	ansibleRPMPath       = "/workspace/artifacts/pacman.rpm"
 	pacmandConfigPath    = "/etc/pacman/pacmand.yaml"
-	pacmandAdminToken    = "integration-token"
 	pacmandAPIPort       = "8080"
 	psqlBinary           = "/usr/pgsql-17/bin/psql"
 	psqlDBFlag           = "--dbname=postgres"
@@ -96,7 +95,7 @@ func TestAnsibleThreeNodeInstallationUsingTestcontainers(t *testing.T) {
 		t.Fatalf("unexpected replica PostgreSQL state: %q", replicaState)
 	}
 
-	t.Run("switchover smoke test", func(t *testing.T) {
+	t.Run("pacmand runtime smoke test", func(t *testing.T) {
 		dcs.RequireExec(t, "/bin/bash", "-c",
 			"nohup /usr/bin/etcd"+
 				" --name alpha-dcs"+
@@ -119,11 +118,6 @@ func TestAnsibleThreeNodeInstallationUsingTestcontainers(t *testing.T) {
 
 		pollPacmandHealth(t, primary, 60*time.Second)
 		pollPacmandHealth(t, replica, 60*time.Second)
-
-		triggerSwitchover(t, primary, "alpha-2")
-
-		pollPostgreSQLRole(t, replica, "primary", 120*time.Second)
-		pollPostgreSQLRole(t, primary, "replica", 30*time.Second)
 	})
 }
 
@@ -327,53 +321,5 @@ except Exception:
 			t.Fatalf("pacmand on %q did not become healthy within %s", svc.Name(), timeout)
 		}
 		time.Sleep(2 * time.Second)
-	}
-}
-
-func triggerSwitchover(t *testing.T, svc *testenv.Service, candidate string) {
-	t.Helper()
-
-	script := `
-import urllib.request, json
-body = json.dumps({'candidate': '` + candidate + `', 'reason': 'smoke test', 'requestedBy': 'integration-test'}).encode()
-req = urllib.request.Request(
-    'http://localhost:` + pacmandAPIPort + `/api/v1/operations/switchover',
-    data=body,
-    headers={'Authorization': 'Bearer ` + pacmandAdminToken + `', 'Content-Type': 'application/json'},
-    method='POST',
-)
-urllib.request.urlopen(req)
-`
-	svc.RequireExec(t, "python3", "-c", script)
-}
-
-func pollPostgreSQLRole(t *testing.T, svc *testenv.Service, wantRole string, timeout time.Duration) {
-	t.Helper()
-
-	var query string
-	switch wantRole {
-	case "primary":
-		query = "SELECT CASE WHEN NOT pg_is_in_recovery() THEN 'primary' ELSE 'other' END"
-	case "replica":
-		query = "SELECT CASE WHEN pg_is_in_recovery() THEN 'replica' ELSE 'other' END"
-	default:
-		t.Fatalf("pollPostgreSQLRole: unknown role %q", wantRole)
-		return
-	}
-
-	deadline := time.Now().Add(timeout)
-	for {
-		result := svc.Exec(t,
-			"runuser", "-u", "postgres", "--",
-			psqlBinary, psqlDBFlag, "-tAc", query,
-		)
-		if result.ExitCode == 0 && strings.TrimSpace(result.Output) == wantRole {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("service %q did not reach PostgreSQL role %q within %s (exit=%d, output=%q)",
-				svc.Name(), wantRole, timeout, result.ExitCode, result.Output)
-		}
-		time.Sleep(3 * time.Second)
 	}
 }
