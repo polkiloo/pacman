@@ -377,13 +377,13 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] add a variant that deploys a three-node external etcd cluster instead of the single-node lab DCS
 - [x] add automated validation for the Ansible deployment path
 
-- [ ] add systemd unit files
+- [x] add systemd unit files
 - [x] add example configs
-- [ ] add local lab environment
-- [ ] add bootstrap scripts for test cluster
-- [ ] add container image for lab/testing
-- [ ] define local state directory layout
-- [ ] define upgrade-safe persistent control-plane state path
+- [x] add local lab environment
+- [x] add bootstrap scripts for test cluster
+- [x] add container image for lab/testing
+- [x] define local state directory layout
+- [x] define upgrade-safe persistent control-plane state path
 
 ---
 

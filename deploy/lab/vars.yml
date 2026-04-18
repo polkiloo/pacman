@@ -1,0 +1,8 @@
+---
+pacman_manage_service: false
+postgres_manage_service: false
+etcd_manage_service: false
+
+pacman_admin_token_inline: lab-admin-token
+etcd_user: root
+etcd_group: root
