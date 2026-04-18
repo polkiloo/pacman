@@ -370,12 +370,12 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 ### Deployment Automation
 
 - [x] add a simple Ansible lab playbook for two PostgreSQL nodes plus one external etcd node
-- [ ] split the lab playbook into reusable Ansible roles for `pacman`, `postgresql`, and external `etcd`
-- [ ] add inventory and variable examples for both package-name installs and direct RPM URL installs
-- [ ] extend the Ansible deployment to configure TLS, bearer auth rotation, and secret distribution
-- [ ] extend the Ansible deployment to bootstrap PostgreSQL replication and PACMAN failover prerequisites
-- [ ] add a variant that deploys a three-node external etcd cluster instead of the single-node lab DCS
-- [ ] add automated validation for the Ansible deployment path
+- [x] split the lab playbook into reusable Ansible roles for `pacman`, `postgresql`, and external `etcd`
+- [x] add inventory and variable examples for both package-name installs and direct RPM URL installs
+- [x] extend the Ansible deployment to configure TLS, bearer auth rotation, and secret distribution
+- [x] extend the Ansible deployment to bootstrap PostgreSQL replication and PACMAN failover prerequisites
+- [x] add a variant that deploys a three-node external etcd cluster instead of the single-node lab DCS
+- [x] add automated validation for the Ansible deployment path
 
 - [ ] add systemd unit files
 - [x] add example configs
