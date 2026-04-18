@@ -541,6 +541,8 @@ func localImageBuildHint(image string) string {
 		return "make docker-build-test-image"
 	case "pacman-pgext-postgres:local":
 		return "make docker-build-pgext-image"
+	case "pacman-ansible-install:local":
+		return "make docker-build-ansible-install-image"
 	default:
 		return "docker build <your-image>"
 	}

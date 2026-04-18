@@ -42,7 +42,7 @@ jobs:
 
   test-integration:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
@@ -55,7 +55,7 @@ jobs:
           cache: true
 
       - name: Build integration images
-        run: make docker-build-test-image docker-build-pgext-image
+        run: make docker-build-test-image docker-build-pgext-image docker-build-ansible-install-image
 
       - name: Run integration smoke suite
         run: make test-integration-smoke
@@ -71,6 +71,9 @@ jobs:
 
       - name: Run integration HA suite
         run: make test-integration-ha
+
+      - name: Run integration install suite
+        run: make test-integration-install
 
   test-rpm-packaging:
     runs-on: ubuntu-latest
