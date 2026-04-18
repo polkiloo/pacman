@@ -744,6 +744,10 @@ func (store *MemoryStateStore) getKey(ctx context.Context, key string) (dcs.KeyV
 }
 
 func (store *MemoryStateStore) persistNodeStatus(ctx context.Context, status agentmodel.NodeStatus) error {
+	store.mu.RLock()
+	expectedRevision := nextRevision(store.nodeStatusRevisions[status.NodeName])
+	store.mu.RUnlock()
+
 	if err := store.setJSON(ctx, store.keyspace.Status(status.NodeName), status, dcs.WithTTL(store.leaseDuration)); err != nil {
 		return err
 	}
@@ -754,7 +758,9 @@ func (store *MemoryStateStore) persistNodeStatus(ctx context.Context, status age
 	}
 	cloned := status.Clone()
 	store.nodeStatuses[status.NodeName] = cloned
-	store.nodeStatusRevisions[status.NodeName] = nextRevision(store.nodeStatusRevisions[status.NodeName])
+	if store.nodeStatusRevisions[status.NodeName] < expectedRevision {
+		store.nodeStatusRevisions[status.NodeName] = expectedRevision
+	}
 	store.mu.Unlock()
 
 	return nil
