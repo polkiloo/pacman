@@ -1,0 +1,6 @@
+---
+pacman_cluster_name: alpha
+pacman_initial_primary: alpha-1
+pacman_package_name: pacman
+etcd_initial_cluster_state: new
+etcd_initial_cluster_token: pacman-alpha-ha
