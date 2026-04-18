@@ -3,6 +3,7 @@
 package installintegration_test
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -16,14 +17,18 @@ import (
 )
 
 const (
-	ansibleInventoryPath = "/workspace/inventory.ini"
-	ansiblePlaybookPath  = "/workspace/deploy/ansible/site.yml"
-	ansibleVarsPath      = "/workspace/test-vars.yml"
-	ansibleRPMPath       = "/workspace/artifacts/pacman.rpm"
-	pacmandConfigPath    = "/etc/pacman/pacmand.yaml"
-	pacmandAPIPort       = "8080"
-	psqlBinary           = "/usr/pgsql-17/bin/psql"
-	psqlDBFlag           = "--dbname=postgres"
+	ansibleInventoryPath   = "/workspace/inventory.ini"
+	ansiblePlaybookPath    = "/workspace/deploy/ansible/site.yml"
+	ansibleVarsPath        = "/workspace/test-vars.yml"
+	ansibleRPMPath         = "/workspace/artifacts/pacman.rpm"
+	pacmandConfigPath      = "/etc/pacman/pacmand.yaml"
+	pacmandSmokeConfigPath = "/var/lib/pacman/pacmand-smoke.yaml"
+	pacmandAPIPort         = "8080"
+	pacmandControlPort     = "9090"
+	psqlBinary             = "/usr/pgsql-17/bin/psql"
+	psqlDBFlag             = "--dbname=postgres"
+	etcdStartupTimeout     = 60 * time.Second
+	pacmandStartupTimeout  = 90 * time.Second
 )
 
 func TestAnsibleThreeNodeInstallationUsingTestcontainers(t *testing.T) {
@@ -109,15 +114,17 @@ func TestAnsibleThreeNodeInstallationUsingTestcontainers(t *testing.T) {
 				" --initial-cluster-token pacman-cluster"+
 				" </dev/null >>/var/log/etcd.log 2>&1 &",
 		)
+		pollEtcdHealth(t, dcs, etcdStartupTimeout)
 		for _, svc := range []*testenv.Service{primary, replica} {
+			preparePacmandSmokeConfig(t, svc)
 			svc.RequireExec(t, "/bin/bash", "-c",
-				"nohup runuser -s /bin/sh -u postgres -- /usr/bin/pacmand -config "+pacmandConfigPath+
+				"cd /var/lib/pacman && nohup runuser -u postgres -- /usr/bin/pacmand -config "+pacmandSmokeConfigPath+
 					" </dev/null >>/var/log/pacmand.log 2>&1 &",
 			)
 		}
 
-		pollPacmandHealth(t, primary, 60*time.Second)
-		pollPacmandHealth(t, replica, 60*time.Second)
+		pollPacmandHealth(t, primary, "http://127.0.0.1:"+pacmandAPIPort+"/health", pacmandStartupTimeout)
+		pollPacmandHealth(t, replica, "http://127.0.0.1:"+pacmandAPIPort+"/health", pacmandStartupTimeout)
 	})
 }
 
@@ -301,25 +308,103 @@ func assertFileExists(t *testing.T, service *testenv.Service, path string) {
 	service.RequireExec(t, "test", "-f", path)
 }
 
-func pollPacmandHealth(t *testing.T, svc *testenv.Service, timeout time.Duration) {
+func preparePacmandSmokeConfig(t *testing.T, svc *testenv.Service) {
 	t.Helper()
 
-	const script = `
+	command := fmt.Sprintf(
+		"python3 - <<'PY'\n"+
+			"from pathlib import Path\n"+
+			"\n"+
+			"src = Path(%q)\n"+
+			"dst = Path(%q)\n"+
+			"lines = []\n"+
+			"for raw in src.read_text().splitlines():\n"+
+			"    stripped = raw.lstrip()\n"+
+			"    indent = raw[:len(raw) - len(stripped)]\n"+
+			"    if stripped.startswith(\"apiAddress:\"):\n"+
+			"        lines.append(f'{indent}apiAddress: \"0.0.0.0:%s\"')\n"+
+			"    elif stripped.startswith(\"controlAddress:\"):\n"+
+			"        lines.append(f'{indent}controlAddress: \"0.0.0.0:%s\"')\n"+
+			"    else:\n"+
+			"        lines.append(raw)\n"+
+			"dst.write_text(\"\\\\n\".join(lines) + \"\\\\n\")\n"+
+			"PY",
+		pacmandConfigPath,
+		pacmandSmokeConfigPath,
+		pacmandAPIPort,
+		pacmandControlPort,
+	)
+
+	svc.RequireExec(t, "/bin/bash", "-lc", command)
+}
+
+func pollPacmandHealth(t *testing.T, svc *testenv.Service, rawURL string, timeout time.Duration) {
+	t.Helper()
+
+	script := `
 import urllib.request, sys
 try:
-    urllib.request.urlopen('http://localhost:` + pacmandAPIPort + `/health', timeout=3)
+    urllib.request.urlopen('` + rawURL + `', timeout=3)
     sys.exit(0)
-except Exception:
+except Exception as err:
+    print(err)
     sys.exit(1)
 `
 	deadline := time.Now().Add(timeout)
+	lastProbeError := ""
 	for {
-		if svc.Exec(t, "python3", "-c", script).ExitCode == 0 {
+		result := svc.Exec(t, "python3", "-c", script)
+		if result.ExitCode == 0 {
 			return
 		}
+		lastProbeError = strings.TrimSpace(result.Output)
 		if time.Now().After(deadline) {
-			t.Fatalf("pacmand on %q did not become healthy within %s", svc.Name(), timeout)
+			t.Fatalf("pacmand on %q did not become healthy within %s; probe=%q; listeners:\n%s\nprocesses:\n%s\npacmand log:\n%s",
+				svc.Name(),
+				timeout,
+				lastProbeError,
+				serviceCommandOutput(t, svc, "/bin/sh", "-lc", "ss -lnt"),
+				serviceCommandOutput(t, svc, "/bin/sh", "-lc", "ps -ef | grep '[p]acmand'"),
+				serviceLogTail(t, svc, "/var/log/pacmand.log"))
 		}
 		time.Sleep(2 * time.Second)
 	}
+}
+
+func pollEtcdHealth(t *testing.T, svc *testenv.Service, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for {
+		result := svc.Exec(t, "/bin/bash", "-lc",
+			"ETCDCTL_API=3 etcdctl --endpoints=http://127.0.0.1:2379 endpoint health")
+		if result.ExitCode == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("etcd on %q did not become healthy within %s; etcdctl output=%q; etcd log:\n%s",
+				svc.Name(), timeout, result.Output, serviceLogTail(t, svc, "/var/log/etcd.log"))
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
+
+func serviceLogTail(t *testing.T, svc *testenv.Service, path string) string {
+	t.Helper()
+
+	result := svc.Exec(t, "/bin/sh", "-lc", "tail -n 200 "+path)
+	if strings.TrimSpace(result.Output) == "" {
+		return "<log unavailable>"
+	}
+	return result.Output
+}
+
+func serviceCommandOutput(t *testing.T, svc *testenv.Service, cmd ...string) string {
+	t.Helper()
+
+	result := svc.Exec(t, cmd...)
+	if strings.TrimSpace(result.Output) == "" {
+		return "<no output>"
+	}
+	return result.Output
 }
