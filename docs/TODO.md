@@ -533,10 +533,10 @@ This track captures the Kubernetes-native operator model described in [ARCHITECT
 ## Suggested Milestones
 
 ## Milestone 1 — Local Agent
-- [ ] implement daemon process
-- [ ] implement PostgreSQL state detection
-- [ ] expose local API
-- [ ] implement lifecycle management
+- [x] implement daemon process
+- [x] implement PostgreSQL state detection
+- [x] expose local API
+- [x] implement lifecycle management
 
 ## Milestone 2 — Cluster View
 - [ ] implement multi-node membership
