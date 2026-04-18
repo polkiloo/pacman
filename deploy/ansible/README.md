@@ -1,59 +1,144 @@
-# Ansible Lab Deployment
+# Ansible Deployment Automation
 
-This directory contains a simple Ansible example for a basic PACMAN lab on
-RPM-based hosts:
+This directory contains the current PACMAN Ansible automation for RPM-oriented
+hosts. The lab shape stays intentionally small, but it now covers the next
+useful layer beyond package installation:
 
-- two PostgreSQL nodes that each run `pacmand`
-- one separate external etcd node used as the PACMAN DCS backend
+- reusable roles for `external_etcd`, `postgresql`, and `pacman`
+- package-name and direct-RPM install examples
+- optional PACMAN TLS material distribution and bearer-token rotation
+- PostgreSQL streaming-replication bootstrap from the declared initial primary
+- both single-node and three-node external etcd layouts
+- automated syntax and inventory validation for the checked-in examples
 
-This is intentionally a small bootstrap example, not a production deployment.
+The automation still targets process-mode `pacmand` nodes. The PostgreSQL
+extension package is not used here.
 
-Current scope:
+## Layout
 
-- installs PostgreSQL packages on the database nodes
-- installs an external etcd package on the DCS node
-- installs a PACMAN RPM by package name or by downloaded RPM URL
-- writes a minimal `pacmand` config on the PostgreSQL nodes
-- writes a single-node etcd systemd override on the DCS node
-- installs a simple `pacmand.service` unit on the PostgreSQL nodes
+- `site.yml`
+  role-based entrypoint that applies `external_etcd`, `postgresql`, and
+  `pacman` to the appropriate host groups
+- `group_vars/all.yml`
+  shared default variables for the lab and example inventories
+- `roles/external_etcd/`
+  installs etcd and renders a systemd override that can form either a single
+  lab node or a multi-node external etcd cluster
+- `roles/postgresql/`
+  installs PostgreSQL, configures replication prerequisites, bootstraps the
+  initial primary, and clones standby nodes with `pg_basebackup`
+- `roles/pacman/`
+  installs PACMAN, renders `pacmand.yaml`, distributes admin-token/TLS
+  material, and installs the local `pacmand.service` unit
+- `examples/package-name/`
+  example inventory and vars that install PACMAN by package name
+- `examples/rpm-url/`
+  example inventory and vars that install PACMAN from a direct RPM URL
+- `examples/etcd-ha/`
+  example inventory and vars for a three-node external etcd cluster
+- `examples/security-overrides.yml.example`
+  example variable file for TLS secret distribution and staged bearer-token
+  rotation
+- `validate.sh`
+  validates the checked-in inventories with `ansible-inventory`,
+  `ansible-playbook --syntax-check`, and `ansible-playbook --list-tasks`
 
-Not included yet:
+`inventory.ini.example` remains as a simple top-level compatibility inventory
+for the original two-postgres-plus-one-etcd lab.
 
-- PostgreSQL streaming replication bootstrap
-- TLS or mTLS material distribution
-- secret management beyond a demo bearer-token file
-- HA etcd clustering
-- distro-specific tuning beyond the default RPM-oriented variables
+## Example Runs
 
-Important:
-
-- The single external etcd node layout is for a lab only. It is a single point
-  of failure and does not provide production quorum.
-- The default package and service names target a PostgreSQL 17 / RPM-style
-  layout and should be overridden for your distro when needed.
-
-## Files
-
-- `inventory.ini.example`: sample three-node inventory
-- `group_vars/all.yml`: default variables for the lab
-- `site.yml`: playbook entrypoint
-- `templates/`: rendered PACMAN, systemd, and etcd templates
-
-Important inventory variables:
-
-- `pacman_cluster_name`: shared PACMAN cluster name
-- `pacman_initial_primary`: bootstrap primary member name
-- `pacman_node_name`: per-node PACMAN member name on PostgreSQL hosts
-- `etcd_name`: per-node etcd member name on the external DCS host
-
-## Example Run
+Package-name install:
 
 ```bash
 cd deploy/ansible
-cp inventory.ini.example inventory.ini
-ansible-playbook -i inventory.ini site.yml \
-  -e pacman_package_url=https://repo.example/pacman-0.1.0-1.el9.x86_64.rpm
+ansible-playbook -i examples/package-name/hosts.ini site.yml
 ```
 
-If PACMAN is already published in a configured RPM repository, skip
-`pacman_package_url` and override `pacman_package_name` instead.
+Direct RPM URL install:
+
+```bash
+cd deploy/ansible
+ansible-playbook -i examples/rpm-url/hosts.ini site.yml
+```
+
+Three-node external etcd variant:
+
+```bash
+cd deploy/ansible
+ansible-playbook -i examples/etcd-ha/hosts.ini site.yml
+```
+
+If your inventory hostnames differ from PACMAN member names, set
+`pacman_initial_primary_host` to the inventory host that corresponds to
+`pacman_initial_primary`.
+
+## Secret Distribution And Rotation
+
+The `pacman` role now supports two admin-token modes:
+
+- inline lab token via `pacman_admin_token_inline`
+- staged file distribution via `pacman_admin_token_source_files`
+
+The staged mode exists so operators can distribute both the current and next
+bearer token, then switch the active symlink by changing
+`pacman_admin_token_active_id` in a later run.
+
+Example:
+
+```bash
+cd deploy/ansible
+ansible-playbook \
+  -i examples/package-name/hosts.ini \
+  -e @examples/security-overrides.yml.example \
+  site.yml
+```
+
+The security example file shows:
+
+- PACMAN API/control-plane TLS certificate, key, and CA distribution
+- member mTLS enablement for PACMAN peer traffic
+- staged admin-token rollout with an explicit active token ID
+
+Current limit:
+
+- the Ansible automation configures PACMAN endpoint TLS and PACMAN secret
+  distribution only
+- etcd itself is still rendered as an HTTP-only lab/external cluster here
+  because PACMAN's current etcd config surface does not yet model etcd client
+  TLS
+
+## PostgreSQL Replication Bootstrap
+
+The `postgresql` role now bootstraps a simple physical-replication topology:
+
+- the host identified by `pacman_initial_primary` / `pacman_initial_primary_host`
+  is initialized as the writable primary
+- PostgreSQL replication prerequisites are configured:
+  `wal_level`, `max_wal_senders`, `max_replication_slots`, `hot_standby`,
+  `listen_addresses`, and `pg_hba.conf` entries
+- the role creates or updates the replication user on the primary
+- every non-primary PostgreSQL host is recloned with `pg_basebackup -R -X stream`
+  if it is not already a standby, then verified to enter streaming recovery
+
+This is still bootstrap automation, not a full day-2 lifecycle:
+
+- it does not perform reinit or divergence repair
+- it does not configure synchronous replication policy
+- it assumes fresh or explicitly replaceable standby data for initial clone
+
+## Validation
+
+Local validation:
+
+```bash
+make ansible-validate
+```
+
+That target runs:
+
+- `bash -n deploy/ansible/validate.sh`
+- inventory resolution for each checked-in example
+- playbook syntax validation for each example
+- task-list expansion for each example so role wiring and templating stay
+  resolvable in CI
