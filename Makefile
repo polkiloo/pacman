@@ -58,7 +58,7 @@ LDFLAGS := -X github.com/polkiloo/pacman/internal/version.Version=$(VERSION) \
 	-X github.com/polkiloo/pacman/internal/version.Commit=$(COMMIT) \
 	-X github.com/polkiloo/pacman/internal/version.BuildDate=$(BUILD_DATE)
 
-.PHONY: fmt test test-dcs-conformance test-integration test-integration-smoke test-integration-security test-integration-patroni test-integration-pgext test-integration-ha docker-build-test-image docker-build-pgext-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl build-pg-extension package-pg-extension install-pg-extension clean-pg-extension tidy clean openapi-codegen-check rpm rpm-builder-image rpm-validate
+.PHONY: fmt test test-dcs-conformance test-integration test-integration-smoke test-integration-security test-integration-patroni test-integration-pgext test-integration-ha docker-build-test-image docker-build-pgext-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl build-pg-extension package-pg-extension install-pg-extension clean-pg-extension tidy clean openapi-codegen-check rpm rpm-builder-image rpm-validate ansible-validate
 
 fmt:
 	$(GO) fmt ./...
@@ -183,6 +183,10 @@ rpm-validate:
 	$(MAKE) rpm RPM_OUTPUT_DIR=$(RPM_VALIDATE_RELEASE2_DIR) RPM_RELEASE=2
 	CONTAINER_RUNTIME=$(CONTAINER_RUNTIME) RPM_VALIDATION_IMAGE=$(RPM_VALIDATION_IMAGE) \
 		./packaging/rpm/validate-install-flow.sh $(RPM_VALIDATE_RELEASE1_DIR) $(RPM_VALIDATE_RELEASE2_DIR)
+
+ansible-validate:
+	bash -n deploy/ansible/validate.sh
+	./deploy/ansible/validate.sh
 
 build-pacmand:
 	mkdir -p $(BIN_DIR)
