@@ -4,11 +4,14 @@ set -euo pipefail
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 lab_dir=$(cd "${script_dir}/.." && pwd)
 repo_root=$(cd "${lab_dir}/../.." && pwd)
+compose_file="${lab_dir}/compose.yml"
 
 dry_run=false
 
-api_url="${PACMAN_DEMO_API_URL:-http://127.0.0.1:8081}"
-replica_api_url="${PACMAN_DEMO_REPLICA_API_URL:-http://127.0.0.1:8082}"
+primary_service="${PACMAN_DEMO_PRIMARY_SERVICE:-pacman-primary}"
+replica_service="${PACMAN_DEMO_REPLICA_SERVICE:-pacman-replica}"
+primary_api_url="${PACMAN_DEMO_PRIMARY_API_URL:-http://127.0.0.1:8080}"
+replica_api_url="${PACMAN_DEMO_REPLICA_API_URL:-http://127.0.0.1:8080}"
 api_token="${PACMAN_DEMO_API_TOKEN:-lab-admin-token}"
 rpm_dir="${PACMAN_DEMO_RPM_DIR:-${repo_root}/bin/ansible-install-rpm}"
 default_candidate="${PACMAN_DEMO_SWITCHOVER_CANDIDATE:-alpha-2}"
@@ -39,7 +42,9 @@ Stages:
   reset
 
 Environment:
-  PACMAN_DEMO_API_URL              default: ${api_url}
+  PACMAN_DEMO_PRIMARY_SERVICE      default: ${primary_service}
+  PACMAN_DEMO_REPLICA_SERVICE      default: ${replica_service}
+  PACMAN_DEMO_PRIMARY_API_URL      default: ${primary_api_url}
   PACMAN_DEMO_REPLICA_API_URL      default: ${replica_api_url}
   PACMAN_DEMO_API_TOKEN            default: ${api_token}
   PACMAN_DEMO_RPM_DIR              default: ${rpm_dir}
@@ -48,7 +53,8 @@ Environment:
   PACMAN_DEMO_WATCH_DELAY          default: ${watch_delay}
 
 Notes:
-  - Native /api/v1/* endpoints require the lab bearer token.
+  - Runtime demo stages execute through docker compose, not host curl/jq.
+  - Native /api/v1/* access uses the lab bearer token from inside the container.
   - The local lab member names are alpha-1 and alpha-2.
   - This demo script intentionally avoids failover + rejoin because current
     rejoin execution is an explicit multi-stage workflow, not a simple restart.
@@ -112,69 +118,67 @@ require_tool() {
 	fi
 }
 
-show_json() {
-	local method=$1
-	local url=$2
-	local filter=$3
-	local body=${4:-}
-	local response
+compose_exec() {
+	local service=$1
+	shift
 
-	require_tool curl
+	run_command docker compose -f "${compose_file}" exec -T "${service}" "$@"
+}
+
+compose_shell() {
+	local service=$1
+	local command=$2
+
+	compose_exec "${service}" /bin/sh -lc "${command}"
+}
+
+require_pacmanctl() {
+	if "${dry_run}"; then
+		return 0
+	fi
+
+	compose_exec "${primary_service}" test -x /usr/bin/pacmanctl >/dev/null
+}
+
+require_python() {
+	local service=$1
 
 	if "${dry_run}"; then
-		if [[ -n "${body}" ]]; then
-			render_command curl -fsS -X "${method}" -H "Authorization: Bearer ${api_token}" -H "Accept: application/json" -H "Content-Type: application/json" --data "${body}" "${url}"
-		else
-			render_command curl -fsS -X "${method}" -H "Authorization: Bearer ${api_token}" -H "Accept: application/json" "${url}"
-		fi
-
-		printf '# jq filter: %s\n' "${filter}"
 		return 0
 	fi
 
-	if [[ -n "${body}" ]]; then
-		response=$(curl -fsS -X "${method}" \
-			-H "Authorization: Bearer ${api_token}" \
-			-H "Accept: application/json" \
-			-H "Content-Type: application/json" \
-			--data "${body}" \
-			"${url}")
-	else
-		response=$(curl -fsS -X "${method}" \
-			-H "Authorization: Bearer ${api_token}" \
-			-H "Accept: application/json" \
-			"${url}")
-	fi
+	compose_exec "${service}" command -v python3 >/dev/null
+}
 
-	if command -v jq >/dev/null 2>&1; then
-		printf '%s\n' "${response}" | jq "${filter}"
-		return 0
-	fi
+python_get_json() {
+	local service=$1
+	local url=$2
 
-	printf '%s\n' "${response}"
+	compose_exec "${service}" python3 -c \
+		"import json, urllib.request; req = urllib.request.Request('${url}', headers={'Accept': 'application/json', 'Authorization': 'Bearer ${api_token}'}); print(json.dumps(json.load(urllib.request.urlopen(req, timeout=5)), indent=2, sort_keys=True))"
 }
 
 show_probe() {
-	local url=$1
-	local label=$2
+	local service=$1
+	local url=$2
+	local label=$3
 
-	require_tool curl
-
+	require_python "${service}"
 	log "${label}"
-	if "${dry_run}"; then
-		render_command curl -fsS "${url}"
-		printf '# jq filter: .\n'
-		return 0
-	fi
 
-	local response
-	response=$(curl -fsS "${url}")
-	if command -v jq >/dev/null 2>&1; then
-		printf '%s\n' "${response}" | jq .
-		return 0
-	fi
+	python_get_json "${service}" "${url}"
+}
 
-	printf '%s\n' "${response}"
+run_pacmanctl() {
+	local service=$1
+	shift
+
+	require_pacmanctl
+	compose_exec "${service}" \
+		env \
+			PACMANCTL_API_URL="${primary_api_url}" \
+			PACMANCTL_API_TOKEN="${api_token}" \
+			pacmanctl "$@"
 }
 
 stage_prepare() {
@@ -192,33 +196,26 @@ stage_bootstrap() {
 }
 
 stage_probes() {
-	show_probe "${api_url}/health" "primary /health"
-	show_probe "${replica_api_url}/health" "replica /health"
+	show_probe "${primary_service}" "${primary_api_url}/health" "primary /health"
+	show_probe "${replica_service}" "${replica_api_url}/health" "replica /health"
 }
 
 stage_cluster() {
-	log "cluster topology"
-	show_json GET "${api_url}/api/v1/cluster" '{clusterName, phase, currentPrimary, currentEpoch, maintenance, members: [.members[] | {name, role, state, healthy}]}'
+	log "cluster status via pacmanctl in ${primary_service}"
+	run_pacmanctl "${primary_service}" cluster status
 }
 
 stage_members() {
-	log "members"
-	show_json GET "${api_url}/api/v1/members" '.items | map({name, role, state, healthy, lagBytes, timeline})'
+	log "members via pacmanctl in ${primary_service}"
+	run_pacmanctl "${primary_service}" members list
 }
 
 stage_metrics() {
-	require_tool curl
-	log "key prometheus metrics"
+	require_python "${primary_service}"
+	log "key prometheus metrics from ${primary_service}"
 
-	if "${dry_run}"; then
-		render_command curl -fsS "${api_url}/metrics"
-		printf '# grep: ^pacman_cluster_|^pacman_member_info|^pacman_node_info\n'
-		return 0
-	fi
-
-	local metrics
-	metrics=$(curl -fsS "${api_url}/metrics")
-	printf '%s\n' "${metrics}" | grep -E '^pacman_cluster_|^pacman_member_info|^pacman_node_info'
+	compose_shell "${primary_service}" \
+		"python3 -c \"import urllib.request; print(urllib.request.urlopen('${primary_api_url}/metrics', timeout=5).read().decode(), end='')\" | grep -E '^pacman_cluster_|^pacman_member_info|^pacman_node_info'"
 }
 
 stage_verify() {
@@ -228,20 +225,20 @@ stage_verify() {
 }
 
 stage_maintenance_enable() {
-	log "enable maintenance mode"
-	show_json PUT "${api_url}/api/v1/maintenance" '.' '{"enabled":true,"reason":"demo-maintenance","requestedBy":"demo-script"}'
+	log "enable maintenance mode via pacmanctl in ${primary_service}"
+	run_pacmanctl "${primary_service}" cluster maintenance enable -reason demo-maintenance -requested-by demo-script
 }
 
 stage_maintenance_disable() {
-	log "disable maintenance mode"
-	show_json PUT "${api_url}/api/v1/maintenance" '.' '{"enabled":false,"reason":"demo-maintenance-complete","requestedBy":"demo-script"}'
+	log "disable maintenance mode via pacmanctl in ${primary_service}"
+	run_pacmanctl "${primary_service}" cluster maintenance disable -reason demo-maintenance-complete -requested-by demo-script
 }
 
 stage_switchover() {
 	local candidate=${1:-${default_candidate}}
 
-	log "request switchover to ${candidate}"
-	show_json POST "${api_url}/api/v1/operations/switchover" '.' "{\"candidate\":\"${candidate}\",\"reason\":\"demo-switchover\",\"requestedBy\":\"demo-script\"}"
+	log "request switchover to ${candidate} via pacmanctl in ${primary_service}"
+	run_pacmanctl "${primary_service}" cluster switchover -candidate "${candidate}" -reason demo-switchover -requested-by demo-script
 }
 
 stage_watch_members() {
@@ -265,8 +262,8 @@ stage_watch_members() {
 }
 
 stage_history() {
-	log "operation history"
-	show_json GET "${api_url}/api/v1/history" '.items'
+	log "history via pacmanctl in ${primary_service}"
+	run_pacmanctl "${primary_service}" history list
 }
 
 stage_full_demo() {

@@ -36,8 +36,8 @@ make rpm
   creates runtime directories, starts containers, applies Ansible, and starts
   etcd + `pacmand`
 - `scripts/demo.sh`
-  step-by-step local demo runner with safe stage commands for bootstrap,
-  verification, maintenance mode, and planned switchover
+  step-by-step local demo runner that executes verification and operations
+  through `docker compose exec` inside the lab containers
 - `scripts/destroy-cluster.sh`
   stops the lab containers but preserves local state
 - `scripts/reset-state.sh`
@@ -65,6 +65,13 @@ deploy/lab/scripts/demo.sh switchover alpha-2
 deploy/lab/scripts/demo.sh watch-members 5
 deploy/lab/scripts/demo.sh history
 ```
+
+The runtime demo stages intentionally run from inside the lab containers:
+
+- health and metrics are queried with container-local Python
+- cluster status, member listing, maintenance mode, switchover, and history use
+  `pacmanctl` inside `pacman-primary`
+- the host only needs Docker, `make`, and standard shell tools for the demo
 
 That flow:
 

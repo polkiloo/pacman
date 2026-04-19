@@ -41,40 +41,41 @@ assert_contains "${bootstrap_output}" "bootstrap-cluster.sh"
 
 printf '==> dry-run verify\n'
 verify_output=$(run_and_capture "${demo_script}" --dry-run verify)
-assert_contains "${verify_output}" "/health"
-assert_contains "${verify_output}" "/api/v1/cluster"
-assert_contains "${verify_output}" "/api/v1/members"
+assert_contains "${verify_output}" "docker compose"
+assert_contains "${verify_output}" "exec -T pacman-primary"
+assert_contains "${verify_output}" "exec -T pacman-replica"
+assert_contains "${verify_output}" "pacmanctl cluster status"
+assert_contains "${verify_output}" "pacmanctl members list"
 
 printf '==> dry-run metrics\n'
 metrics_output=$(run_and_capture "${demo_script}" --dry-run metrics)
 assert_contains "${metrics_output}" "/metrics"
 assert_contains "${metrics_output}" "pacman_cluster_"
+assert_contains "${metrics_output}" "docker compose"
 
 printf '==> dry-run maintenance enable\n'
 maintenance_enable_output=$(run_and_capture "${demo_script}" --dry-run maintenance-enable)
-assert_contains "${maintenance_enable_output}" "/api/v1/maintenance"
-assert_contains "${maintenance_enable_output}" "enabled"
+assert_contains "${maintenance_enable_output}" "pacmanctl cluster maintenance enable"
 assert_contains "${maintenance_enable_output}" "demo-maintenance"
 
 printf '==> dry-run maintenance disable\n'
 maintenance_disable_output=$(run_and_capture "${demo_script}" --dry-run maintenance-disable)
-assert_contains "${maintenance_disable_output}" "/api/v1/maintenance"
-assert_contains "${maintenance_disable_output}" "enabled"
+assert_contains "${maintenance_disable_output}" "pacmanctl cluster maintenance disable"
 assert_contains "${maintenance_disable_output}" "demo-maintenance-complete"
 
 printf '==> dry-run switchover\n'
 switchover_output=$(run_and_capture "${demo_script}" --dry-run switchover alpha-2)
-assert_contains "${switchover_output}" "/api/v1/operations/switchover"
-assert_contains "${switchover_output}" "candidate"
+assert_contains "${switchover_output}" "pacmanctl cluster switchover"
+assert_contains "${switchover_output}" "-candidate"
 assert_contains "${switchover_output}" "alpha-2"
 
 printf '==> dry-run history\n'
 history_output=$(run_and_capture "${demo_script}" --dry-run history)
-assert_contains "${history_output}" "/api/v1/history"
+assert_contains "${history_output}" "pacmanctl history list"
 
 printf '==> dry-run watch-members\n'
 watch_output=$(run_and_capture "${demo_script}" --dry-run watch-members 2)
-assert_contains "${watch_output}" "/api/v1/members"
+assert_contains "${watch_output}" "pacmanctl members list"
 assert_contains "${watch_output}" "sleep"
 
 printf '==> dry-run destroy/reset\n'
@@ -86,7 +87,7 @@ assert_contains "${reset_output}" "reset-state.sh"
 printf '==> dry-run full demo\n'
 full_demo_output=$(run_and_capture "${demo_script}" --dry-run full-demo)
 assert_contains "${full_demo_output}" "bootstrap-cluster.sh"
-assert_contains "${full_demo_output}" "/api/v1/operations/switchover"
-assert_contains "${full_demo_output}" "/api/v1/history"
+assert_contains "${full_demo_output}" "pacmanctl cluster switchover"
+assert_contains "${full_demo_output}" "pacmanctl history list"
 
 printf 'demo script dry-run verification passed\n'
