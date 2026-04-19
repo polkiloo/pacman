@@ -29,6 +29,7 @@ list_output=$(run_and_capture "${demo_script}" list)
 assert_contains "${list_output}" "prepare"
 assert_contains "${list_output}" "full-demo"
 assert_contains "${list_output}" "watch-members"
+assert_contains "${list_output}" "postgres-config"
 
 printf '==> dry-run prepare\n'
 prepare_output=$(run_and_capture "${demo_script}" --dry-run prepare)
@@ -52,6 +53,12 @@ metrics_output=$(run_and_capture "${demo_script}" --dry-run metrics)
 assert_contains "${metrics_output}" "/metrics"
 assert_contains "${metrics_output}" "pacman_cluster_"
 assert_contains "${metrics_output}" "docker compose"
+
+printf '==> dry-run postgres-config\n'
+postgres_config_output=$(run_and_capture "${demo_script}" --dry-run postgres-config shared_buffers 256MB)
+assert_contains "${postgres_config_output}" "pacmanctl cluster spec show -o json"
+assert_contains "${postgres_config_output}" "etcdctl put"
+assert_contains "${postgres_config_output}" "shared_buffers=256MB"
 
 printf '==> dry-run maintenance enable\n'
 maintenance_enable_output=$(run_and_capture "${demo_script}" --dry-run maintenance-enable)

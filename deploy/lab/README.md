@@ -58,6 +58,7 @@ deploy/lab/scripts/demo.sh list
 deploy/lab/scripts/demo.sh prepare
 deploy/lab/scripts/demo.sh bootstrap
 deploy/lab/scripts/demo.sh verify
+deploy/lab/scripts/demo.sh postgres-config
 deploy/lab/scripts/demo.sh metrics
 deploy/lab/scripts/demo.sh maintenance-enable
 deploy/lab/scripts/demo.sh maintenance-disable
@@ -68,10 +69,17 @@ deploy/lab/scripts/demo.sh history
 
 The runtime demo stages intentionally run from inside the lab containers:
 
-- health and metrics are queried with container-local Python
-- cluster status, member listing, maintenance mode, switchover, and history use
-  `pacmanctl` inside `pacman-primary`
+- `probes` and `metrics` use Patroni-compatible top-level endpoints
+- `cluster`, `members`, `maintenance-*`, `switchover`, and `history` use the
+  PACMAN-native `/api/v1/*` API through `pacmanctl`
+- `postgres-config` reads `/api/v1/cluster/spec`, updates the desired cluster
+  spec through etcd, then waits until the PACMAN-native view reflects the new
+  PostgreSQL parameter
+- `verify` mixes the two surfaces so the demo exercises both compatibility and
+  native PACMAN views
 - the host only needs Docker, `make`, and standard shell tools for the demo
+- the script defaults to container-reachable PACMAN API URLs:
+  `http://pacman-primary:8080` and `http://pacman-replica:8080`
 
 That flow:
 
@@ -82,6 +90,11 @@ That flow:
 - starts the external etcd daemon and both `pacmand` daemons
 - verifies etcd and PACMAN health endpoints
 
+The `postgres-config` stage is intentionally a desired-state demo, not a live
+PostgreSQL reload demo. It changes the persisted cluster spec parameter map and
+shows PACMAN observing the new value, but it does not yet push that parameter
+into the already-running PostgreSQL instances automatically.
+
 Useful host endpoints after bootstrap:
 
 - etcd: `http://127.0.0.1:2379`
@@ -89,6 +102,11 @@ Useful host endpoints after bootstrap:
 - replica PACMAN API: `http://127.0.0.1:8082`
 - primary PostgreSQL: `127.0.0.1:5433`
 - replica PostgreSQL: `127.0.0.1:5434`
+
+If you override `PACMAN_DEMO_PRIMARY_API_URL` or
+`PACMAN_DEMO_REPLICA_API_URL`, use addresses that are reachable from inside the
+lab containers. `127.0.0.1:8081` and `127.0.0.1:8082` are host-side published
+ports, not container-side loopback listeners.
 
 Destroy containers but keep state:
 

@@ -10,13 +10,27 @@ dry_run=false
 
 primary_service="${PACMAN_DEMO_PRIMARY_SERVICE:-pacman-primary}"
 replica_service="${PACMAN_DEMO_REPLICA_SERVICE:-pacman-replica}"
-primary_api_url="${PACMAN_DEMO_PRIMARY_API_URL:-http://127.0.0.1:8080}"
-replica_api_url="${PACMAN_DEMO_REPLICA_API_URL:-http://127.0.0.1:8080}"
+primary_api_url="${PACMAN_DEMO_PRIMARY_API_URL:-http://${primary_service}:8080}"
+replica_api_url="${PACMAN_DEMO_REPLICA_API_URL:-http://${replica_service}:8080}"
 api_token="${PACMAN_DEMO_API_TOKEN:-lab-admin-token}"
 rpm_dir="${PACMAN_DEMO_RPM_DIR:-${repo_root}/bin/ansible-install-rpm}"
 default_candidate="${PACMAN_DEMO_SWITCHOVER_CANDIDATE:-alpha-2}"
 watch_iterations="${PACMAN_DEMO_WATCH_ITERATIONS:-10}"
 watch_delay="${PACMAN_DEMO_WATCH_DELAY:-2}"
+postgres_config_parameter="${PACMAN_DEMO_POSTGRES_PARAMETER:-log_min_duration_statement}"
+postgres_config_value="${PACMAN_DEMO_POSTGRES_VALUE:-250ms}"
+
+pgbench_host="${PACMAN_DEMO_PGBENCH_HOST:-localhost}"
+pgbench_port="${PACMAN_DEMO_PGBENCH_PORT:-5432}"
+pgbench_user="${PACMAN_DEMO_PGBENCH_USER:-postgres}"
+pgbench_db="${PACMAN_DEMO_PGBENCH_DB:-postgres}"
+pgbench_scale="${PACMAN_DEMO_PGBENCH_SCALE:-10}"
+pgbench_clients="${PACMAN_DEMO_PGBENCH_CLIENTS:-4}"
+pgbench_threads="${PACMAN_DEMO_PGBENCH_THREADS:-2}"
+pgbench_duration="${PACMAN_DEMO_PGBENCH_DURATION:-120}"
+
+pgbench_pid_file="/tmp/pacman-demo-pgbench.pid"
+pgbench_log_file="/tmp/pacman-demo-pgbench.log"
 
 print_usage() {
 	cat <<EOF
@@ -24,22 +38,28 @@ Usage:
   $(basename "$0") [--dry-run] <stage> [stage-args]
 
 Stages:
-  list
-  prepare
-  bootstrap
-  probes
-  cluster
-  members
-  metrics
-  verify
-  maintenance-enable
-  maintenance-disable
-  switchover [candidate]
-  watch-members [iterations]
-  history
-  full-demo
-  destroy
-  reset
+  list                               [catalog]
+  prepare                            [build/runtime]
+  bootstrap                          [ansible/bootstrap]
+  probes                             [Patroni-compatible API]
+  cluster                            [PACMAN-native API]
+  members                            [PACMAN-native API]
+  postgres-config [parameter] [value] [PACMAN-native API + DCS]
+  metrics                            [Patroni-compatible API]
+  verify                             [mixed: Patroni-compatible + PACMAN-native]
+  maintenance-enable                 [PACMAN-native API]
+  maintenance-disable                [PACMAN-native API]
+  cancel-switchover                  [PACMAN-native API]
+  switchover [candidate]             [PACMAN-native API]
+  watch-members [iterations]         [PACMAN-native API]
+  history                            [PACMAN-native API]
+  pgbench-init                       [PostgreSQL client]
+  load-on                            [PostgreSQL client]
+  load-off                           [PostgreSQL client]
+  pgbench-stats                      [pgbench log]
+  full-demo                          [mixed]
+  destroy                            [docker lifecycle]
+  reset                              [docker lifecycle]
 
 Environment:
   PACMAN_DEMO_PRIMARY_SERVICE      default: ${primary_service}
@@ -51,33 +71,58 @@ Environment:
   PACMAN_DEMO_SWITCHOVER_CANDIDATE default: ${default_candidate}
   PACMAN_DEMO_WATCH_ITERATIONS     default: ${watch_iterations}
   PACMAN_DEMO_WATCH_DELAY          default: ${watch_delay}
+  PACMAN_DEMO_POSTGRES_PARAMETER   default: ${postgres_config_parameter}
+  PACMAN_DEMO_POSTGRES_VALUE       default: ${postgres_config_value}
+  PACMAN_DEMO_PGBENCH_HOST         default: ${pgbench_host}
+  PACMAN_DEMO_PGBENCH_PORT         default: ${pgbench_port}
+  PACMAN_DEMO_PGBENCH_USER         default: ${pgbench_user}
+  PACMAN_DEMO_PGBENCH_DB           default: ${pgbench_db}
+  PACMAN_DEMO_PGBENCH_SCALE        default: ${pgbench_scale}
+  PACMAN_DEMO_PGBENCH_CLIENTS      default: ${pgbench_clients}
+  PACMAN_DEMO_PGBENCH_THREADS      default: ${pgbench_threads}
+  PACMAN_DEMO_PGBENCH_DURATION     default: ${pgbench_duration}s
 
 Notes:
   - Runtime demo stages execute through docker compose, not host curl/jq.
+  - PACMAN_DEMO_*_API_URL values must be reachable from inside the lab
+    containers. Host-published ports stay available on 127.0.0.1:8081/8082.
   - Native /api/v1/* access uses the lab bearer token from inside the container.
   - The local lab member names are alpha-1 and alpha-2.
-  - This demo script intentionally avoids failover + rejoin because current
-    rejoin execution is an explicit multi-stage workflow, not a simple restart.
+  - postgres-config updates the desired cluster PostgreSQL parameter map in DCS
+    and waits for /api/v1/cluster/spec to reflect the new value.
+  - postgres-config does not hot-reload the running PostgreSQL instances yet;
+    it demonstrates desired-state propagation, not live config application.
+  - pgbench runs inside pacman-primary against its local PostgreSQL instance.
+    Transactions will briefly error during switchover — this is expected and
+    demonstrates PACMAN completing the operation under live write load.
+  - After switchover the former primary automatically rejoins as a standby.
+    The watch loop shows it recovering — final state should show both members healthy.
 EOF
 }
 
 print_stage_list() {
 	cat <<'EOF'
-prepare
-bootstrap
-probes
-cluster
-members
-metrics
-verify
-maintenance-enable
-maintenance-disable
-switchover
-watch-members
-history
-full-demo
-destroy
-reset
+prepare              [build/runtime]
+bootstrap            [ansible/bootstrap]
+probes               [Patroni-compatible API]
+cluster              [PACMAN-native API]
+members              [PACMAN-native API]
+postgres-config      [PACMAN-native API + DCS]
+metrics              [Patroni-compatible API]
+verify               [mixed: Patroni-compatible + PACMAN-native]
+maintenance-enable   [PACMAN-native API]
+maintenance-disable  [PACMAN-native API]
+cancel-switchover    [PACMAN-native API]
+switchover           [PACMAN-native API]
+watch-members        [PACMAN-native API]
+history              [PACMAN-native API]
+pgbench-init         [PostgreSQL client]
+load-on              [PostgreSQL client]
+load-off             [PostgreSQL client]
+pgbench-stats        [pgbench log]
+full-demo            [mixed]
+destroy              [docker lifecycle]
+reset                [docker lifecycle]
 EOF
 }
 
@@ -140,6 +185,14 @@ require_pacmanctl() {
 	compose_exec "${primary_service}" test -x /usr/bin/pacmanctl >/dev/null
 }
 
+require_etcdctl() {
+	if "${dry_run}"; then
+		return 0
+	fi
+
+	compose_exec pacman-dcs command -v etcdctl >/dev/null
+}
+
 require_python() {
 	local service=$1
 
@@ -150,12 +203,34 @@ require_python() {
 	compose_exec "${service}" command -v python3 >/dev/null
 }
 
+ensure_container_api_url() {
+	local url=$1
+	local variable_name=$2
+	local service_name=$3
+
+	case "${url}" in
+		http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*)
+			printf '%s=%s points at container loopback.\n' "${variable_name}" "${url}" >&2
+			printf 'demo stages run inside docker compose containers, so use a service URL such as http://%s:8080.\n' "${service_name}" >&2
+			printf 'host-published ports remain available on http://127.0.0.1:8081 and http://127.0.0.1:8082 outside the containers.\n' >&2
+			exit 1
+			;;
+	esac
+}
+
 python_get_json() {
 	local service=$1
 	local url=$2
 
 	compose_exec "${service}" python3 -c \
-		"import json, urllib.request; req = urllib.request.Request('${url}', headers={'Accept': 'application/json', 'Authorization': 'Bearer ${api_token}'}); print(json.dumps(json.load(urllib.request.urlopen(req, timeout=5)), indent=2, sort_keys=True))"
+		"import json, sys, urllib.error, urllib.request
+req = urllib.request.Request('${url}', headers={'Accept': 'application/json', 'Authorization': 'Bearer ${api_token}'})
+try:
+    response = urllib.request.urlopen(req, timeout=5)
+except urllib.error.URLError as exc:
+    print(f'failed to fetch ${url} from ${service}: {exc}', file=sys.stderr)
+    sys.exit(1)
+print(json.dumps(json.load(response), indent=2, sort_keys=True))"
 }
 
 show_probe() {
@@ -174,11 +249,217 @@ run_pacmanctl() {
 	shift
 
 	require_pacmanctl
+	ensure_container_api_url "${primary_api_url}" "PACMAN_DEMO_PRIMARY_API_URL" "${primary_service}"
 	compose_exec "${service}" \
 		env \
 			PACMANCTL_API_URL="${primary_api_url}" \
 			PACMANCTL_API_TOKEN="${api_token}" \
 			pacmanctl "$@"
+}
+
+show_desired_postgres_parameter() {
+	local service=$1
+	local parameter=$2
+
+	require_python "${service}"
+	ensure_container_api_url "${primary_api_url}" "PACMAN_DEMO_PRIMARY_API_URL" "${primary_service}"
+	compose_exec "${service}" python3 - "${parameter}" "${primary_api_url}/api/v1/cluster/spec" "${api_token}" <<'PY'
+import json
+import sys
+import urllib.request
+
+parameter, url, token = sys.argv[1:4]
+request = urllib.request.Request(
+    url,
+    headers={
+        "Accept": "application/json",
+        "Authorization": f"Bearer {token}",
+    },
+)
+with urllib.request.urlopen(request, timeout=5) as response:
+    spec = json.load(response)
+
+parameters = ((spec.get("postgres") or {}).get("parameters") or {})
+summary = {
+    "clusterName": spec.get("clusterName"),
+    "generation": spec.get("generation"),
+    "parameter": parameter,
+    "value": parameters.get(parameter, "<unset>"),
+}
+print(json.dumps(summary, indent=2, sort_keys=True))
+PY
+}
+
+update_desired_postgres_parameter() {
+	local parameter=$1
+	local value=$2
+
+	require_etcdctl
+	require_python pacman-dcs
+	ensure_container_api_url "${primary_api_url}" "PACMAN_DEMO_PRIMARY_API_URL" "${primary_service}"
+	compose_exec pacman-dcs python3 - "${parameter}" "${value}" "${primary_api_url}/api/v1/cluster/spec" "${api_token}" <<'PY'
+import base64
+import json
+import os
+import subprocess
+import sys
+import urllib.request
+
+parameter, value, url, token = sys.argv[1:5]
+request = urllib.request.Request(
+    url,
+    headers={
+        "Accept": "application/json",
+        "Authorization": f"Bearer {token}",
+    },
+)
+with urllib.request.urlopen(request, timeout=5) as response:
+    api_spec = json.load(response)
+
+cluster_name = str(api_spec.get("clusterName") or "").strip()
+if not cluster_name:
+    raise SystemExit("cluster spec did not include clusterName")
+
+env = dict(os.environ)
+env["ETCDCTL_API"] = "3"
+key = f"/pacman/{cluster_name}/config"
+current = subprocess.run(
+    [
+        "etcdctl",
+        "--endpoints=http://127.0.0.1:2379",
+        "get",
+        key,
+        "-w",
+        "json",
+    ],
+    check=True,
+    capture_output=True,
+    env=env,
+    text=True,
+)
+response = json.loads(current.stdout)
+kvs = response.get("kvs") or []
+if not kvs:
+    raise SystemExit(f"cluster spec key {key} is missing")
+
+raw_etcd_value = base64.b64decode(kvs[0]["value"])
+stored = json.loads(raw_etcd_value)
+ttl_nanos = 0
+
+if isinstance(stored, dict) and "value" in stored and "revision" in stored:
+    spec_bytes = base64.b64decode(stored["value"])
+    spec = json.loads(spec_bytes)
+    internal_revision = int(stored.get("revision") or 0)
+    ttl_nanos = int(stored.get("ttlNanos") or 0)
+else:
+    spec = stored
+    internal_revision = int((spec or {}).get("generation") or 0)
+
+postgres = spec.setdefault("postgres", {})
+parameters = postgres.setdefault("parameters", {})
+previous = parameters.get(parameter, "<unset>")
+generation_before = int(spec.get("generation") or 0)
+
+if previous == value:
+    action = "unchanged"
+    generation_after = generation_before
+else:
+    action = "updated"
+    parameters[parameter] = value
+    generation_after = generation_before + 1
+    spec["generation"] = generation_after
+    spec_payload = json.dumps(spec, separators=(",", ":"), sort_keys=True).encode()
+    envelope = {
+        "value": base64.b64encode(spec_payload).decode("ascii"),
+        "revision": internal_revision + 1,
+    }
+    if ttl_nanos > 0:
+        envelope["ttlNanos"] = ttl_nanos
+    payload = json.dumps(envelope, separators=(",", ":"), sort_keys=True)
+    subprocess.run(
+        [
+            "etcdctl",
+            "--endpoints=http://127.0.0.1:2379",
+            "put",
+            key,
+            payload,
+        ],
+        check=True,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+summary = {
+    "action": action,
+    "clusterName": cluster_name,
+    "generationAfter": generation_after,
+    "generationBefore": generation_before,
+    "parameter": parameter,
+    "previousValue": previous,
+    "value": value,
+}
+print(json.dumps(summary, indent=2, sort_keys=True))
+PY
+}
+
+wait_for_desired_postgres_parameter() {
+	local parameter=$1
+	local value=$2
+
+	require_python "${primary_service}"
+	ensure_container_api_url "${primary_api_url}" "PACMAN_DEMO_PRIMARY_API_URL" "${primary_service}"
+	compose_exec "${primary_service}" python3 - "${parameter}" "${value}" "${primary_api_url}/api/v1/cluster/spec" "${api_token}" <<'PY'
+import json
+import sys
+import time
+import urllib.error
+import urllib.request
+
+parameter, expected, url, token = sys.argv[1:5]
+deadline = time.time() + 20
+request = urllib.request.Request(
+    url,
+    headers={
+        "Accept": "application/json",
+        "Authorization": f"Bearer {token}",
+    },
+)
+
+while True:
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            spec = json.load(response)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 503 and time.time() < deadline:
+            time.sleep(1)
+            continue
+        raise
+    except urllib.error.URLError:
+        if time.time() < deadline:
+            time.sleep(1)
+            continue
+        raise
+
+    parameters = ((spec.get("postgres") or {}).get("parameters") or {})
+    current = parameters.get(parameter, "<unset>")
+    if current == expected:
+        summary = {
+            "clusterName": spec.get("clusterName"),
+            "generation": spec.get("generation"),
+            "parameter": parameter,
+            "value": current,
+        }
+        print(json.dumps(summary, indent=2, sort_keys=True))
+        break
+
+    if time.time() >= deadline:
+        raise SystemExit(
+            f"timed out waiting for {parameter}={expected}; current value is {current!r}"
+        )
+
+    time.sleep(1)
+PY
 }
 
 stage_prepare() {
@@ -196,23 +477,53 @@ stage_bootstrap() {
 }
 
 stage_probes() {
-	show_probe "${primary_service}" "${primary_api_url}/health" "primary /health"
-	show_probe "${replica_service}" "${replica_api_url}/health" "replica /health"
+	ensure_container_api_url "${primary_api_url}" "PACMAN_DEMO_PRIMARY_API_URL" "${primary_service}"
+	ensure_container_api_url "${replica_api_url}" "PACMAN_DEMO_REPLICA_API_URL" "${replica_service}"
+	show_probe "${primary_service}" "${primary_api_url}/health" "primary /health [Patroni-compatible API]"
+	show_probe "${replica_service}" "${replica_api_url}/health" "replica /health [Patroni-compatible API]"
 }
 
 stage_cluster() {
-	log "cluster status via pacmanctl in ${primary_service}"
+	log "cluster status via pacmanctl in ${primary_service} [PACMAN-native API]"
 	run_pacmanctl "${primary_service}" cluster status
 }
 
 stage_members() {
-	log "members via pacmanctl in ${primary_service}"
+	log "members via pacmanctl in ${primary_service} [PACMAN-native API]"
 	run_pacmanctl "${primary_service}" members list
 }
 
+stage_postgres_config() {
+	local parameter=${1:-${postgres_config_parameter}}
+	local value=${2:-${postgres_config_value}}
+
+	if "${dry_run}"; then
+		log "show desired PostgreSQL parameter before change [PACMAN-native API]"
+		render_command docker compose -f "${compose_file}" exec -T "${primary_service}" \
+			env PACMANCTL_API_URL="${primary_api_url}" PACMANCTL_API_TOKEN="${api_token}" \
+			pacmanctl cluster spec show -o json
+		log "update desired PostgreSQL parameter ${parameter}=${value} in DCS [PACMAN-native API + DCS]"
+		render_command docker compose -f "${compose_file}" exec -T pacman-dcs \
+			env ETCDCTL_API=3 etcdctl put "/pacman/<cluster>/config" "<updated-cluster-spec-json>"
+		log "wait for desired PostgreSQL parameter to appear in cluster spec [PACMAN-native API]"
+		render_command docker compose -f "${compose_file}" exec -T "${primary_service}" \
+			env PACMANCTL_API_URL="${primary_api_url}" PACMANCTL_API_TOKEN="${api_token}" \
+			pacmanctl cluster spec show -o json
+		return 0
+	fi
+
+	log "desired PostgreSQL parameter before change [PACMAN-native API]"
+	show_desired_postgres_parameter "${primary_service}" "${parameter}"
+	log "update desired PostgreSQL parameter ${parameter}=${value} in DCS [PACMAN-native API + DCS]"
+	update_desired_postgres_parameter "${parameter}" "${value}"
+	log "desired PostgreSQL parameter after change [PACMAN-native API]"
+	wait_for_desired_postgres_parameter "${parameter}" "${value}"
+}
+
 stage_metrics() {
+	ensure_container_api_url "${primary_api_url}" "PACMAN_DEMO_PRIMARY_API_URL" "${primary_service}"
 	require_python "${primary_service}"
-	log "key prometheus metrics from ${primary_service}"
+	log "key prometheus metrics from ${primary_service} [Patroni-compatible API]"
 
 	compose_shell "${primary_service}" \
 		"python3 -c \"import urllib.request; print(urllib.request.urlopen('${primary_api_url}/metrics', timeout=5).read().decode(), end='')\" | grep -E '^pacman_cluster_|^pacman_member_info|^pacman_node_info'"
@@ -225,20 +536,39 @@ stage_verify() {
 }
 
 stage_maintenance_enable() {
-	log "enable maintenance mode via pacmanctl in ${primary_service}"
+	log "enable maintenance mode via pacmanctl in ${primary_service} [PACMAN-native API]"
 	run_pacmanctl "${primary_service}" cluster maintenance enable -reason demo-maintenance -requested-by demo-script
 }
 
 stage_maintenance_disable() {
-	log "disable maintenance mode via pacmanctl in ${primary_service}"
+	log "disable maintenance mode via pacmanctl in ${primary_service} [PACMAN-native API]"
 	run_pacmanctl "${primary_service}" cluster maintenance disable -reason demo-maintenance-complete -requested-by demo-script
+}
+
+stage_cancel_switchover() {
+	log "cancel any pending switchover [PACMAN-native API]"
+	require_python "${primary_service}"
+	ensure_container_api_url "${primary_api_url}" "PACMAN_DEMO_PRIMARY_API_URL" "${primary_service}"
+	compose_exec "${primary_service}" python3 -c \
+		"import sys, urllib.request, urllib.error
+req = urllib.request.Request('${primary_api_url}/api/v1/operations/switchover', method='DELETE', headers={'Authorization': 'Bearer ${api_token}'})
+try:
+    urllib.request.urlopen(req, timeout=5)
+    print('pending switchover cancelled')
+except urllib.error.HTTPError as e:
+    if e.code == 404:
+        print('no pending switchover to cancel')
+    else:
+        print(f'cancel returned {e.code}', file=sys.stderr)
+except urllib.error.URLError as e:
+    print(f'cancel request failed: {e}', file=sys.stderr)" || true
 }
 
 stage_switchover() {
 	local candidate=${1:-${default_candidate}}
 
-	log "request switchover to ${candidate} via pacmanctl in ${primary_service}"
-	run_pacmanctl "${primary_service}" cluster switchover -candidate "${candidate}" -reason demo-switchover -requested-by demo-script
+	log "request switchover to ${candidate} via pacmanctl in ${primary_service} [PACMAN-native API]"
+	run_pacmanctl "${primary_service}" cluster switchover -candidate "${candidate}" -reason demo-switchover -requested-by demo-script -force
 }
 
 stage_watch_members() {
@@ -262,8 +592,90 @@ stage_watch_members() {
 }
 
 stage_history() {
-	log "history via pacmanctl in ${primary_service}"
+	log "history via pacmanctl in ${primary_service} [PACMAN-native API]"
 	run_pacmanctl "${primary_service}" history list
+}
+
+resolve_pgbench() {
+	# Try PATH first, then the standard PostgreSQL versioned bin directories on
+	# EL9 (/usr/pgsql-NN/bin) and Debian (/usr/lib/postgresql/NN/bin).
+	compose_exec "${primary_service}" /bin/sh -lc \
+		'for candidate in pgbench $(ls /usr/pgsql-*/bin/pgbench /usr/lib/postgresql/*/bin/pgbench 2>/dev/null); do
+			command -v "$candidate" >/dev/null 2>&1 && { echo "$candidate"; exit 0; }
+			[ -x "$candidate" ] && { echo "$candidate"; exit 0; }
+		done; exit 1' 2>/dev/null
+}
+
+require_pgbench() {
+	if "${dry_run}"; then
+		return 0
+	fi
+
+	if ! resolve_pgbench >/dev/null; then
+		printf 'pgbench not found in %s (checked PATH and /usr/pgsql-*/bin, /usr/lib/postgresql/*/bin)\n' "${primary_service}" >&2
+		exit 1
+	fi
+}
+
+pgbench_bin() {
+	if "${dry_run}"; then
+		printf 'pgbench'
+		return 0
+	fi
+	resolve_pgbench
+}
+
+pgbench_connect_args() {
+	printf -- '-h %s -p %s -U %s %s' "${pgbench_host}" "${pgbench_port}" "${pgbench_user}" "${pgbench_db}"
+}
+
+stage_pgbench_init() {
+	require_pgbench
+
+	log "initialize pgbench schema on primary (scale=${pgbench_scale}, db=${pgbench_db})"
+	# shellcheck disable=SC2046
+	compose_shell "${primary_service}" \
+		"$(pgbench_bin) $(pgbench_connect_args) -i -s ${pgbench_scale} --quiet"
+}
+
+stage_load_on() {
+	require_pgbench
+
+	log "start pgbench background load: ${pgbench_clients} clients / ${pgbench_threads} threads / ${pgbench_duration}s"
+	# --progress-timestamp prints a Unix timestamp on each progress line so
+	# the log shows when during the switchover transactions were failing.
+	# shellcheck disable=SC2046
+	compose_shell "${primary_service}" \
+		"nohup $(pgbench_bin) $(pgbench_connect_args) \
+			-c ${pgbench_clients} \
+			-j ${pgbench_threads} \
+			-T ${pgbench_duration} \
+			-P 5 \
+			--progress-timestamp \
+		>${pgbench_log_file} 2>&1 </dev/null & echo \$! >${pgbench_pid_file}
+		echo \"pgbench started (pid=\$(cat ${pgbench_pid_file}))\""
+}
+
+stage_load_off() {
+	log "stop pgbench load"
+	compose_shell "${primary_service}" \
+		"if [ -f ${pgbench_pid_file} ]; then
+			pid=\$(cat ${pgbench_pid_file})
+			kill \"\${pid}\" 2>/dev/null && echo \"pgbench pid \${pid} stopped\" || echo \"pgbench already exited\"
+			rm -f ${pgbench_pid_file}
+		else
+			echo \"no running pgbench (${pgbench_pid_file} not found)\"
+		fi"
+}
+
+stage_pgbench_stats() {
+	log "pgbench progress log (last 30 lines)"
+	compose_shell "${primary_service}" \
+		"if [ -f ${pgbench_log_file} ]; then
+			tail -n 30 ${pgbench_log_file}
+		else
+			echo \"no pgbench log at ${pgbench_log_file}\"
+		fi"
 }
 
 stage_full_demo() {
@@ -274,7 +686,7 @@ stage_full_demo() {
 	stage_maintenance_enable
 	stage_maintenance_disable
 	stage_switchover
-	stage_watch_members 5
+	stage_watch_members 15
 	stage_history
 }
 
@@ -343,6 +755,9 @@ main() {
 		members)
 			stage_members "$@"
 			;;
+		postgres-config)
+			stage_postgres_config "$@"
+			;;
 		metrics)
 			stage_metrics "$@"
 			;;
@@ -355,6 +770,9 @@ main() {
 		maintenance-disable)
 			stage_maintenance_disable "$@"
 			;;
+		cancel-switchover)
+			stage_cancel_switchover "$@"
+			;;
 		switchover)
 			stage_switchover "$@"
 			;;
@@ -363,6 +781,18 @@ main() {
 			;;
 		history)
 			stage_history "$@"
+			;;
+		pgbench-init)
+			stage_pgbench_init "$@"
+			;;
+		load-on)
+			stage_load_on "$@"
+			;;
+		load-off)
+			stage_load_off "$@"
+			;;
+		pgbench-stats)
+			stage_pgbench_stats "$@"
 			;;
 		full-demo)
 			stage_full_demo "$@"
