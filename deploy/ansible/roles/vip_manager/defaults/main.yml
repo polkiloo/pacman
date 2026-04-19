@@ -1,0 +1,31 @@
+---
+vip_manager_enabled: false
+vip_manager_version: 3.0.0
+vip_manager_package_url: ""
+vip_manager_download_path: /var/tmp/vip-manager.tar.gz
+vip_manager_extract_dir: /var/tmp/vip-manager
+vip_manager_binary_path: /usr/local/bin/vip-manager
+vip_manager_config_dir: /etc/pacman
+vip_manager_config_path: /etc/pacman/vip-manager.yml
+vip_manager_service_name: vip-manager
+vip_manager_manage_service: true
+vip_manager_user: root
+vip_manager_group: root
+
+vip_manager_ip: ""
+vip_manager_netmask: 24
+vip_manager_interface: eth0
+vip_manager_interval_ms: 1000
+vip_manager_verbose: false
+
+vip_manager_dcs_type: patroni
+vip_manager_dcs_endpoints:
+  - "http://{{ pacman_api_address | default((ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname))) ~ ':' ~ pacman_api_port) }}"
+vip_manager_trigger_path: /primary
+vip_manager_trigger_status_code: 200
+
+vip_manager_release_arch_overrides:
+  amd64: x86_64
+  x86_64: x86_64
+  arm64: arm64
+  aarch64: arm64

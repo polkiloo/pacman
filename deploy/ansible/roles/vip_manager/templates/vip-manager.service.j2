@@ -1,0 +1,15 @@
+[Unit]
+Description=vip-manager for PACMAN PostgreSQL VIP
+After=network-online.target {{ pacmand_service_name }}.service {{ postgres_service_name }}.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ vip_manager_user }}
+Group={{ vip_manager_group }}
+ExecStart={{ vip_manager_binary_path }} --config {{ vip_manager_config_path }}
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

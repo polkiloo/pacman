@@ -8,6 +8,7 @@ compose_file="${lab_dir}/compose.yml"
 runtime_dir="${lab_dir}/.local"
 rpm_dir="${PACMAN_LAB_RPM_DIR:-${repo_root}/bin/ansible-install-rpm}"
 lab_image="${PACMAN_LAB_IMAGE:-pacman-lab:local}"
+vip_address="${PACMAN_LAB_VIP_ADDRESS:-172.28.0.100}"
 
 export PACMAN_LAB_IMAGE="${lab_image}"
 
@@ -91,6 +92,24 @@ wait_for_pacmand_health() {
   done
 }
 
+wait_for_postgres_vip() {
+  local deadline=$((SECONDS + 90))
+
+  until compose_exec pacman-primary /bin/sh -lc \
+    "/usr/pgsql-17/bin/pg_isready -h '${vip_address}' -p 5432 -d postgres >/dev/null" >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      compose_exec pacman-primary /bin/sh -lc "ip -brief addr show dev eth0 || true"
+      compose_exec pacman-replica /bin/sh -lc "ip -brief addr show dev eth0 || true"
+      compose_exec pacman-primary /bin/sh -lc "ps -ef | grep '[v]ip-manager' || true"
+      compose_exec pacman-replica /bin/sh -lc "ps -ef | grep '[v]ip-manager' || true"
+      compose_exec pacman-primary /bin/sh -lc 'cat /var/log/pacman/vip-manager.log || true'
+      compose_exec pacman-replica /bin/sh -lc 'cat /var/log/pacman/vip-manager.log || true'
+      return 1
+    fi
+    sleep 2
+  done
+}
+
 start_etcd() {
   if compose_exec pacman-dcs pgrep -f "/usr/bin/etcd --name alpha-dcs" >/dev/null 2>&1; then
     wait_for_etcd_health
@@ -127,6 +146,16 @@ start_pacmand() {
   wait_for_pacmand_health "${service}" "http://${host}:8080/health"
 }
 
+start_vip_manager() {
+  local service=$1
+
+  if ! compose_exec "${service}" pgrep -f "/usr/local/bin/vip-manager --config /etc/pacman/vip-manager.yml" >/dev/null 2>&1; then
+    compose_exec_detached "${service}" \
+      /bin/sh -lc \
+      "exec /usr/local/bin/vip-manager --config /etc/pacman/vip-manager.yml >>/var/log/pacman/vip-manager.log 2>&1"
+  fi
+}
+
 main() {
   local rpm_path
 
@@ -148,11 +177,15 @@ main() {
   start_etcd
   start_pacmand pacman-primary pacman-primary
   start_pacmand pacman-replica pacman-replica
+  start_vip_manager pacman-primary
+  start_vip_manager pacman-replica
+  wait_for_postgres_vip
 
   printf 'PACMAN lab bootstrapped successfully.\n'
   printf 'Primary API: http://127.0.0.1:8081\n'
   printf 'Replica API: http://127.0.0.1:8082\n'
   printf 'etcd: http://127.0.0.1:2379\n'
+  printf 'Writable PostgreSQL VIP: %s:5432\n' "${vip_address}"
 }
 
 main "$@"

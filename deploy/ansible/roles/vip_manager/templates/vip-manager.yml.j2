@@ -1,0 +1,12 @@
+ip: {{ vip_manager_ip }}
+netmask: {{ vip_manager_netmask }}
+interface: {{ vip_manager_interface }}
+dcs-type: {{ vip_manager_dcs_type }}
+dcs-endpoints:
+{% for endpoint in vip_manager_dcs_endpoints %}
+  - {{ endpoint }}
+{% endfor %}
+trigger-key: {{ vip_manager_trigger_path }}
+trigger-value: {{ vip_manager_trigger_status_code }}
+interval: {{ vip_manager_interval_ms }}
+verbose: {{ vip_manager_verbose | bool | lower }}

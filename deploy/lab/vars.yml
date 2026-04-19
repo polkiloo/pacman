@@ -2,7 +2,12 @@
 pacman_manage_service: false
 postgres_manage_service: false
 etcd_manage_service: false
+vip_manager_manage_service: false
 
 pacman_admin_token_inline: lab-admin-token
 etcd_user: root
 etcd_group: root
+vip_manager_enabled: true
+vip_manager_ip: 172.28.0.100
+vip_manager_interface: eth0
+vip_manager_verbose: true
