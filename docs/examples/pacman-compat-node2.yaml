@@ -1,0 +1,61 @@
+# PACMAN config equivalent to Patroni postgres2.yml (second standby, REST auth variant).
+#
+# Patroni original:
+#   scope: batman
+#   name: postgresql2
+#   restapi.listen: 127.0.0.1:8010
+#   restapi.authentication.username / .password (HTTP Basic)
+#   etcd.host: 127.0.0.1:2379
+#   postgresql.listen: 127.0.0.1:5434
+#   postgresql.data_dir: data/postgresql2
+#
+# Patroni REST Basic Auth → PACMAN bearer token.
+# Set the token value in /etc/pacman/admin-token.  All PACMAN API consumers must
+# send "Authorization: Bearer <token>" instead of Basic credentials.
+#
+# Unsupported Patroni fields dropped: bootstrap.initdb, bootstrap.dcs.loop_wait,
+# bootstrap.dcs.maximum_lag_on_failover, postgresql.pgpass, postgresql.authentication,
+# postgresql.basebackup, tags.
+
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+
+node:
+  name: postgresql2             # Patroni: name
+  role: data
+  apiAddress: 127.0.0.1:8010   # Patroni: restapi.listen
+  controlAddress: 127.0.0.1:9010   # PACMAN-only peer/control-plane listener
+
+dcs:
+  backend: etcd
+  clusterName: batman           # Patroni: scope
+  ttl: 30s                      # Patroni: bootstrap.dcs.ttl
+  retryTimeout: 10s             # Patroni: bootstrap.dcs.retry_timeout
+  etcd:
+    endpoints:
+      - http://127.0.0.1:2379   # Patroni: etcd.host (scheme added)
+
+postgres:
+  dataDir: data/postgresql2     # Patroni: postgresql.data_dir
+  binDir: /usr/lib/postgresql/17/bin   # Patroni: postgresql.bin_dir
+  listenAddress: 127.0.0.1      # Patroni: postgresql.listen (host part)
+  port: 5434                    # Patroni: postgresql.listen (port part)
+  parameters:
+    unix_socket_directories: ".."   # Patroni: postgresql.parameters
+
+bootstrap:
+  clusterName: batman
+  initialPrimary: postgresql0   # Same as node0 — cluster is already bootstrapped
+  seedAddresses:
+    - 127.0.0.1:9008
+    - 127.0.0.1:9009
+    - 127.0.0.1:9010
+  expectedMembers:
+    - postgresql0
+    - postgresql1
+    - postgresql2
+
+security:
+  # Replaces Patroni restapi.authentication.username/password (Basic Auth).
+  # PACMAN uses bearer token authentication instead.
+  adminBearerTokenFile: /etc/pacman/admin-token

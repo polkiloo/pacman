@@ -371,12 +371,13 @@ pacmand validates the config document at startup and exits non-zero with a descr
 | Endpoint without URL scheme (`etcd:2379`) | `dcs: etcd endpoint … missing scheme` |
 | Missing `bootstrap.clusterName` | `validate config document` |
 
-Test config validity without starting postgres:
+Config validation currently happens during normal startup; PACMAN does not yet
+provide a standalone `--validate-only` mode:
 
 ```bash
-pacmand -config /etc/pacman/pacmand.yaml --validate-only
-# exit 0 → config is valid
-# exit 1 → config error printed to stderr
+pacmand -config /etc/pacman/pacmand.yaml
+# startup succeeds → config decoded and validated
+# startup fails early → config error printed to stderr
 ```
 
 ---
