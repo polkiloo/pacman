@@ -47,6 +47,7 @@ assert_contains "${verify_output}" "exec -T pacman-primary"
 assert_contains "${verify_output}" "exec -T pacman-replica"
 assert_contains "${verify_output}" "pacmanctl cluster status"
 assert_contains "${verify_output}" "pacmanctl members list"
+assert_contains "${verify_output}" "vip-manager PostgreSQL VIP"
 
 printf '==> dry-run metrics\n'
 metrics_output=$(run_and_capture "${demo_script}" --dry-run metrics)
@@ -96,5 +97,6 @@ full_demo_output=$(run_and_capture "${demo_script}" --dry-run full-demo)
 assert_contains "${full_demo_output}" "bootstrap-cluster.sh"
 assert_contains "${full_demo_output}" "pacmanctl cluster switchover"
 assert_contains "${full_demo_output}" "pacmanctl history list"
+assert_contains "${full_demo_output}" "vip-manager PostgreSQL VIP"
 
 printf 'demo script dry-run verification passed\n'

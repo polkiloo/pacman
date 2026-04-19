@@ -19,8 +19,11 @@ watch_iterations="${PACMAN_DEMO_WATCH_ITERATIONS:-10}"
 watch_delay="${PACMAN_DEMO_WATCH_DELAY:-2}"
 postgres_config_parameter="${PACMAN_DEMO_POSTGRES_PARAMETER:-log_min_duration_statement}"
 postgres_config_value="${PACMAN_DEMO_POSTGRES_VALUE:-250ms}"
+vip_address="${PACMAN_DEMO_VIP_ADDRESS:-172.28.0.100}"
+vip_interface="${PACMAN_DEMO_VIP_INTERFACE:-eth0}"
+rw_host="${PACMAN_DEMO_RW_HOST:-${vip_address}}"
 
-pgbench_host="${PACMAN_DEMO_PGBENCH_HOST:-localhost}"
+pgbench_host="${PACMAN_DEMO_PGBENCH_HOST:-${rw_host}}"
 pgbench_port="${PACMAN_DEMO_PGBENCH_PORT:-5432}"
 pgbench_user="${PACMAN_DEMO_PGBENCH_USER:-postgres}"
 pgbench_db="${PACMAN_DEMO_PGBENCH_DB:-postgres}"
@@ -73,6 +76,9 @@ Environment:
   PACMAN_DEMO_WATCH_DELAY          default: ${watch_delay}
   PACMAN_DEMO_POSTGRES_PARAMETER   default: ${postgres_config_parameter}
   PACMAN_DEMO_POSTGRES_VALUE       default: ${postgres_config_value}
+  PACMAN_DEMO_VIP_ADDRESS          default: ${vip_address}
+  PACMAN_DEMO_VIP_INTERFACE        default: ${vip_interface}
+  PACMAN_DEMO_RW_HOST              default: ${rw_host}
   PACMAN_DEMO_PGBENCH_HOST         default: ${pgbench_host}
   PACMAN_DEMO_PGBENCH_PORT         default: ${pgbench_port}
   PACMAN_DEMO_PGBENCH_USER         default: ${pgbench_user}
@@ -86,13 +92,15 @@ Notes:
   - Runtime demo stages execute through docker compose, not host curl/jq.
   - PACMAN_DEMO_*_API_URL values must be reachable from inside the lab
     containers. Host-published ports stay available on 127.0.0.1:8081/8082.
-  - Native /api/v1/* access uses the lab bearer token from inside the container.
+  - Native /api/v1/* access uses node-local PACMAN URLs plus the lab bearer token.
+  - vip-manager manages the writable PostgreSQL VIP at ${vip_address}; PostgreSQL
+    client stages default to that address so they follow switchovers automatically.
   - The local lab member names are alpha-1 and alpha-2.
   - postgres-config updates the desired cluster PostgreSQL parameter map in DCS
     and waits for /api/v1/cluster/spec to reflect the new value.
   - postgres-config does not hot-reload the running PostgreSQL instances yet;
     it demonstrates desired-state propagation, not live config application.
-  - pgbench runs inside pacman-primary against its local PostgreSQL instance.
+  - pgbench runs inside pacman-primary against ${pgbench_host}:${pgbench_port}.
     Transactions will briefly error during switchover — this is expected and
     demonstrates PACMAN completing the operation under live write load.
   - After switchover the former primary automatically rejoins as a standby.
@@ -203,6 +211,16 @@ require_python() {
 	compose_exec "${service}" command -v python3 >/dev/null
 }
 
+require_pg_isready() {
+	local service=$1
+
+	if "${dry_run}"; then
+		return 0
+	fi
+
+	compose_exec "${service}" command -v /usr/pgsql-17/bin/pg_isready >/dev/null
+}
+
 ensure_container_api_url() {
 	local url=$1
 	local variable_name=$2
@@ -227,10 +245,16 @@ python_get_json() {
 req = urllib.request.Request('${url}', headers={'Accept': 'application/json', 'Authorization': 'Bearer ${api_token}'})
 try:
     response = urllib.request.urlopen(req, timeout=5)
+    status = response.status
+except urllib.error.HTTPError as exc:
+    response = exc
+    status = exc.code
 except urllib.error.URLError as exc:
     print(f'failed to fetch ${url} from ${service}: {exc}', file=sys.stderr)
     sys.exit(1)
-print(json.dumps(json.load(response), indent=2, sort_keys=True))"
+body = json.load(response)
+print(f'HTTP {status}')
+print(json.dumps(body, indent=2, sort_keys=True))"
 }
 
 show_probe() {
@@ -242,6 +266,20 @@ show_probe() {
 	log "${label}"
 
 	python_get_json "${service}" "${url}"
+}
+
+show_vip_assignment() {
+	local service=$1
+
+	log "${service} VIP assignment [vip-manager PostgreSQL VIP]"
+	compose_shell "${service}" "ip -brief addr show dev '${vip_interface}'"
+}
+
+show_vip_postgres_route() {
+	require_pg_isready "${primary_service}"
+	log "writable PostgreSQL VIP ${rw_host}:${pgbench_port} [vip-manager PostgreSQL VIP]"
+	compose_shell "${primary_service}" \
+		"/usr/pgsql-17/bin/pg_isready -h '${rw_host}' -p '${pgbench_port}' -d '${pgbench_db}'"
 }
 
 run_pacmanctl() {
@@ -481,6 +519,11 @@ stage_probes() {
 	ensure_container_api_url "${replica_api_url}" "PACMAN_DEMO_REPLICA_API_URL" "${replica_service}"
 	show_probe "${primary_service}" "${primary_api_url}/health" "primary /health [Patroni-compatible API]"
 	show_probe "${replica_service}" "${replica_api_url}/health" "replica /health [Patroni-compatible API]"
+	show_probe "${primary_service}" "${primary_api_url}/primary" "primary /primary [Patroni-compatible API]"
+	show_probe "${replica_service}" "${replica_api_url}/primary" "replica /primary [Patroni-compatible API]"
+	show_vip_assignment "${primary_service}"
+	show_vip_assignment "${replica_service}"
+	show_vip_postgres_route
 }
 
 stage_cluster() {
@@ -632,7 +675,7 @@ pgbench_connect_args() {
 stage_pgbench_init() {
 	require_pgbench
 
-	log "initialize pgbench schema on primary (scale=${pgbench_scale}, db=${pgbench_db})"
+	log "initialize pgbench schema on ${pgbench_host}:${pgbench_port} (scale=${pgbench_scale}, db=${pgbench_db}) [vip-manager PostgreSQL VIP]"
 	# shellcheck disable=SC2046
 	compose_shell "${primary_service}" \
 		"$(pgbench_bin) $(pgbench_connect_args) -i -s ${pgbench_scale} --quiet"
@@ -641,7 +684,7 @@ stage_pgbench_init() {
 stage_load_on() {
 	require_pgbench
 
-	log "start pgbench background load: ${pgbench_clients} clients / ${pgbench_threads} threads / ${pgbench_duration}s"
+	log "start pgbench background load against ${pgbench_host}:${pgbench_port}: ${pgbench_clients} clients / ${pgbench_threads} threads / ${pgbench_duration}s [vip-manager PostgreSQL VIP]"
 	# --progress-timestamp prints a Unix timestamp on each progress line so
 	# the log shows when during the switchover transactions were failing.
 	# shellcheck disable=SC2046
@@ -688,6 +731,7 @@ stage_full_demo() {
 	stage_switchover
 	stage_watch_members 15
 	stage_history
+	stage_probes
 }
 
 stage_destroy() {
