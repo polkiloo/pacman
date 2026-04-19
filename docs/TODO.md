@@ -414,9 +414,9 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 
 ### Patroni Migration Compatibility
 
-- [ ] define the minimum supported Patroni config subset for migration, anchored to upstream `postgres0.yml`, `postgres1.yml`, and `postgres2.yml`
-- [ ] document field-by-field mapping between Patroni example config keys and PACMAN config / API surfaces
-- [ ] add three PACMAN example configs mirroring the Patroni `postgres0/1/2.yml` topology for side-by-side infrastructure migration
+- [x] define the minimum supported Patroni config subset for migration, anchored to upstream `postgres0.yml`, `postgres1.yml`, and `postgres2.yml`
+- [x] document field-by-field mapping between Patroni example config keys and PACMAN config / API surfaces
+- [x] add three PACMAN example configs mirroring the Patroni `postgres0/1/2.yml` topology for side-by-side infrastructure migration
 - [ ] implement a Patroni-config import / translation path for the supported subset
 - [ ] support translation of Patroni DCS discovery settings (`etcd.host` / `hosts`, optional `raft`) into PACMAN backend configuration
 - [ ] support translation of Patroni node-local settings (`name`, REST listen/connect addresses, PostgreSQL listen/connect addresses, `data_dir`, `bin_dir`)
