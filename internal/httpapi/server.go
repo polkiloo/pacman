@@ -61,6 +61,9 @@ type Config struct {
 	OpenAPIDocument OpenAPIDocumentProvider
 	// Middlewares are applied before built-in PACMAN routes are registered.
 	Middlewares []Middleware
+	// LocalPromoter optionally enables POST /api/v1/promote to trigger a
+	// node-local pg_ctl promote. When nil the endpoint returns 503.
+	LocalPromoter LocalPromoter
 }
 
 var errServerAlreadyStarted = errors.New("http api server is already started")
@@ -75,6 +78,7 @@ type Server struct {
 	tlsConfig      *tls.Config
 	authorizer     Authorizer
 	openAPIDoc     OpenAPIDocumentProvider
+	localPromoter  LocalPromoter
 	requestSeq     atomic.Uint64
 	openAPILoad    sync.Once
 	openAPIBytes   []byte
@@ -102,6 +106,7 @@ func New(nodeName string, store NodeStatusReader, logger *slog.Logger, cfg Confi
 		tlsConfig:      cfg.TLSConfig,
 		authorizer:     cfg.Authorizer,
 		openAPIDoc:     cfg.OpenAPIDocument,
+		localPromoter:  cfg.LocalPromoter,
 	}
 
 	if srv.openAPIDoc == nil {
@@ -150,6 +155,7 @@ func (srv *Server) registerRoutes() {
 	v1.Post("/operations/switchover", srv.authMiddleware(AccessScopeClusterWrite), srv.requireJSONContentTypeMiddleware(), srv.handleSwitchoverCreate)
 	v1.Delete("/operations/switchover", srv.authMiddleware(AccessScopeClusterWrite), srv.handleSwitchoverCancel)
 	v1.Post("/operations/failover", srv.authMiddleware(AccessScopeClusterWrite), srv.requireJSONContentTypeMiddleware(), srv.handleFailoverCreate)
+	v1.Post("/promote", srv.authMiddleware(AccessScopeClusterWrite), srv.handlePromote)
 
 	srv.app.Use("/api/v1", srv.apiNotFoundMiddleware())
 }

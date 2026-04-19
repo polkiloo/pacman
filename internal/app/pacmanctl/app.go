@@ -270,6 +270,7 @@ func (a *App) runCluster(ctx context.Context, client *apiClient, args []string) 
 			ScheduledAt: options.scheduledAt,
 			Reason:      options.reason,
 			RequestedBy: options.requestedBy,
+			Force:       options.force,
 		})
 		if err != nil {
 			return err
@@ -490,6 +491,7 @@ type switchoverCommandOptions struct {
 	scheduledAt *time.Time
 	reason      string
 	requestedBy string
+	force       bool
 }
 
 type failoverCommandOptions struct {
@@ -523,12 +525,14 @@ func parseSwitchoverCommandOptions(args []string, stderr io.Writer) (switchoverC
 	var scheduledAt string
 	var reason string
 	var requestedBy string
+	var force bool
 	format := defaultOutputFormat
 
 	fs.StringVar(&candidate, "candidate", "", "switchover target member")
 	fs.StringVar(&scheduledAt, "scheduled-at", "", "RFC3339 schedule time")
 	fs.StringVar(&reason, "reason", "", "operator reason for the switchover")
 	fs.StringVar(&requestedBy, "requested-by", "", "operator identity")
+	fs.BoolVar(&force, "force", false, "cancel any pending operation and proceed")
 	addOutputFormatFlags(fs, &format)
 
 	if err := fs.Parse(args); err != nil {
@@ -553,6 +557,7 @@ func parseSwitchoverCommandOptions(args []string, stderr io.Writer) (switchoverC
 		candidate:   trimmedCandidate,
 		reason:      strings.TrimSpace(reason),
 		requestedBy: strings.TrimSpace(requestedBy),
+		force:       force,
 	}
 
 	if strings.TrimSpace(scheduledAt) != "" {

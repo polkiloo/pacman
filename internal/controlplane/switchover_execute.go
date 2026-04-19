@@ -344,7 +344,7 @@ func demotedFormerPrimaryStatus(status agentmodel.NodeStatus, observedAt time.Ti
 	updated.Role = cluster.MemberRoleReplica
 	updated.State = cluster.MemberStateStopping
 	updated.ObservedAt = observedAt
-	updated.NeedsRejoin = false
+	updated.NeedsRejoin = true
 
 	if updated.Postgres.Managed {
 		updated.Postgres.Up = false

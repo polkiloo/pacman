@@ -15,6 +15,7 @@ type RejoinEngine interface {
 	AssessRejoinMember(string) (RejoinMemberAssessment, error)
 	DetectRejoinDivergence(string) (RejoinDivergenceAssessment, error)
 	DecideRejoinStrategy(string) (RejoinStrategyDecision, error)
+	ExecuteRejoinDirect(context.Context, RejoinRequest) (RejoinExecution, error)
 	ExecuteRejoinRewind(context.Context, RejoinRequest, RewindExecutor) (RejoinExecution, error)
 	ExecuteRejoinStandbyConfig(context.Context, StandbyConfigExecutor) (RejoinExecution, error)
 	ExecuteRejoinRestartAsStandby(context.Context, StandbyRestartExecutor) (RejoinExecution, error)

@@ -212,6 +212,7 @@ type SwitchoverRequest struct {
 	ScheduledAt *time.Time `json:"scheduledAt,omitempty"`
 	Reason      string     `json:"reason,omitempty"`
 	RequestedBy string     `json:"requestedBy,omitempty"`
+	Force       bool       `json:"force,omitempty"`
 }
 
 type FailoverRequest struct {
