@@ -23,6 +23,7 @@ func Module(processName string, args []string, stdout, stderr io.Writer) fx.Opti
 		logging.Module(processName),
 		observability.Module(),
 		ConfigModule(),
+		ControlPlaneModule(),
 		security.TLSModule(),
 		security.MemberMTLSModule(),
 		fx.Provide(New),
