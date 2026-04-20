@@ -38,6 +38,56 @@ func TestPGCtlStartRunsExpectedCommand(t *testing.T) {
 	}
 }
 
+func TestPGCtlStartNoWaitRunsExpectedCommand(t *testing.T) {
+	t.Parallel()
+
+	var calls [][]string
+	ctl := PGCtl{
+		DataDir: "/srv/postgres",
+		runner: func(_ context.Context, _ string, args ...string) (commandResult, error) {
+			calls = append(calls, append([]string(nil), args...))
+			// First call is status: exit code 3 = not running.
+			if args[0] == "status" {
+				return commandResult{exitCode: 3}, errors.New("server not running")
+			}
+			return commandResult{}, nil
+		},
+	}
+
+	if err := ctl.StartNoWait(context.Background()); err != nil {
+		t.Fatalf("start postgres without waiting: %v", err)
+	}
+
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 calls (status + start), got %d: %v", len(calls), calls)
+	}
+	wantStart := []string{"start", "-D", "/srv/postgres", "-W"}
+	if !slices.Equal(calls[1], wantStart) {
+		t.Fatalf("unexpected start args: got %v, want %v", calls[1], wantStart)
+	}
+}
+
+func TestPGCtlStartNoWaitIsIdempotentWhenAlreadyRunning(t *testing.T) {
+	t.Parallel()
+
+	var calls [][]string
+	ctl := PGCtl{
+		DataDir: "/srv/postgres",
+		runner: func(_ context.Context, _ string, args ...string) (commandResult, error) {
+			calls = append(calls, append([]string(nil), args...))
+			return commandResult{}, nil // exit 0 = running
+		},
+	}
+
+	if err := ctl.StartNoWait(context.Background()); err != nil {
+		t.Fatalf("start no-wait on already-running server: %v", err)
+	}
+
+	if len(calls) != 1 || calls[0][0] != "status" {
+		t.Fatalf("expected only status call, got %v", calls)
+	}
+}
+
 func TestPGCtlStopRunsExpectedCommand(t *testing.T) {
 	t.Parallel()
 
@@ -73,6 +123,15 @@ func TestPGCtlStartRequiresDataDir(t *testing.T) {
 	t.Parallel()
 
 	err := (PGCtl{}).Start(context.Background())
+	if !errors.Is(err, ErrDataDirRequired) {
+		t.Fatalf("expected missing data dir error, got %v", err)
+	}
+}
+
+func TestPGCtlStartNoWaitRequiresDataDir(t *testing.T) {
+	t.Parallel()
+
+	err := (PGCtl{}).StartNoWait(context.Background())
 	if !errors.Is(err, ErrDataDirRequired) {
 		t.Fatalf("expected missing data dir error, got %v", err)
 	}

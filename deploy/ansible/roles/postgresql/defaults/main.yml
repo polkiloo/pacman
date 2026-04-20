@@ -10,6 +10,7 @@ postgres_server_listen_addresses: "*"
 postgres_os_user: postgres
 postgres_os_group: postgres
 postgres_manage_replication: true
+postgres_superuser_password: ""
 postgres_replication_user: replicator
 postgres_replication_password: replicator
 postgres_replication_hba_cidrs:
@@ -18,6 +19,7 @@ postgres_replication_force_reclone: false
 postgres_max_wal_senders: 10
 postgres_max_replication_slots: 10
 postgres_wal_keep_size: 512MB
+postgres_wal_log_hints: true
 postgres_extra_parameters: {}
 postgres_manage_service: true
 postgres_runtime_log_path: "{{ postgres_data_dir }}/pacman-postgresql.log"

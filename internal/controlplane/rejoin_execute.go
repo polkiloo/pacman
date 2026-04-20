@@ -15,6 +15,7 @@ type preparedRejoinExecution struct {
 	decision           RejoinStrategyDecision
 	memberNode         agentmodel.NodeStatus
 	currentPrimaryNode agentmodel.NodeStatus
+	rewindSourceServer string
 	operation          cluster.Operation
 	currentEpoch       cluster.Epoch
 	standby            postgres.StandbyConfig
@@ -82,6 +83,12 @@ func (store *MemoryStateStore) prepareRejoinRewindExecution(request RejoinReques
 		return preparedRejoinExecution{}, err
 	}
 
+	primaryAddress := store.primaryPostgresAddressLocked(decision.CurrentPrimary.Name, inputs.currentPrimaryNode.Postgres.Address)
+	rewindSourceServer, err := rejoinPrimaryConnInfo(primaryAddress, "")
+	if err != nil {
+		return preparedRejoinExecution{}, err
+	}
+
 	operation, err := buildRejoinOperation(normalized, decision, executedAt)
 	if err != nil {
 		return preparedRejoinExecution{}, err
@@ -95,6 +102,7 @@ func (store *MemoryStateStore) prepareRejoinRewindExecution(request RejoinReques
 		decision:           decision.Clone(),
 		memberNode:         inputs.memberNode.Clone(),
 		currentPrimaryNode: inputs.currentPrimaryNode.Clone(),
+		rewindSourceServer: rewindSourceServer,
 		operation:          operation.Clone(),
 		currentEpoch:       inputs.currentEpoch,
 		executedAt:         executedAt,
@@ -103,12 +111,10 @@ func (store *MemoryStateStore) prepareRejoinRewindExecution(request RejoinReques
 
 func validateRejoinRewindDecision(decision RejoinStrategyDecision) error {
 	switch {
-	case decision.DirectRejoinPossible:
-		return ErrRejoinRewindNotRequired
-	case !decision.Decided:
-		return ErrRejoinStrategyUndetermined
-	case decision.Strategy != cluster.RejoinStrategyRewind:
+	case decision.Strategy == cluster.RejoinStrategyReclone:
 		return ErrRejoinRecloneRequired
+	case !decision.Decided && !decision.DirectRejoinPossible && len(decision.Reasons) > 0:
+		return ErrRejoinStrategyUndetermined
 	default:
 		return nil
 	}
@@ -308,6 +314,7 @@ func buildRewindRequest(prepared preparedRejoinExecution) RewindRequest {
 		MemberNode:         prepared.memberNode.Clone(),
 		CurrentPrimaryNode: prepared.currentPrimaryNode.Clone(),
 		CurrentEpoch:       prepared.currentEpoch,
+		SourceServer:       prepared.rewindSourceServer,
 	}
 }
 

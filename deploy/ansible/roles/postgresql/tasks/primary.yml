@@ -64,6 +64,18 @@
   no_log: true
   when: postgres_manage_replication | bool
 
+- name: Ensure postgres superuser password is configured when requested
+  ansible.builtin.command:
+    argv:
+      - "{{ postgres_bin_dir }}/psql"
+      - -v
+      - ON_ERROR_STOP=1
+      - --dbname=postgres
+    stdin: "ALTER ROLE postgres WITH PASSWORD '{{ postgres_superuser_password | replace(\"'\", \"''\") }}';"
+  become_user: "{{ postgres_os_user }}"
+  no_log: true
+  when: postgres_superuser_password | length > 0
+
 - name: Verify the initial primary is writable
   ansible.builtin.command:
     argv:

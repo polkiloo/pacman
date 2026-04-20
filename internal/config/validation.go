@@ -195,6 +195,10 @@ func (postgres PostgresLocalConfig) Validate() error {
 		return ErrPostgresPortOutOfRange
 	}
 
+	if strings.TrimSpace(postgres.ReplicationPassword) != "" && strings.TrimSpace(postgres.ReplicationUser) == "" {
+		return ErrPostgresReplicationUserRequired
+	}
+
 	for key := range postgres.Parameters {
 		normalized := strings.ToLower(strings.TrimSpace(key))
 		if _, unsafe := unsafeLocalPostgresParameters[normalized]; unsafe {

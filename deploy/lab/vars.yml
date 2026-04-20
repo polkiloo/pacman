@@ -5,6 +5,9 @@ etcd_manage_service: false
 vip_manager_manage_service: false
 
 pacman_admin_token_inline: lab-admin-token
+postgres_superuser_password: pacman-demo-password
+pacmand_environment:
+  PGPASSWORD: pacman-demo-password
 etcd_user: root
 etcd_group: root
 vip_manager_enabled: true

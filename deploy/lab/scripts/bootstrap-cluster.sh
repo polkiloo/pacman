@@ -140,7 +140,7 @@ start_pacmand() {
   if ! compose_exec "${service}" pgrep -u postgres -f "/usr/bin/pacmand -config /etc/pacman/pacmand.yaml" >/dev/null 2>&1; then
     compose_exec_detached "${service}" \
       /bin/bash -lc \
-      "cd /var/lib/pacman && exec runuser -u postgres -- /usr/bin/pacmand -config /etc/pacman/pacmand.yaml >>/var/log/pacman/pacmand.log 2>&1"
+      "cd /var/lib/pacman && exec runuser -u postgres -- /bin/bash -lc '. /etc/sysconfig/pacmand 2>/dev/null || true; export PACMAND_CONFIG PACMAND_EXTRA_ARGS PGPASSWORD; cd /var/lib/pacman && exec /usr/bin/pacmand -config \"\${PACMAND_CONFIG:-/etc/pacman/pacmand.yaml}\" \${PACMAND_EXTRA_ARGS:-}' >>/var/log/pacman/pacmand.log 2>&1"
   fi
 
   wait_for_pacmand_health "${service}" "http://${host}:8080/health"

@@ -38,6 +38,7 @@ postgres_server_listen_addresses: "*"
 postgres_os_user: postgres
 postgres_os_group: postgres
 postgres_manage_replication: true
+postgres_superuser_password: ""
 postgres_replication_user: replicator
 postgres_replication_password: replicator
 postgres_replication_hba_cidrs:

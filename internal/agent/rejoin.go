@@ -21,9 +21,9 @@ type pgRewindRewinder struct {
 }
 
 func (r *pgRewindRewinder) Rewind(ctx context.Context, req controlplane.RewindRequest) error {
-	connInfo := req.CurrentPrimaryNode.Postgres.Address
+	connInfo := strings.TrimSpace(req.SourceServer)
 	if connInfo == "" {
-		return fmt.Errorf("pg_rewind: current primary postgres address is empty")
+		return fmt.Errorf("pg_rewind: current primary source server is empty")
 	}
 
 	return postgres.PGRewind{
@@ -36,7 +36,9 @@ func (r *pgRewindRewinder) Rewind(ctx context.Context, req controlplane.RewindRe
 // localStandbyConfigurator implements controlplane.StandbyConfigExecutor by
 // writing postgresql.auto.conf and standby.signal into the local data dir.
 type localStandbyConfigurator struct {
-	dataDir string
+	dataDir             string
+	replicationUser     string
+	replicationPassword string
 }
 
 func (c *localStandbyConfigurator) ConfigureStandby(_ context.Context, req controlplane.StandbyConfigRequest) error {
@@ -44,6 +46,11 @@ func (c *localStandbyConfigurator) ConfigureStandby(_ context.Context, req contr
 	// new primary after switchover. wal_keep_size retains enough WAL to reconnect.
 	standby := req.Standby
 	standby.PrimarySlotName = ""
+	standby.PrimaryConnInfo = mergePrimaryConnInfoCredentials(
+		standby.PrimaryConnInfo,
+		c.replicationUser,
+		c.replicationPassword,
+	)
 
 	rendered, err := postgres.RenderStandbyFiles(c.dataDir, standby)
 	if err != nil {
@@ -102,14 +109,47 @@ func mergePostgresAutoConf(path, newStandbyBlock string) (string, error) {
 	return base + newStandbyBlock, nil
 }
 
-// pgCtlStandbyRestarter implements controlplane.StandbyRestartExecutor via
-// pg_ctl start.
+func mergePrimaryConnInfoCredentials(connInfo, user, password string) string {
+	trimmed := strings.TrimSpace(connInfo)
+	if trimmed == "" {
+		return ""
+	}
+
+	parts := []string{trimmed}
+	if trimmedUser := strings.TrimSpace(user); trimmedUser != "" && !connInfoContainsKey(trimmed, "user") {
+		parts = append(parts, "user="+formatConnInfoValue(trimmedUser))
+	}
+	if trimmedPassword := strings.TrimSpace(password); trimmedPassword != "" && !connInfoContainsKey(trimmed, "password") {
+		parts = append(parts, "password="+formatConnInfoValue(trimmedPassword))
+	}
+
+	return strings.Join(parts, " ")
+}
+
+func connInfoContainsKey(connInfo, key string) bool {
+	lowered := strings.ToLower(strings.TrimSpace(connInfo))
+	return strings.HasPrefix(lowered, key+"=") || strings.Contains(lowered, " "+key+"=")
+}
+
+func formatConnInfoValue(value string) string {
+	if !strings.ContainsAny(value, " \t'\\") {
+		return value
+	}
+
+	escaped := strings.ReplaceAll(value, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `'`, `\'`)
+	return "'" + escaped + "'"
+}
+
+// pgCtlStandbyRestarter implements controlplane.StandbyRestartExecutor via a
+// non-blocking pg_ctl start. The heartbeat loop verifies replica readiness on
+// later iterations.
 type pgCtlStandbyRestarter struct {
 	pgCtl *postgres.PGCtl
 }
 
 func (r *pgCtlStandbyRestarter) RestartAsStandby(ctx context.Context, _ controlplane.StandbyRestartRequest) error {
-	return r.pgCtl.Start(ctx)
+	return r.pgCtl.StartNoWait(ctx)
 }
 
 func (daemon *Daemon) reconcileRejoin(ctx context.Context, currentPostgres agentmodel.PostgresStatus) {
@@ -149,7 +189,11 @@ func (daemon *Daemon) reconcileRejoin(ctx context.Context, currentPostgres agent
 	}
 
 	// Try standby config — fails with ErrRejoinExecutionRequired if no active op.
-	configurator := &localStandbyConfigurator{dataDir: daemon.config.Postgres.DataDir}
+	configurator := &localStandbyConfigurator{
+		dataDir:             daemon.config.Postgres.DataDir,
+		replicationUser:     daemon.config.Postgres.ReplicationUser,
+		replicationPassword: daemon.config.Postgres.ReplicationPassword,
+	}
 	if _, err := engine.ExecuteRejoinStandbyConfig(ctx, configurator); err == nil {
 		daemon.logger.InfoContext(ctx, "rejoin standby configured",
 			daemon.logArgs("agent")...)

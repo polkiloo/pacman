@@ -126,6 +126,7 @@ type RewindRequest struct {
 	MemberNode         agentmodel.NodeStatus
 	CurrentPrimaryNode agentmodel.NodeStatus
 	CurrentEpoch       cluster.Epoch
+	SourceServer       string
 }
 
 // StandbyConfigExecutor renders and persists the local standby configuration

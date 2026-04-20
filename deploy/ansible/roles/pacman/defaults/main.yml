@@ -31,4 +31,5 @@ pacmand_config_dir: /etc/pacman
 pacmand_config_path: /etc/pacman/pacmand.yaml
 pacmand_state_dir: /var/lib/pacman
 pacmand_token_dir: "{{ pacmand_config_dir }}/tokens"
+pacmand_environment: {}
 pacman_manage_service: true

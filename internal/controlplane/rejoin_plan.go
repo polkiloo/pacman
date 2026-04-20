@@ -146,9 +146,6 @@ func buildRejoinDivergenceAssessment(inputs rejoinInputs) RejoinDivergenceAssess
 
 	assessment.Compared = true
 	switch {
-	case inputs.member.Timeline < inputs.currentPrimary.Timeline:
-		assessment.Diverged = true
-		assessment.RequiresRewind = true
 	case inputs.member.Timeline > inputs.currentPrimary.Timeline:
 		assessment.Diverged = true
 		assessment.RequiresReclone = true

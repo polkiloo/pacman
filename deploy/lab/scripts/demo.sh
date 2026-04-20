@@ -26,13 +26,17 @@ rw_host="${PACMAN_DEMO_RW_HOST:-${vip_address}}"
 pgbench_host="${PACMAN_DEMO_PGBENCH_HOST:-${rw_host}}"
 pgbench_port="${PACMAN_DEMO_PGBENCH_PORT:-5432}"
 pgbench_user="${PACMAN_DEMO_PGBENCH_USER:-postgres}"
+pgbench_password="${PACMAN_DEMO_PGBENCH_PASSWORD:-pacman-demo-password}"
 pgbench_db="${PACMAN_DEMO_PGBENCH_DB:-postgres}"
 pgbench_scale="${PACMAN_DEMO_PGBENCH_SCALE:-10}"
 pgbench_clients="${PACMAN_DEMO_PGBENCH_CLIENTS:-4}"
 pgbench_threads="${PACMAN_DEMO_PGBENCH_THREADS:-2}"
 pgbench_duration="${PACMAN_DEMO_PGBENCH_DURATION:-120}"
+pgbench_chunk_duration="${PACMAN_DEMO_PGBENCH_CHUNK_DURATION:-15}"
 
 pgbench_pid_file="/tmp/pacman-demo-pgbench.pid"
+pgbench_child_pid_file="/tmp/pacman-demo-pgbench.child.pid"
+pgbench_pause_file="/tmp/pacman-demo-pgbench.pause"
 pgbench_log_file="/tmp/pacman-demo-pgbench.log"
 
 print_usage() {
@@ -82,11 +86,13 @@ Environment:
   PACMAN_DEMO_PGBENCH_HOST         default: ${pgbench_host}
   PACMAN_DEMO_PGBENCH_PORT         default: ${pgbench_port}
   PACMAN_DEMO_PGBENCH_USER         default: ${pgbench_user}
+  PACMAN_DEMO_PGBENCH_PASSWORD     default: ${pgbench_password}
   PACMAN_DEMO_PGBENCH_DB           default: ${pgbench_db}
   PACMAN_DEMO_PGBENCH_SCALE        default: ${pgbench_scale}
   PACMAN_DEMO_PGBENCH_CLIENTS      default: ${pgbench_clients}
   PACMAN_DEMO_PGBENCH_THREADS      default: ${pgbench_threads}
   PACMAN_DEMO_PGBENCH_DURATION     default: ${pgbench_duration}s
+  PACMAN_DEMO_PGBENCH_CHUNK_DURATION default: ${pgbench_chunk_duration}s
 
 Notes:
   - Runtime demo stages execute through docker compose, not host curl/jq.
@@ -101,8 +107,8 @@ Notes:
   - postgres-config does not hot-reload the running PostgreSQL instances yet;
     it demonstrates desired-state propagation, not live config application.
   - pgbench runs inside pacman-primary against ${pgbench_host}:${pgbench_port}.
-    Transactions will briefly error during switchover — this is expected and
-    demonstrates PACMAN completing the operation under live write load.
+    The demo supervisor restarts interrupted pgbench chunks during switchover
+    so a planned primary handoff does not abort the whole load stage.
   - After switchover the former primary automatically rejoins as a standby.
     The watch loop shows it recovering — final state should show both members healthy.
 EOF
@@ -280,6 +286,20 @@ show_vip_postgres_route() {
 	log "writable PostgreSQL VIP ${rw_host}:${pgbench_port} [vip-manager PostgreSQL VIP]"
 	compose_shell "${primary_service}" \
 		"/usr/pgsql-17/bin/pg_isready -h '${rw_host}' -p '${pgbench_port}' -d '${pgbench_db}'"
+}
+
+wait_for_vip_postgres_route() {
+	require_pg_isready "${primary_service}"
+	compose_exec "${primary_service}" /bin/sh -lc "
+		deadline=\$(( \$(date +%s) + 90 ))
+		until /usr/pgsql-17/bin/pg_isready -h '${rw_host}' -p '${pgbench_port}' -d '${pgbench_db}' >/dev/null 2>&1; do
+			if [ \$(date +%s) -ge \${deadline} ]; then
+				echo 'timed out waiting for writable PostgreSQL VIP ${rw_host}:${pgbench_port}' >&2
+				exit 1
+			fi
+			sleep 1
+		done
+	"
 }
 
 run_pacmanctl() {
@@ -609,9 +629,38 @@ except urllib.error.URLError as e:
 
 stage_switchover() {
 	local candidate=${1:-${default_candidate}}
+	local pgbench_paused=false
+
+	if pgbench_supervisor_running; then
+		log "pause pgbench load at chunk boundary before switchover"
+		pause_pgbench_load
+		pgbench_paused=true
+	fi
 
 	log "request switchover to ${candidate} via pacmanctl in ${primary_service} [PACMAN-native API]"
-	run_pacmanctl "${primary_service}" cluster switchover -candidate "${candidate}" -reason demo-switchover -requested-by demo-script -force
+	if ! run_pacmanctl "${primary_service}" cluster switchover -candidate "${candidate}" -reason demo-switchover -requested-by demo-script -force; then
+		if "${pgbench_paused}"; then
+			resume_pgbench_load
+		fi
+		return 1
+	fi
+	if ! wait_for_member_primary "${candidate}"; then
+		if "${pgbench_paused}"; then
+			resume_pgbench_load
+		fi
+		return 1
+	fi
+	if ! wait_for_vip_postgres_route; then
+		if "${pgbench_paused}"; then
+			resume_pgbench_load
+		fi
+		return 1
+	fi
+
+	if "${pgbench_paused}"; then
+		log "resume pgbench load after switchover"
+		resume_pgbench_load
+	fi
 }
 
 stage_watch_members() {
@@ -672,12 +721,104 @@ pgbench_connect_args() {
 	printf -- '-h %s -p %s -U %s %s' "${pgbench_host}" "${pgbench_port}" "${pgbench_user}" "${pgbench_db}"
 }
 
+pgbench_supervisor_running() {
+	compose_exec "${primary_service}" /bin/sh -lc "
+		if [ ! -f ${pgbench_pid_file} ]; then
+			exit 1
+		fi
+		pid=\$(cat ${pgbench_pid_file} 2>/dev/null || true)
+		[ -n \"\${pid}\" ] && kill -0 \"\${pid}\" 2>/dev/null
+	" >/dev/null 2>&1
+}
+
+pause_pgbench_load() {
+	compose_exec "${primary_service}" /bin/sh -lc "
+		touch ${pgbench_pause_file}
+		deadline=\$(( \$(date +%s) + ${pgbench_chunk_duration} + 10 ))
+		while [ -f ${pgbench_child_pid_file} ]; do
+			child=\$(cat ${pgbench_child_pid_file} 2>/dev/null || true)
+			if [ -z \"\${child}\" ] || ! kill -0 \"\${child}\" 2>/dev/null; then
+				rm -f ${pgbench_child_pid_file}
+				break
+			fi
+			if [ \$(date +%s) -ge \${deadline} ]; then
+				echo 'timed out waiting for active pgbench chunk to stop' >&2
+				exit 1
+			fi
+			sleep 1
+		done
+	"
+}
+
+resume_pgbench_load() {
+	compose_shell "${primary_service}" "rm -f ${pgbench_pause_file}"
+}
+
+wait_for_member_primary() {
+	local candidate=$1
+
+	require_python "${primary_service}"
+	ensure_container_api_url "${primary_api_url}" "PACMAN_DEMO_PRIMARY_API_URL" "${primary_service}"
+	compose_exec "${primary_service}" python3 - "${candidate}" "${primary_api_url}/api/v1/members" "${api_token}" <<'PY'
+import json
+import sys
+import time
+import urllib.error
+import urllib.request
+
+candidate, url, token = sys.argv[1:4]
+deadline = time.time() + 90
+request = urllib.request.Request(
+    url,
+    headers={
+        "Accept": "application/json",
+        "Authorization": f"Bearer {token}",
+    },
+)
+
+while True:
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            body = json.load(response)
+    except urllib.error.URLError:
+        if time.time() < deadline:
+            time.sleep(1)
+            continue
+        raise
+
+    if isinstance(body, dict):
+        members = body.get("items") or []
+    elif isinstance(body, list):
+        members = body
+    else:
+        members = []
+
+    for member in members:
+        if not isinstance(member, dict):
+            continue
+        if str(member.get("name") or "").strip() != candidate:
+            continue
+        if (
+            str(member.get("role") or "").strip() == "primary"
+            and str(member.get("state") or "").strip() == "running"
+            and bool(member.get("healthy")) is True
+        ):
+            print(json.dumps(member, indent=2, sort_keys=True))
+            raise SystemExit(0)
+
+    if time.time() >= deadline:
+        raise SystemExit(f"timed out waiting for {candidate} to become healthy primary")
+
+    time.sleep(1)
+PY
+}
+
 stage_pgbench_init() {
 	require_pgbench
 
 	log "initialize pgbench schema on ${pgbench_host}:${pgbench_port} (scale=${pgbench_scale}, db=${pgbench_db}) [vip-manager PostgreSQL VIP]"
 	# shellcheck disable=SC2046
-	compose_shell "${primary_service}" \
+	compose_exec "${primary_service}" env "PGPASSWORD=${pgbench_password}" /bin/sh -lc \
 		"$(pgbench_bin) $(pgbench_connect_args) -i -s ${pgbench_scale} --quiet"
 }
 
@@ -688,15 +829,48 @@ stage_load_on() {
 	# --progress-timestamp prints a Unix timestamp on each progress line so
 	# the log shows when during the switchover transactions were failing.
 	# shellcheck disable=SC2046
-	compose_shell "${primary_service}" \
-		"nohup $(pgbench_bin) $(pgbench_connect_args) \
-			-c ${pgbench_clients} \
-			-j ${pgbench_threads} \
-			-T ${pgbench_duration} \
-			-P 5 \
-			--progress-timestamp \
-		>${pgbench_log_file} 2>&1 </dev/null & echo \$! >${pgbench_pid_file}
-		echo \"pgbench started (pid=\$(cat ${pgbench_pid_file}))\""
+	compose_exec "${primary_service}" env "PGPASSWORD=${pgbench_password}" /bin/sh -lc \
+		"nohup /bin/sh -lc '
+			set -u
+			child_pid=
+			trap '\''if [ -n \"\${child_pid:-}\" ]; then kill \"\${child_pid}\" 2>/dev/null || true; fi; rm -f ${pgbench_child_pid_file} ${pgbench_pause_file} ${pgbench_pid_file}; exit 0'\'' INT TERM
+			end=\$(( \$(date +%s) + ${pgbench_duration} ))
+			chunk=${pgbench_chunk_duration}
+			: >${pgbench_log_file}
+			rm -f ${pgbench_child_pid_file} ${pgbench_pause_file}
+			while [ \$(date +%s) -lt \${end} ]; do
+				while [ -f ${pgbench_pause_file} ]; do
+					sleep 1
+				done
+				remaining=\$(( end - \$(date +%s) ))
+				run_for=\${chunk}
+				if [ \${remaining} -lt \${run_for} ]; then
+					run_for=\${remaining}
+				fi
+				if [ \${run_for} -le 0 ]; then
+					break
+				fi
+				status=0
+				$(pgbench_bin) $(pgbench_connect_args) \
+					-c ${pgbench_clients} \
+					-j ${pgbench_threads} \
+					-T \${run_for} \
+					-P 5 \
+					--progress-timestamp \
+					>>${pgbench_log_file} 2>&1 &
+				child_pid=\$!
+				echo \${child_pid} >${pgbench_child_pid_file}
+				wait \${child_pid} || status=\$?
+				child_pid=
+				rm -f ${pgbench_child_pid_file}
+				if [ \${status} -ne 0 ]; then
+					echo \"pgbench chunk exited with status \${status}; retrying after switchover\" >>${pgbench_log_file}
+					sleep 1
+				fi
+			done
+			rm -f ${pgbench_child_pid_file} ${pgbench_pause_file} ${pgbench_pid_file}
+		' >/dev/null 2>&1 </dev/null & echo \$! >${pgbench_pid_file}
+		echo \"pgbench supervisor started (pid=\$(cat ${pgbench_pid_file}))\""
 }
 
 stage_load_off() {
@@ -704,8 +878,12 @@ stage_load_off() {
 	compose_shell "${primary_service}" \
 		"if [ -f ${pgbench_pid_file} ]; then
 			pid=\$(cat ${pgbench_pid_file})
+			if [ -f ${pgbench_child_pid_file} ]; then
+				child=\$(cat ${pgbench_child_pid_file} 2>/dev/null || true)
+				[ -n \"\${child}\" ] && kill \"\${child}\" 2>/dev/null || true
+			fi
 			kill \"\${pid}\" 2>/dev/null && echo \"pgbench pid \${pid} stopped\" || echo \"pgbench already exited\"
-			rm -f ${pgbench_pid_file}
+			rm -f ${pgbench_pid_file} ${pgbench_child_pid_file} ${pgbench_pause_file}
 		else
 			echo \"no running pgbench (${pgbench_pid_file} not found)\"
 		fi"

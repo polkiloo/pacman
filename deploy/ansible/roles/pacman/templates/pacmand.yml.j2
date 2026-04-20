@@ -41,6 +41,8 @@ postgres:
   binDir: "{{ postgres_bin_dir }}"
   listenAddress: "{{ postgres_listen_address }}"
   port: {{ postgres_port }}
+  replicationUser: "{{ postgres_replication_user }}"
+  replicationPassword: "{{ postgres_replication_password }}"
 
 bootstrap:
   clusterName: "{{ pacman_cluster_name }}"

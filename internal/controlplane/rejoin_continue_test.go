@@ -138,6 +138,49 @@ func TestMemoryStateStoreExecuteRejoinRestartAsStandbyTransitionsToStarting(t *t
 	}
 }
 
+func TestMemoryStateStoreExecuteRejoinStandbyConfigAfterOfflineHeartbeat(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.April, 19, 15, 30, 0, 0, time.UTC)
+	store := seededPreparedRejoinStore(t, cluster.ClusterSpec{
+		ClusterName: "alpha",
+		Members: []cluster.MemberSpec{
+			{Name: "alpha-1"},
+			{Name: "alpha-2"},
+		},
+	}, now, now.Add(10*time.Second), now.Add(20*time.Second))
+
+	if _, err := store.PublishNodeStatus(context.Background(), agentmodel.NodeStatus{
+		NodeName:   "alpha-1",
+		MemberName: "alpha-1",
+		Role:       cluster.MemberRoleUnknown,
+		State:      cluster.MemberStateFailed,
+		Postgres: agentmodel.PostgresStatus{
+			Managed:   true,
+			Up:        false,
+			Role:      cluster.MemberRoleUnknown,
+			CheckedAt: now.Add(5 * time.Second),
+		},
+		ObservedAt: now.Add(5 * time.Second),
+	}); err != nil {
+		t.Fatalf("publish offline former primary heartbeat: %v", err)
+	}
+
+	configurator := &recordingStandbyConfigurer{}
+	execution, err := store.ExecuteRejoinStandbyConfig(context.Background(), configurator)
+	if err != nil {
+		t.Fatalf("execute rejoin standby config after offline heartbeat: %v", err)
+	}
+
+	if !execution.StandbyConfigured || execution.State != cluster.RejoinStateConfiguringStandby {
+		t.Fatalf("unexpected standby config execution after offline heartbeat: %+v", execution)
+	}
+
+	if len(configurator.requests) != 1 {
+		t.Fatalf("expected one standby config request after offline heartbeat, got %+v", configurator.requests)
+	}
+}
+
 func TestMemoryStateStoreRejoinStandbyContinuationRejectsBlockedExecution(t *testing.T) {
 	now := time.Date(2026, time.March, 30, 11, 0, 0, 0, time.UTC)
 
@@ -178,7 +221,7 @@ func TestMemoryStateStoreRejoinStandbyContinuationRejectsBlockedExecution(t *tes
 				t.Helper()
 
 				formerPrimary := rejoinFormerPrimaryStatus("alpha-1", now, 10, "sys-alpha")
-				currentPrimary := rejoinPrimaryStatus("alpha-2", now.Add(time.Second), 11, "sys-alpha")
+				currentPrimary := rejoinPrimaryStatus("alpha-2", now.Add(time.Second), 10, "sys-alpha")
 				currentPrimary.Postgres.Address = ""
 
 				store := seededFailoverStore(t, cluster.ClusterSpec{
@@ -189,8 +232,8 @@ func TestMemoryStateStoreRejoinStandbyContinuationRejectsBlockedExecution(t *tes
 				store.mu.Lock()
 				store.clusterStatus.CurrentEpoch = 7
 				store.mu.Unlock()
-				if _, err := store.ExecuteRejoinRewind(context.Background(), RejoinRequest{Member: "alpha-1"}, &recordingRewinder{}); err != nil {
-					t.Fatalf("execute rejoin rewind: %v", err)
+				if _, err := store.ExecuteRejoinDirect(context.Background(), RejoinRequest{Member: "alpha-1"}); err != nil {
+					t.Fatalf("execute direct rejoin: %v", err)
 				}
 
 				_, err := store.ExecuteRejoinStandbyConfig(context.Background(), &recordingStandbyConfigurer{})

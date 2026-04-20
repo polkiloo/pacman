@@ -559,6 +559,27 @@ func mergeControlPlaneManagedNodeFlags(previous, current agentmodel.NodeStatus) 
 		merged.PendingRestart = true
 	}
 
+	// Former primaries publish an offline heartbeat while PostgreSQL is stopped
+	// during switchover/rejoin. Keep the last known identity/timeline so the
+	// control plane can still decide and continue the rejoin workflow.
+	if previous.NeedsRejoin && merged.Postgres.Managed && !merged.Postgres.Up {
+		if merged.Role == "" || merged.Role == cluster.MemberRoleUnknown {
+			merged.Role = previous.Role
+		}
+
+		if merged.Postgres.Role == "" || merged.Postgres.Role == cluster.MemberRoleUnknown {
+			merged.Postgres.Role = previous.Postgres.Role
+		}
+
+		if merged.Postgres.Details == (agentmodel.PostgresDetails{}) {
+			merged.Postgres.Details = previous.Postgres.Details
+		}
+
+		if merged.Postgres.WAL == (agentmodel.WALProgress{}) {
+			merged.Postgres.WAL = previous.Postgres.WAL
+		}
+	}
+
 	if merged.PendingRestart {
 		merged.Postgres.Details.PendingRestart = true
 	}

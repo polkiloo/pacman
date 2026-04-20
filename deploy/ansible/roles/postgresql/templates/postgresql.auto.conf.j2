@@ -5,6 +5,7 @@ max_wal_senders = '{{ postgres_max_wal_senders }}'
 max_replication_slots = '{{ postgres_max_replication_slots }}'
 hot_standby = 'on'
 wal_keep_size = '{{ postgres_wal_keep_size }}'
+wal_log_hints = '{{ "on" if (postgres_wal_log_hints | bool) else "off" }}'
 {% if (postgres_manage_replication | bool) and (not postgres_is_initial_primary) %}
 primary_slot_name = '{{ postgres_replication_slot_name }}'
 {% endif %}

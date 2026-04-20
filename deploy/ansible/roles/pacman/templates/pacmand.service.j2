@@ -7,8 +7,9 @@ Wants=network-online.target
 Type=simple
 User={{ pacmand_service_user }}
 Group={{ pacmand_service_group }}
+EnvironmentFile=-/etc/sysconfig/pacmand
 WorkingDirectory={{ pacmand_state_dir }}
-ExecStart={{ pacmand_binary_path }} -config {{ pacmand_config_path }}
+ExecStart={{ pacmand_binary_path }} -config ${PACMAND_CONFIG} ${PACMAND_EXTRA_ARGS}
 Restart=on-failure
 RestartSec=5s
 

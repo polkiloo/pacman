@@ -17,12 +17,33 @@ type commandResult struct {
 }
 
 var runCommand commandRunner = executeCommand
+var runPassthroughCommand commandRunner = executePassthroughCommand
 
 func executeCommand(ctx context.Context, name string, args ...string) (commandResult, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	output, err := cmd.CombinedOutput()
 	result := commandResult{
 		output:   string(output),
+		exitCode: 0,
+	}
+	if err == nil {
+		return result, nil
+	}
+
+	var exitError *exec.ExitError
+	if errors.As(err, &exitError) {
+		result.exitCode = exitError.ExitCode()
+	} else {
+		result.exitCode = -1
+	}
+
+	return result, err
+}
+
+func executePassthroughCommand(ctx context.Context, name string, args ...string) (commandResult, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	err := cmd.Run()
+	result := commandResult{
 		exitCode: 0,
 	}
 	if err == nil {

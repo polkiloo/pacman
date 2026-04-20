@@ -1,0 +1,5 @@
+PACMAND_CONFIG={{ pacmand_config_path }}
+PACMAND_EXTRA_ARGS=
+{% for key, value in pacmand_environment | dictsort %}
+{{ key }}={{ value | string | quote }}
+{% endfor %}
