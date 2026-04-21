@@ -152,7 +152,7 @@ func findBuiltPacmanRPM(t *testing.T) string {
 
 	rpmDir := strings.TrimSpace(os.Getenv("PACMAN_ANSIBLE_INSTALL_RPM_DIR"))
 	if rpmDir == "" {
-		t.Fatal("PACMAN_ANSIBLE_INSTALL_RPM_DIR must point to a directory containing a built pacman RPM")
+		rpmDir = filepath.Join(integrationRepoRoot(t), "bin", "ansible-install-rpm")
 	}
 
 	entries, err := os.ReadDir(rpmDir)

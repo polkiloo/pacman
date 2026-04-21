@@ -81,6 +81,20 @@ type Postgres struct {
 func New(t *testing.T) *Environment {
 	t.Helper()
 
+	return newEnvironment(t, network.WithAttachable())
+}
+
+// NewWithNetworkOptions creates a new integration test environment with
+// additional Docker network customisation such as fixed subnets.
+func NewWithNetworkOptions(t *testing.T, options ...network.NetworkCustomizer) *Environment {
+	t.Helper()
+
+	return newEnvironment(t, append([]network.NetworkCustomizer{network.WithAttachable()}, options...)...)
+}
+
+func newEnvironment(t *testing.T, networkOptions ...network.NetworkCustomizer) *Environment {
+	t.Helper()
+
 	ctx := context.Background()
 	image := os.Getenv("PACMAN_TEST_IMAGE")
 	if strings.TrimSpace(image) == "" {
@@ -94,7 +108,7 @@ func New(t *testing.T) *Environment {
 	networkCtx, cancel := context.WithTimeout(ctx, dockerOperationTimeout)
 	defer cancel()
 
-	nw, err := network.New(networkCtx, network.WithAttachable())
+	nw, err := network.New(networkCtx, networkOptions...)
 	if err != nil {
 		t.Fatalf("create integration test network: %v", err)
 	}
