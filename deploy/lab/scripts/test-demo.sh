@@ -30,6 +30,7 @@ assert_contains "${list_output}" "prepare"
 assert_contains "${list_output}" "full-demo"
 assert_contains "${list_output}" "watch-members"
 assert_contains "${list_output}" "postgres-config"
+assert_contains "${list_output}" "observability"
 
 printf '==> dry-run prepare\n'
 prepare_output=$(run_and_capture "${demo_script}" --dry-run prepare)
@@ -54,6 +55,12 @@ metrics_output=$(run_and_capture "${demo_script}" --dry-run metrics)
 assert_contains "${metrics_output}" "/metrics"
 assert_contains "${metrics_output}" "pacman_cluster_"
 assert_contains "${metrics_output}" "docker compose"
+
+printf '==> dry-run observability\n'
+observability_output=$(run_and_capture "${demo_script}" --dry-run observability)
+assert_contains "${observability_output}" "/api/v1/targets"
+assert_contains "${observability_output}" "Grafana UI: http://127.0.0.1:3000"
+assert_contains "${observability_output}" "PACMAN Demo Overview"
 
 printf '==> dry-run postgres-config\n'
 postgres_config_output=$(run_and_capture "${demo_script}" --dry-run postgres-config shared_buffers 256MB)
@@ -98,5 +105,6 @@ assert_contains "${full_demo_output}" "bootstrap-cluster.sh"
 assert_contains "${full_demo_output}" "pacmanctl cluster switchover"
 assert_contains "${full_demo_output}" "pacmanctl history list"
 assert_contains "${full_demo_output}" "vip-manager PostgreSQL VIP"
+assert_contains "${full_demo_output}" "Prometheus UI: http://127.0.0.1:9093"
 
 printf 'demo script dry-run verification passed\n'

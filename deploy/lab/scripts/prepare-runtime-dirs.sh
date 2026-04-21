@@ -6,6 +6,8 @@ lab_dir=$(cd "${script_dir}/.." && pwd)
 runtime_dir="${lab_dir}/.local"
 
 mkdir -p \
+  "${runtime_dir}/grafana/data" \
+  "${runtime_dir}/prometheus/data" \
   "${runtime_dir}/alpha-dcs/etc/pacman" \
   "${runtime_dir}/alpha-dcs/var/lib/etcd/pacman" \
   "${runtime_dir}/alpha-dcs/var/log" \

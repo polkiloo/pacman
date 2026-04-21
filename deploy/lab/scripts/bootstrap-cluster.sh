@@ -9,6 +9,12 @@ runtime_dir="${lab_dir}/.local"
 rpm_dir="${PACMAN_LAB_RPM_DIR:-${repo_root}/bin/ansible-install-rpm}"
 lab_image="${PACMAN_LAB_IMAGE:-pacman-lab:local}"
 vip_address="${PACMAN_LAB_VIP_ADDRESS:-172.28.0.100}"
+prometheus_internal_url="${PACMAN_LAB_PROMETHEUS_INTERNAL_URL:-http://prometheus:9090/-/ready}"
+prometheus_url="${PACMAN_LAB_PROMETHEUS_URL:-http://127.0.0.1:9093}"
+grafana_internal_url="${PACMAN_LAB_GRAFANA_INTERNAL_URL:-http://grafana:3000/api/health}"
+grafana_url="${PACMAN_LAB_GRAFANA_URL:-http://127.0.0.1:3000}"
+grafana_admin_user="${PACMAN_LAB_GRAFANA_ADMIN_USER:-admin}"
+grafana_admin_password="${PACMAN_LAB_GRAFANA_ADMIN_PASSWORD:-pacman-demo}"
 
 export PACMAN_LAB_IMAGE="${lab_image}"
 
@@ -110,6 +116,22 @@ wait_for_postgres_vip() {
   done
 }
 
+wait_for_internal_http() {
+  local url=$1
+  local label=$2
+  local log_service=$3
+  local deadline=$((SECONDS + 90))
+
+  until compose_exec pacman-primary python3 -c \
+    "import urllib.request; urllib.request.urlopen('${url}', timeout=3)" >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      docker compose -f "${compose_file}" logs --tail=100 "${log_service}" || true
+      return 1
+    fi
+    sleep 2
+  done
+}
+
 start_etcd() {
   if compose_exec pacman-dcs pgrep -f "/usr/bin/etcd --name alpha-dcs" >/dev/null 2>&1; then
     wait_for_etcd_health
@@ -180,12 +202,16 @@ main() {
   start_vip_manager pacman-primary
   start_vip_manager pacman-replica
   wait_for_postgres_vip
+  wait_for_internal_http "${prometheus_internal_url}" "Prometheus" prometheus
+  wait_for_internal_http "${grafana_internal_url}" "Grafana" grafana
 
   printf 'PACMAN lab bootstrapped successfully.\n'
   printf 'Primary API: http://127.0.0.1:8081\n'
   printf 'Replica API: http://127.0.0.1:8082\n'
   printf 'etcd: http://127.0.0.1:2379\n'
   printf 'Writable PostgreSQL VIP: %s:5432\n' "${vip_address}"
+  printf 'Prometheus: %s\n' "${prometheus_url}"
+  printf 'Grafana: %s (login: %s / %s)\n' "${grafana_url}" "${grafana_admin_user}" "${grafana_admin_password}"
 }
 
 main "$@"

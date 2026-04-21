@@ -1,5 +1,13 @@
 name: pacman-lab
 
+x-node-exporter-common: &node_exporter_common
+  image: ${PACMAN_LAB_NODE_EXPORTER_IMAGE:-prom/node-exporter:v1.8.2}
+  command:
+    - --path.procfs=/proc
+    - --path.sysfs=/sys
+    - --path.rootfs=/
+    - --web.listen-address=:9100
+
 services:
   pacman-dcs:
     image: ${PACMAN_LAB_IMAGE:-pacman-lab:local}
@@ -21,6 +29,14 @@ services:
     networks:
       pacman-lab-net:
         ipv4_address: 172.28.0.10
+
+  pacman-dcs-node-exporter:
+    <<: *node_exporter_common
+    container_name: pacman-lab-dcs-node-exporter
+    depends_on:
+      - pacman-dcs
+    network_mode: "service:pacman-dcs"
+    pid: "service:pacman-dcs"
 
   pacman-primary:
     image: ${PACMAN_LAB_IMAGE:-pacman-lab:local}
@@ -49,6 +65,14 @@ services:
       pacman-lab-net:
         ipv4_address: 172.28.0.11
 
+  pacman-primary-node-exporter:
+    <<: *node_exporter_common
+    container_name: pacman-lab-primary-node-exporter
+    depends_on:
+      - pacman-primary
+    network_mode: "service:pacman-primary"
+    pid: "service:pacman-primary"
+
   pacman-replica:
     image: ${PACMAN_LAB_IMAGE:-pacman-lab:local}
     build:
@@ -75,6 +99,60 @@ services:
     networks:
       pacman-lab-net:
         ipv4_address: 172.28.0.12
+
+  pacman-replica-node-exporter:
+    <<: *node_exporter_common
+    container_name: pacman-lab-replica-node-exporter
+    depends_on:
+      - pacman-replica
+    network_mode: "service:pacman-replica"
+    pid: "service:pacman-replica"
+
+  prometheus:
+    image: ${PACMAN_LAB_PROMETHEUS_IMAGE:-prom/prometheus:v2.53.0}
+    container_name: pacman-lab-prometheus
+    hostname: prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=24h
+      - --web.enable-lifecycle
+    ports:
+      - "9093:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./.local/prometheus/data:/prometheus
+    depends_on:
+      - pacman-dcs
+      - pacman-dcs-node-exporter
+      - pacman-primary
+      - pacman-primary-node-exporter
+      - pacman-replica
+      - pacman-replica-node-exporter
+    networks:
+      pacman-lab-net:
+        ipv4_address: 172.28.0.20
+
+  grafana:
+    image: ${PACMAN_LAB_GRAFANA_IMAGE:-grafana/grafana:11.0.0}
+    container_name: pacman-lab-grafana
+    hostname: grafana
+    user: "0"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${PACMAN_LAB_GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${PACMAN_LAB_GRAFANA_ADMIN_PASSWORD:-pacman-demo}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./.local/grafana/data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      pacman-lab-net:
+        ipv4_address: 172.28.0.21
 
 networks:
   pacman-lab-net:

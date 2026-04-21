@@ -12,6 +12,11 @@ primary_service="${PACMAN_DEMO_PRIMARY_SERVICE:-pacman-primary}"
 replica_service="${PACMAN_DEMO_REPLICA_SERVICE:-pacman-replica}"
 primary_api_url="${PACMAN_DEMO_PRIMARY_API_URL:-http://${primary_service}:8080}"
 replica_api_url="${PACMAN_DEMO_REPLICA_API_URL:-http://${replica_service}:8080}"
+prometheus_internal_url="${PACMAN_DEMO_PROMETHEUS_INTERNAL_URL:-http://prometheus:9090}"
+prometheus_url="${PACMAN_DEMO_PROMETHEUS_URL:-http://127.0.0.1:9093}"
+grafana_url="${PACMAN_DEMO_GRAFANA_URL:-http://127.0.0.1:3000}"
+grafana_user="${PACMAN_DEMO_GRAFANA_USER:-admin}"
+grafana_password="${PACMAN_DEMO_GRAFANA_PASSWORD:-pacman-demo}"
 api_token="${PACMAN_DEMO_API_TOKEN:-lab-admin-token}"
 rpm_dir="${PACMAN_DEMO_RPM_DIR:-${repo_root}/bin/ansible-install-rpm}"
 default_candidate="${PACMAN_DEMO_SWITCHOVER_CANDIDATE:-alpha-2}"
@@ -33,6 +38,7 @@ pgbench_clients="${PACMAN_DEMO_PGBENCH_CLIENTS:-4}"
 pgbench_threads="${PACMAN_DEMO_PGBENCH_THREADS:-2}"
 pgbench_duration="${PACMAN_DEMO_PGBENCH_DURATION:-120}"
 pgbench_chunk_duration="${PACMAN_DEMO_PGBENCH_CHUNK_DURATION:-15}"
+pause_load_on_switchover="${PACMAN_DEMO_PAUSE_LOAD_ON_SWITCHOVER:-false}"
 
 pgbench_pid_file="/tmp/pacman-demo-pgbench.pid"
 pgbench_child_pid_file="/tmp/pacman-demo-pgbench.child.pid"
@@ -53,6 +59,7 @@ Stages:
   members                            [PACMAN-native API]
   postgres-config [parameter] [value] [PACMAN-native API + DCS]
   metrics                            [Patroni-compatible API]
+  observability                      [Prometheus + Grafana]
   verify                             [mixed: Patroni-compatible + PACMAN-native]
   maintenance-enable                 [PACMAN-native API]
   maintenance-disable                [PACMAN-native API]
@@ -73,6 +80,11 @@ Environment:
   PACMAN_DEMO_REPLICA_SERVICE      default: ${replica_service}
   PACMAN_DEMO_PRIMARY_API_URL      default: ${primary_api_url}
   PACMAN_DEMO_REPLICA_API_URL      default: ${replica_api_url}
+  PACMAN_DEMO_PROMETHEUS_INTERNAL_URL default: ${prometheus_internal_url}
+  PACMAN_DEMO_PROMETHEUS_URL       default: ${prometheus_url}
+  PACMAN_DEMO_GRAFANA_URL          default: ${grafana_url}
+  PACMAN_DEMO_GRAFANA_USER         default: ${grafana_user}
+  PACMAN_DEMO_GRAFANA_PASSWORD     default: ${grafana_password}
   PACMAN_DEMO_API_TOKEN            default: ${api_token}
   PACMAN_DEMO_RPM_DIR              default: ${rpm_dir}
   PACMAN_DEMO_SWITCHOVER_CANDIDATE default: ${default_candidate}
@@ -93,6 +105,7 @@ Environment:
   PACMAN_DEMO_PGBENCH_THREADS      default: ${pgbench_threads}
   PACMAN_DEMO_PGBENCH_DURATION     default: ${pgbench_duration}s
   PACMAN_DEMO_PGBENCH_CHUNK_DURATION default: ${pgbench_chunk_duration}s
+  PACMAN_DEMO_PAUSE_LOAD_ON_SWITCHOVER default: ${pause_load_on_switchover}
 
 Notes:
   - Runtime demo stages execute through docker compose, not host curl/jq.
@@ -101,14 +114,20 @@ Notes:
   - Native /api/v1/* access uses node-local PACMAN URLs plus the lab bearer token.
   - vip-manager manages the writable PostgreSQL VIP at ${vip_address}; PostgreSQL
     client stages default to that address so they follow switchovers automatically.
+  - bootstrap provisions Prometheus, Grafana, and one node_exporter endpoint on
+    each demo node namespace, including the external DCS node.
+  - the Grafana stack auto-loads the "PACMAN Demo Overview" dashboard with
+    Prometheus as the default datasource.
   - The local lab member names are alpha-1 and alpha-2.
   - postgres-config updates the desired cluster PostgreSQL parameter map in DCS
     and waits for /api/v1/cluster/spec to reflect the new value.
   - postgres-config does not hot-reload the running PostgreSQL instances yet;
     it demonstrates desired-state propagation, not live config application.
   - pgbench runs inside pacman-primary against ${pgbench_host}:${pgbench_port}.
-    The demo supervisor restarts interrupted pgbench chunks during switchover
-    so a planned primary handoff does not abort the whole load stage.
+    The default behavior keeps load running across switchover and retries
+    interrupted pgbench chunks after reconnect. Set
+    PACMAN_DEMO_PAUSE_LOAD_ON_SWITCHOVER=true only when you want a quieter
+    stage-managed handoff for presentations.
   - After switchover the former primary automatically rejoins as a standby.
     The watch loop shows it recovering — final state should show both members healthy.
 EOF
@@ -123,6 +142,7 @@ cluster              [PACMAN-native API]
 members              [PACMAN-native API]
 postgres-config      [PACMAN-native API + DCS]
 metrics              [Patroni-compatible API]
+observability        [Prometheus + Grafana]
 verify               [mixed: Patroni-compatible + PACMAN-native]
 maintenance-enable   [PACMAN-native API]
 maintenance-disable  [PACMAN-native API]
@@ -345,6 +365,36 @@ summary = {
     "value": parameters.get(parameter, "<unset>"),
 }
 print(json.dumps(summary, indent=2, sort_keys=True))
+PY
+}
+
+show_prometheus_targets() {
+	require_python "${primary_service}"
+	compose_exec "${primary_service}" python3 - "${prometheus_internal_url}/api/v1/targets" <<'PY'
+import json
+import sys
+import urllib.request
+
+url = sys.argv[1]
+with urllib.request.urlopen(url, timeout=5) as response:
+    payload = json.load(response)
+
+targets = []
+for target in ((payload.get("data") or {}).get("activeTargets") or []):
+    labels = target.get("labels") or {}
+    targets.append(
+        {
+            "health": target.get("health"),
+            "instance": labels.get("instance"),
+            "job": labels.get("job"),
+            "lastError": target.get("lastError"),
+            "node": labels.get("node"),
+            "scrapeUrl": target.get("scrapeUrl"),
+        }
+    )
+
+targets.sort(key=lambda item: (item.get("job") or "", item.get("node") or "", item.get("instance") or ""))
+print(json.dumps(targets, indent=2, sort_keys=True))
 PY
 }
 
@@ -592,6 +642,17 @@ stage_metrics() {
 		"python3 -c \"import urllib.request; print(urllib.request.urlopen('${primary_api_url}/metrics', timeout=5).read().decode(), end='')\" | grep -E '^pacman_cluster_|^pacman_member_info|^pacman_node_info'"
 }
 
+stage_observability() {
+	log "Prometheus scrape targets [Prometheus API]"
+	show_prometheus_targets
+
+	log "observability endpoints [host browser]"
+	printf 'Prometheus UI: %s\n' "${prometheus_url}"
+	printf 'Grafana UI: %s\n' "${grafana_url}"
+	printf 'Grafana login: %s / %s\n' "${grafana_user}" "${grafana_password}"
+	printf 'Grafana dashboard: PACMAN Lab / PACMAN Demo Overview\n'
+}
+
 stage_verify() {
 	stage_probes
 	stage_cluster
@@ -631,7 +692,7 @@ stage_switchover() {
 	local candidate=${1:-${default_candidate}}
 	local pgbench_paused=false
 
-	if pgbench_supervisor_running; then
+	if [[ "${pause_load_on_switchover}" == "true" ]] && pgbench_supervisor_running; then
 		log "pause pgbench load at chunk boundary before switchover"
 		pause_pgbench_load
 		pgbench_paused=true
@@ -904,6 +965,7 @@ stage_full_demo() {
 	stage_bootstrap
 	stage_verify
 	stage_metrics
+	stage_observability
 	stage_maintenance_enable
 	stage_maintenance_disable
 	stage_switchover
@@ -982,6 +1044,9 @@ main() {
 			;;
 		metrics)
 			stage_metrics "$@"
+			;;
+		observability)
+			stage_observability "$@"
 			;;
 		verify)
 			stage_verify "$@"
