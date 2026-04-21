@@ -9,41 +9,41 @@ scrape_configs:
       - targets:
           - pacman-primary:8080
         labels:
-          node: alpha-1
-          member: alpha-1
-          role: postgres
-          service: pacman-primary
+          lab_member: alpha-1
+          lab_node: alpha-1
+          lab_role: postgres
+          lab_service: pacman-primary
       - targets:
           - pacman-replica:8080
         labels:
-          node: alpha-2
-          member: alpha-2
-          role: postgres
-          service: pacman-replica
+          lab_member: alpha-2
+          lab_node: alpha-2
+          lab_role: postgres
+          lab_service: pacman-replica
 
   - job_name: node-exporter
     static_configs:
       - targets:
           - pacman-dcs:9100
         labels:
-          node: alpha-dcs
-          member: alpha-dcs
-          role: dcs
-          service: pacman-dcs
+          lab_member: alpha-dcs
+          lab_node: alpha-dcs
+          lab_role: dcs
+          lab_service: pacman-dcs
       - targets:
           - pacman-primary:9100
         labels:
-          node: alpha-1
-          member: alpha-1
-          role: postgres
-          service: pacman-primary
+          lab_member: alpha-1
+          lab_node: alpha-1
+          lab_role: postgres
+          lab_service: pacman-primary
       - targets:
           - pacman-replica:9100
         labels:
-          node: alpha-2
-          member: alpha-2
-          role: postgres
-          service: pacman-replica
+          lab_member: alpha-2
+          lab_node: alpha-2
+          lab_role: postgres
+          lab_service: pacman-replica
 
   - job_name: etcd
     metrics_path: /metrics
@@ -51,7 +51,7 @@ scrape_configs:
       - targets:
           - pacman-dcs:2379
         labels:
-          node: alpha-dcs
-          member: alpha-dcs
-          role: dcs
-          service: pacman-dcs
+          lab_member: alpha-dcs
+          lab_node: alpha-dcs
+          lab_role: dcs
+          lab_service: pacman-dcs

@@ -388,13 +388,55 @@ for target in ((payload.get("data") or {}).get("activeTargets") or []):
             "instance": labels.get("instance"),
             "job": labels.get("job"),
             "lastError": target.get("lastError"),
-            "node": labels.get("node"),
+            "node": labels.get("lab_node"),
             "scrapeUrl": target.get("scrapeUrl"),
         }
     )
 
 targets.sort(key=lambda item: (item.get("job") or "", item.get("node") or "", item.get("instance") or ""))
 print(json.dumps(targets, indent=2, sort_keys=True))
+PY
+}
+
+current_primary_timeline() {
+	require_python "${primary_service}"
+	ensure_container_api_url "${primary_api_url}" "PACMAN_DEMO_PRIMARY_API_URL" "${primary_service}"
+	compose_exec "${primary_service}" python3 - "${primary_api_url}/api/v1/members" "${api_token}" <<'PY'
+import json
+import sys
+import urllib.request
+
+url, token = sys.argv[1:3]
+request = urllib.request.Request(
+    url,
+    headers={
+        "Accept": "application/json",
+        "Authorization": f"Bearer {token}",
+    },
+)
+with urllib.request.urlopen(request, timeout=5) as response:
+    body = json.load(response)
+
+if isinstance(body, dict):
+    members = body.get("items") or []
+elif isinstance(body, list):
+    members = body
+else:
+    members = []
+
+for member in members:
+    if not isinstance(member, dict):
+        continue
+    if str(member.get("role") or "").strip() != "primary":
+        continue
+    timeline = member.get("timeline") or 0
+    try:
+        print(int(timeline))
+    except (TypeError, ValueError):
+        print(0)
+    raise SystemExit(0)
+
+print(0)
 PY
 }
 
@@ -691,6 +733,11 @@ except urllib.error.URLError as e:
 stage_switchover() {
 	local candidate=${1:-${default_candidate}}
 	local pgbench_paused=false
+	local previous_timeline=0
+
+	if ! "${dry_run}"; then
+		previous_timeline=$(current_primary_timeline || printf '0')
+	fi
 
 	if [[ "${pause_load_on_switchover}" == "true" ]] && pgbench_supervisor_running; then
 		log "pause pgbench load at chunk boundary before switchover"
@@ -705,7 +752,7 @@ stage_switchover() {
 		fi
 		return 1
 	fi
-	if ! wait_for_member_primary "${candidate}"; then
+	if ! wait_for_member_primary "${candidate}" "${previous_timeline}"; then
 		if "${pgbench_paused}"; then
 			resume_pgbench_load
 		fi
@@ -817,17 +864,19 @@ resume_pgbench_load() {
 
 wait_for_member_primary() {
 	local candidate=$1
+	local minimum_timeline=${2:-0}
 
 	require_python "${primary_service}"
 	ensure_container_api_url "${primary_api_url}" "PACMAN_DEMO_PRIMARY_API_URL" "${primary_service}"
-	compose_exec "${primary_service}" python3 - "${candidate}" "${primary_api_url}/api/v1/members" "${api_token}" <<'PY'
+	compose_exec "${primary_service}" python3 - "${candidate}" "${minimum_timeline}" "${primary_api_url}/api/v1/members" "${api_token}" <<'PY'
 import json
 import sys
 import time
 import urllib.error
 import urllib.request
 
-candidate, url, token = sys.argv[1:4]
+candidate, minimum_timeline_text, url, token = sys.argv[1:5]
+minimum_timeline = int(minimum_timeline_text)
 deadline = time.time() + 90
 request = urllib.request.Request(
     url,
@@ -863,12 +912,15 @@ while True:
             str(member.get("role") or "").strip() == "primary"
             and str(member.get("state") or "").strip() == "running"
             and bool(member.get("healthy")) is True
+            and int(member.get("timeline") or 0) > minimum_timeline
         ):
             print(json.dumps(member, indent=2, sort_keys=True))
             raise SystemExit(0)
 
     if time.time() >= deadline:
-        raise SystemExit(f"timed out waiting for {candidate} to become healthy primary")
+        raise SystemExit(
+            f"timed out waiting for {candidate} to become healthy primary with timeline above {minimum_timeline}"
+        )
 
     time.sleep(1)
 PY

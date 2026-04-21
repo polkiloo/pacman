@@ -72,7 +72,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "pacman_cluster_primary",
+          "expr": "max by (member) (pacman_cluster_primary)",
           "instant": true,
           "legendFormat": "{{member}}",
           "refId": "A"
@@ -151,7 +151,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "pacman_cluster_maintenance_mode",
+          "expr": "max(pacman_cluster_maintenance_mode)",
           "instant": true,
           "refId": "A"
         }
@@ -210,7 +210,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (kind, state) (pacman_cluster_operation_active)",
+          "expr": "max by (kind, state) (pacman_cluster_operation_active)",
           "instant": true,
           "legendFormat": "{{kind}} / {{state}}",
           "refId": "A"
@@ -227,10 +227,29 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "thresholds"
           },
-          "min": 0,
-          "max": 1
+          "mappings": [
+            {
+              "options": {
+                "1": {
+                  "color": "green",
+                  "index": 0,
+                  "text": "current"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
         },
         "overrides": []
       },
@@ -242,15 +261,18 @@
       },
       "id": 4,
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
+        "textMode": "name"
       },
       "targets": [
         {
@@ -258,13 +280,14 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "pacman_member_info{role=\"primary\"}",
-          "legendFormat": "{{member}} primary",
+          "expr": "max by (member, role, state) (pacman_member_info)",
+          "instant": true,
+          "legendFormat": "{{member}} {{role}}",
           "refId": "A"
         }
       ],
-      "title": "Primary Role by Member",
-      "type": "timeseries"
+      "title": "Current Member Roles",
+      "type": "stat"
     },
     {
       "datasource": {
@@ -305,7 +328,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "pacman_member_healthy",
+          "expr": "max by (member) (pacman_member_healthy)",
           "legendFormat": "{{member}} healthy",
           "refId": "A"
         }
@@ -350,7 +373,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "pacman_member_timeline",
+          "expr": "max by (member) (pacman_member_timeline)",
           "legendFormat": "{{member}} timeline",
           "refId": "A"
         }
@@ -396,7 +419,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "pacman_member_replication_lag_bytes",
+          "expr": "max by (member) (pacman_member_replication_lag_bytes)",
           "legendFormat": "{{member}} lag",
           "refId": "A"
         }
@@ -442,8 +465,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (node) (rate(node_network_receive_bytes_total{job=\"node-exporter\",device!=\"lo\"}[1m]))",
-          "legendFormat": "{{node}} rx",
+          "expr": "sum by (lab_node) (rate(node_network_receive_bytes_total{job=\"node-exporter\",device!=\"lo\"}[1m]))",
+          "legendFormat": "{{lab_node}} rx",
           "refId": "A"
         }
       ],
@@ -488,8 +511,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (node) (rate(node_network_transmit_bytes_total{job=\"node-exporter\",device!=\"lo\"}[1m]))",
-          "legendFormat": "{{node}} tx",
+          "expr": "sum by (lab_node) (rate(node_network_transmit_bytes_total{job=\"node-exporter\",device!=\"lo\"}[1m]))",
+          "legendFormat": "{{lab_node}} tx",
           "refId": "A"
         }
       ],
@@ -536,7 +559,7 @@
             "uid": "prometheus"
           },
           "expr": "up{job=~\"pacman|node-exporter|etcd\"}",
-          "legendFormat": "{{job}} {{node}} {{instance}}",
+          "legendFormat": "{{job}} {{lab_node}} {{instance}}",
           "refId": "A"
         }
       ],
