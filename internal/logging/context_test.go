@@ -9,6 +9,7 @@ func TestAttrsFromContextReturnsStableSortedCorrelationFields(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
+	ctx = WithCluster(ctx, "alpha")
 	ctx = WithPrincipalSubject(ctx, "ops@example")
 	ctx = WithOperation(ctx, "op-1", "switchover")
 	ctx = WithNode(ctx, "alpha-1")
@@ -16,8 +17,8 @@ func TestAttrsFromContextReturnsStableSortedCorrelationFields(t *testing.T) {
 	ctx = WithMember(ctx, "alpha-2")
 
 	attrs := AttrsFromContext(ctx)
-	if len(attrs) != 6 {
-		t.Fatalf("expected 6 correlation attrs, got %d", len(attrs))
+	if len(attrs) != 7 {
+		t.Fatalf("expected 7 correlation attrs, got %d", len(attrs))
 	}
 
 	gotKeys := make([]string, len(attrs))
@@ -28,6 +29,7 @@ func TestAttrsFromContextReturnsStableSortedCorrelationFields(t *testing.T) {
 	}
 
 	wantKeys := []string{
+		"cluster",
 		"member",
 		"node",
 		"operation_id",
@@ -42,6 +44,7 @@ func TestAttrsFromContextReturnsStableSortedCorrelationFields(t *testing.T) {
 	}
 
 	for key, want := range map[string]string{
+		"cluster":           "alpha",
 		"member":            "alpha-2",
 		"node":              "alpha-1",
 		"operation_id":      "op-1",

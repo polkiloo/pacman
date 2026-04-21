@@ -165,6 +165,78 @@ func TestModuleReturnsLoggerRegistrationError(t *testing.T) {
 	}
 }
 
+func TestResolveLogLevel(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name   string
+		lookup func(string) (string, bool)
+		want   slog.Level
+	}{
+		{
+			name: "missing env defaults to info",
+			lookup: func(string) (string, bool) {
+				return "", false
+			},
+			want: slog.LevelInfo,
+		},
+		{
+			name: "debug",
+			lookup: func(string) (string, bool) {
+				return "debug", true
+			},
+			want: slog.LevelDebug,
+		},
+		{
+			name: "blank defaults to info",
+			lookup: func(string) (string, bool) {
+				return "   ", true
+			},
+			want: slog.LevelInfo,
+		},
+		{
+			name: "warning aliases to warn",
+			lookup: func(string) (string, bool) {
+				return "warning", true
+			},
+			want: slog.LevelWarn,
+		},
+		{
+			name: "error",
+			lookup: func(string) (string, bool) {
+				return "error", true
+			},
+			want: slog.LevelError,
+		},
+		{
+			name: "unknown defaults to info",
+			lookup: func(string) (string, bool) {
+				return "trace", true
+			},
+			want: slog.LevelInfo,
+		},
+	}
+
+	for _, testCase := range testCases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := resolveLogLevel(func(key string) (string, bool) {
+				if key != envLogLevel {
+					t.Fatalf("lookup called with unexpected key %q", key)
+				}
+
+				return testCase.lookup(key)
+			})
+
+			if got.Level() != testCase.want {
+				t.Fatalf("resolved level: got %v, want %v", got.Level(), testCase.want)
+			}
+		})
+	}
+}
+
 func decodeEntry(t *testing.T, payload []byte) map[string]any {
 	t.Helper()
 

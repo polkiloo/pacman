@@ -205,10 +205,12 @@ func TestMemoryStateStoreDetectRejoinDivergenceRequirements(t *testing.T) {
 		wantReasons         []string
 	}{
 		{
-			name:           "older timeline does not require rewind",
-			member:         rejoinFormerPrimaryStatus("alpha-1", now, 10, "sys-alpha"),
-			currentPrimary: rejoinPrimaryStatus("alpha-2", now.Add(time.Second), 11, "sys-alpha"),
-			wantCompared:   true,
+			name:               "member timeline behind primary requires rewind",
+			member:             rejoinFormerPrimaryStatus("alpha-1", now, 10, "sys-alpha"),
+			currentPrimary:     rejoinPrimaryStatus("alpha-2", now.Add(time.Second), 11, "sys-alpha"),
+			wantCompared:       true,
+			wantDiverged:       true,
+			wantRequiresRewind: true,
 		},
 		{
 			name:           "matching timeline does not diverge",
@@ -301,10 +303,11 @@ func TestMemoryStateStoreDecideRejoinStrategyChoosesRepairPath(t *testing.T) {
 		wantReasons      []string
 	}{
 		{
-			name:             "direct rejoin possible for former primary behind current timeline",
-			member:           rejoinFormerPrimaryStatus("alpha-1", now, 10, "sys-alpha"),
-			currentPrimary:   rejoinPrimaryStatus("alpha-2", now.Add(time.Second), 11, "sys-alpha"),
-			wantDirectRejoin: true,
+			name:           "rewind selected for former primary behind current timeline",
+			member:         rejoinFormerPrimaryStatus("alpha-1", now, 10, "sys-alpha"),
+			currentPrimary: rejoinPrimaryStatus("alpha-2", now.Add(time.Second), 11, "sys-alpha"),
+			wantDecided:    true,
+			wantStrategy:   cluster.RejoinStrategyRewind,
 		},
 		{
 			name:           "reclone selected for system identifier mismatch",

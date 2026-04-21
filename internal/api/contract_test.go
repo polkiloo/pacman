@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -438,6 +439,175 @@ components:
 
 	if operation.Summary != "Embedded split health probe" {
 		t.Fatalf("unexpected embedded split operation summary: %q", operation.Summary)
+	}
+}
+
+func TestResolveDocumentFSErrors(t *testing.T) {
+	t.Parallel()
+
+	t.Run("missing root document", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := ResolveDocumentFS(fstest.MapFS{}, "openapi.yaml"); err == nil {
+			t.Fatal("expected missing embedded openapi file error")
+		}
+	})
+
+	t.Run("invalid root yaml", func(t *testing.T) {
+		t.Parallel()
+
+		fsys := fstest.MapFS{
+			"openapi.yaml": {
+				Data: []byte("openapi: ["),
+			},
+		}
+
+		if _, err := ResolveDocumentFS(fsys, "openapi.yaml"); err == nil {
+			t.Fatal("expected invalid embedded yaml error")
+		}
+	})
+
+	t.Run("missing external ref", func(t *testing.T) {
+		t.Parallel()
+
+		fsys := fstest.MapFS{
+			"openapi.yaml": {
+				Data: []byte(`openapi: 3.1.0
+paths:
+  /health:
+    $ref: './missing.yaml#/~1health'
+`),
+			},
+		}
+
+		if _, err := ResolveDocumentFS(fsys, "openapi.yaml"); err == nil {
+			t.Fatal("expected missing embedded external ref error")
+		}
+	})
+
+	t.Run("bad external pointer", func(t *testing.T) {
+		t.Parallel()
+
+		fsys := fstest.MapFS{
+			"openapi.yaml": {
+				Data: []byte(`openapi: 3.1.0
+paths:
+  /health:
+    $ref: './paths.yaml#/~1missing'
+`),
+			},
+			"paths.yaml": {
+				Data: []byte(`/health: {}` + "\n"),
+			},
+		}
+
+		if _, err := ResolveDocumentFS(fsys, "openapi.yaml"); err == nil {
+			t.Fatal("expected bad embedded external ref pointer error")
+		}
+	})
+}
+
+func TestDecodeDocumentRejectsInvalidYAML(t *testing.T) {
+	t.Parallel()
+
+	if _, err := decodeDocument([]byte("openapi: [")); err == nil {
+		t.Fatal("expected invalid document payload error")
+	}
+}
+
+func TestSplitRefAndResolvePointerHelpers(t *testing.T) {
+	t.Parallel()
+
+	if path, pointer := splitRef("./paths.yaml#/~1health/get"); path != "./paths.yaml" || pointer != "/~1health/get" {
+		t.Fatalf("unexpected split ref result: path=%q pointer=%q", path, pointer)
+	}
+
+	if path, pointer := splitRef("./paths.yaml"); path != "./paths.yaml" || pointer != "" {
+		t.Fatalf("unexpected split ref without fragment: path=%q pointer=%q", path, pointer)
+	}
+
+	document := map[string]any{
+		"paths": map[string]any{
+			"/health": []any{
+				map[string]any{
+					"get": map[string]any{
+						"summary": "ok",
+					},
+				},
+			},
+		},
+	}
+
+	resolved, err := resolvePointer(document, "")
+	if err != nil {
+		t.Fatalf("resolve empty pointer: %v", err)
+	}
+
+	if !reflect.DeepEqual(resolved, document) {
+		t.Fatalf("expected empty pointer to return original value, got %#v", resolved)
+	}
+
+	resolved, err = resolvePointer(document, "/paths/~1health/0/get/summary")
+	if err != nil {
+		t.Fatalf("resolve escaped map and array pointer: %v", err)
+	}
+
+	if got, ok := resolved.(string); !ok || got != "ok" {
+		t.Fatalf("unexpected pointer result: %#v", resolved)
+	}
+
+	testCases := []struct {
+		name    string
+		value   any
+		pointer string
+		wantErr string
+	}{
+		{
+			name:    "unsupported fragment syntax",
+			value:   document,
+			pointer: "paths",
+			wantErr: `unsupported ref fragment "paths"`,
+		},
+		{
+			name:    "missing map key",
+			value:   document,
+			pointer: "/paths/~1missing",
+			wantErr: `pointer segment "/missing" not found`,
+		},
+		{
+			name:    "invalid array index",
+			value:   []any{"a"},
+			pointer: "/first",
+			wantErr: `pointer segment "first" is not a valid array index`,
+		},
+		{
+			name:    "array index out of range",
+			value:   []any{"a"},
+			pointer: "/1",
+			wantErr: "pointer index 1 out of range",
+		},
+		{
+			name:    "unsupported leaf type",
+			value:   "value",
+			pointer: "/field",
+			wantErr: `pointer segment "field" cannot be resolved from string`,
+		},
+	}
+
+	for _, testCase := range testCases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := resolvePointer(testCase.value, testCase.pointer)
+			if err == nil {
+				t.Fatalf("expected error for pointer %q", testCase.pointer)
+			}
+
+			if !strings.Contains(err.Error(), testCase.wantErr) {
+				t.Fatalf("unexpected pointer error: got %q, want substring %q", err.Error(), testCase.wantErr)
+			}
+		})
 	}
 }
 

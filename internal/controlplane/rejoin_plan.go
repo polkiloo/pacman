@@ -150,6 +150,9 @@ func buildRejoinDivergenceAssessment(inputs rejoinInputs) RejoinDivergenceAssess
 		assessment.Diverged = true
 		assessment.RequiresReclone = true
 		assessment.Reasons = append(assessment.Reasons, reasonTimelineAheadOfCurrentPrimary)
+	case inputs.member.Timeline < inputs.currentPrimary.Timeline:
+		assessment.Diverged = true
+		assessment.RequiresRewind = true
 	}
 
 	return assessment.Clone()

@@ -915,8 +915,8 @@ func TestMemoryStateStorePublishNodeStatusPreservesFormerPrimaryDetailsDuringRej
 		t.Fatalf("decide rejoin strategy after offline heartbeat: %v", err)
 	}
 
-	if !decision.DirectRejoinPossible {
-		t.Fatalf("expected direct rejoin to be possible for former primary behind current timeline, got %+v", decision)
+	if !decision.Decided || decision.Strategy != cluster.RejoinStrategyRewind || decision.DirectRejoinPossible {
+		t.Fatalf("expected rewind strategy for former primary behind current timeline, got %+v", decision)
 	}
 }
 
