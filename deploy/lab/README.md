@@ -89,11 +89,15 @@ The runtime demo stages intentionally run from inside the lab containers:
 
 That flow:
 
+- refreshes the local PACMAN runtime RPM in `bin/ansible-install-rpm/` by
+  default before applying the lab deployment
 - finds the latest PACMAN runtime RPM in `bin/ansible-install-rpm/`
 - builds the lab image from `test/docker/pacman-ansible-install.Dockerfile`
 - starts the three-node compose environment
 - applies the Ansible deployment to each container with `ansible_connection=local`
 - starts the external etcd daemon and both `pacmand` daemons
+- restarts `pacmand` and `vip-manager` during bootstrap so the lab picks up the
+  freshly installed binaries and config
 - verifies etcd and PACMAN health endpoints
 
 The `postgres-config` stage is intentionally a desired-state demo, not a live

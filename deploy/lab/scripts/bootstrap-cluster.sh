@@ -9,6 +9,7 @@ runtime_dir="${lab_dir}/.local"
 rpm_dir="${PACMAN_LAB_RPM_DIR:-${repo_root}/bin/ansible-install-rpm}"
 lab_image="${PACMAN_LAB_IMAGE:-pacman-lab:local}"
 vip_address="${PACMAN_LAB_VIP_ADDRESS:-172.28.0.100}"
+auto_prepare="${PACMAN_LAB_AUTO_PREPARE:-true}"
 prometheus_internal_url="${PACMAN_LAB_PROMETHEUS_INTERNAL_URL:-http://prometheus:9090/-/ready}"
 prometheus_url="${PACMAN_LAB_PROMETHEUS_URL:-http://127.0.0.1:9093}"
 grafana_internal_url="${PACMAN_LAB_GRAFANA_INTERNAL_URL:-http://grafana:3000/api/health}"
@@ -20,7 +21,14 @@ export PACMAN_LAB_IMAGE="${lab_image}"
 
 find_runtime_rpm() {
   local candidate name
-  for candidate in "${rpm_dir}"/pacman-*.rpm; do
+  local candidates=()
+
+  while IFS= read -r candidate; do
+    candidates+=("${candidate}")
+  done < <(find "${rpm_dir}" -maxdepth 1 -type f -name 'pacman-*.rpm' ! -name 'pacman-postgresql17-agent-*' ! -name '*.src.rpm' -print | sort)
+
+  for (( candidate_index=${#candidates[@]} - 1; candidate_index >= 0; candidate_index-- )); do
+    candidate=${candidates[${candidate_index}]}
     name=$(basename "${candidate}")
     if [[ -f "${candidate}" && "${name}" != pacman-postgresql17-agent-* && "${name}" != *.src.rpm ]]; then
       printf '%s\n' "${candidate}"
@@ -29,6 +37,15 @@ find_runtime_rpm() {
   done
 
   return 1
+}
+
+prepare_runtime_rpm() {
+  if [[ "${auto_prepare}" != "true" ]]; then
+    return 0
+  fi
+
+  printf 'Refreshing PACMAN runtime RPM in %s\n' "${rpm_dir}"
+  make -C "${repo_root}" rpm "RPM_OUTPUT_DIR=${rpm_dir}"
 }
 
 write_generated_vars() {
@@ -159,11 +176,14 @@ start_pacmand() {
   local service=$1
   local host=$2
 
-  if ! compose_exec "${service}" pgrep -u postgres -f "/usr/bin/pacmand -config /etc/pacman/pacmand.yaml" >/dev/null 2>&1; then
-    compose_exec_detached "${service}" \
-      /bin/bash -lc \
-      "cd /var/lib/pacman && exec runuser -u postgres -- /bin/bash -lc '. /etc/sysconfig/pacmand 2>/dev/null || true; export PACMAND_CONFIG PACMAND_EXTRA_ARGS PGPASSWORD; cd /var/lib/pacman && exec /usr/bin/pacmand -config \"\${PACMAND_CONFIG:-/etc/pacman/pacmand.yaml}\" \${PACMAND_EXTRA_ARGS:-}' >>/var/log/pacman/pacmand.log 2>&1"
-  fi
+  compose_exec "${service}" /bin/sh -lc \
+    "pkill -u postgres -f '/usr/bin/pacmand -config /etc/pacman/pacmand.yaml' 2>/dev/null || true"
+  compose_exec "${service}" /bin/sh -lc \
+    "deadline=\$(( \$(date +%s) + 20 )); while pgrep -u postgres -f '/usr/bin/pacmand -config /etc/pacman/pacmand.yaml' >/dev/null 2>&1; do if [ \$(date +%s) -ge \${deadline} ]; then echo 'timed out waiting for pacmand to stop' >&2; exit 1; fi; sleep 1; done"
+
+  compose_exec_detached "${service}" \
+    /bin/bash -lc \
+    "cd /var/lib/pacman && exec runuser -u postgres -- /bin/bash -lc '. /etc/sysconfig/pacmand 2>/dev/null || true; export PACMAND_CONFIG PACMAND_EXTRA_ARGS PGPASSWORD; cd /var/lib/pacman && exec /usr/bin/pacmand -config \"\${PACMAND_CONFIG:-/etc/pacman/pacmand.yaml}\" \${PACMAND_EXTRA_ARGS:-}' >>/var/log/pacman/pacmand.log 2>&1"
 
   wait_for_pacmand_health "${service}" "http://${host}:8080/health"
 }
@@ -171,19 +191,24 @@ start_pacmand() {
 start_vip_manager() {
   local service=$1
 
-  if ! compose_exec "${service}" pgrep -f "/usr/local/bin/vip-manager --config /etc/pacman/vip-manager.yml" >/dev/null 2>&1; then
-    compose_exec_detached "${service}" \
-      /bin/sh -lc \
-      "exec /usr/local/bin/vip-manager --config /etc/pacman/vip-manager.yml >>/var/log/pacman/vip-manager.log 2>&1"
-  fi
+  compose_exec "${service}" /bin/sh -lc \
+    "pkill -f '/usr/local/bin/vip-manager --config /etc/pacman/vip-manager.yml' 2>/dev/null || true"
+  compose_exec "${service}" /bin/sh -lc \
+    "deadline=\$(( \$(date +%s) + 20 )); while pgrep -f '/usr/local/bin/vip-manager --config /etc/pacman/vip-manager.yml' >/dev/null 2>&1; do if [ \$(date +%s) -ge \${deadline} ]; then echo 'timed out waiting for vip-manager to stop' >&2; exit 1; fi; sleep 1; done"
+
+  compose_exec_detached "${service}" \
+    /bin/sh -lc \
+    "exec /usr/local/bin/vip-manager --config /etc/pacman/vip-manager.yml >>/var/log/pacman/vip-manager.log 2>&1"
 }
 
 main() {
   local rpm_path
 
+  prepare_runtime_rpm
+
   if ! rpm_path=$(find_runtime_rpm); then
     printf 'no PACMAN runtime RPM found in %s\n' "${rpm_dir}" >&2
-    printf 'build one first with: make rpm\n' >&2
+    printf 'build one first with: make rpm or rerun with PACMAN_LAB_AUTO_PREPARE=true\n' >&2
     exit 1
   fi
 
