@@ -4,6 +4,13 @@ const queryHealthSQL = `
 select current_setting('server_version_num')::integer
 `
 
+const observationTimelineSQL = `
+case
+	when local.in_recovery then coalesce(nullif(recovery.min_recovery_end_timeline, 0), checkpoint.timeline_id)
+	else ('x' || substr(pg_walfile_name(local.write_lsn::pg_lsn), 1, 8))::bit(32)::bigint
+end
+`
+
 const queryObservationSQL = `
 with local as (
 	select
@@ -29,7 +36,7 @@ select
 	local.postmaster_start_at,
 	local.pending_restart,
 	system.system_identifier::text,
-	checkpoint.timeline_id,
+	` + observationTimelineSQL + `,
 	coalesce(local.write_lsn, ''),
 	coalesce(local.flush_lsn, ''),
 	coalesce(local.receive_lsn, ''),
@@ -43,4 +50,5 @@ select
 from local
 cross join pg_control_system() as system
 cross join pg_control_checkpoint() as checkpoint
+cross join pg_control_recovery() as recovery
 `
