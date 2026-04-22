@@ -598,13 +598,29 @@ func writeTracingBinary(t *testing.T, binaryName, scriptTemplate string) (string
 	binDir := t.TempDir()
 	tracePath := filepath.Join(binDir, binaryName+".trace")
 	scriptPath := filepath.Join(binDir, binaryName)
+	tempPath := scriptPath + ".tmp"
 	script := []byte(strings.TrimSpace(
 		strings.ReplaceAll(
 			strings.ReplaceAll(scriptTemplate, "%q", `"`+tracePath+`"`),
 			"%%", "%",
 		),
 	) + "\n")
-	if err := os.WriteFile(scriptPath, script, 0o755); err != nil {
+
+	file, err := os.OpenFile(tempPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
+	if err != nil {
+		t.Fatalf("open temp %s script: %v", binaryName, err)
+	}
+
+	if _, err := file.Write(script); err != nil {
+		_ = file.Close()
+		t.Fatalf("write temp %s script: %v", binaryName, err)
+	}
+
+	if err := file.Close(); err != nil {
+		t.Fatalf("close temp %s script: %v", binaryName, err)
+	}
+
+	if err := os.Rename(tempPath, scriptPath); err != nil {
 		t.Fatalf("write %s script: %v", binaryName, err)
 	}
 

@@ -242,6 +242,10 @@ components:
         postmasterStartAt:
           type: string
           format: date-time
+        databaseSizeBytes:
+          type: integer
+          format: int64
+          minimum: 0
         replicationLagBytes:
           type: integer
           format: int64
