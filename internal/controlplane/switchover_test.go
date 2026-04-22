@@ -622,8 +622,8 @@ func TestMemoryStateStoreExecuteSwitchoverPromotesTargetAndRecordsHistory(t *tes
 		t.Fatal("expected former primary node status after switchover")
 	}
 
-	if primary.Role != cluster.MemberRoleReplica || primary.State != cluster.MemberStateStopping || primary.NeedsRejoin {
-		t.Fatalf("expected former primary to be demoted without needs_rejoin, got %+v", primary)
+	if primary.Role != cluster.MemberRoleReplica || primary.State != cluster.MemberStateStopping || !primary.NeedsRejoin {
+		t.Fatalf("expected former primary to be demoted with needs_rejoin=true, got %+v", primary)
 	}
 
 	if primary.Postgres.Up || primary.Postgres.Role != cluster.MemberRoleReplica {

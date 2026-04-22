@@ -56,14 +56,16 @@ type SecurityConfig struct {
 	MemberMTLSEnabled    bool   `yaml:"memberMTLSEnabled,omitempty" json:"memberMTLSEnabled,omitempty"`
 }
 
-// PostgresLocalConfig captures node-local PostgreSQL process settings that are
-// safe for pacmand to source from local config.
+// PostgresLocalConfig captures node-local PostgreSQL process settings and
+// rejoin credentials that pacmand sources only from local node config.
 type PostgresLocalConfig struct {
-	DataDir       string            `yaml:"dataDir,omitempty" json:"dataDir,omitempty"`
-	BinDir        string            `yaml:"binDir,omitempty" json:"binDir,omitempty"`
-	ListenAddress string            `yaml:"listenAddress,omitempty" json:"listenAddress,omitempty"`
-	Port          int               `yaml:"port,omitempty" json:"port,omitempty"`
-	Parameters    map[string]string `yaml:"parameters,omitempty" json:"parameters,omitempty"`
+	DataDir             string            `yaml:"dataDir,omitempty" json:"dataDir,omitempty"`
+	BinDir              string            `yaml:"binDir,omitempty" json:"binDir,omitempty"`
+	ListenAddress       string            `yaml:"listenAddress,omitempty" json:"listenAddress,omitempty"`
+	Port                int               `yaml:"port,omitempty" json:"port,omitempty"`
+	Parameters          map[string]string `yaml:"parameters,omitempty" json:"parameters,omitempty"`
+	ReplicationUser     string            `yaml:"replicationUser,omitempty" json:"replicationUser,omitempty"`
+	ReplicationPassword string            `yaml:"replicationPassword,omitempty" json:"replicationPassword,omitempty"`
 }
 
 // ClusterBootstrapConfig captures the initial cluster formation intent before a

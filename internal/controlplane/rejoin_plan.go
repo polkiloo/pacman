@@ -146,13 +146,14 @@ func buildRejoinDivergenceAssessment(inputs rejoinInputs) RejoinDivergenceAssess
 
 	assessment.Compared = true
 	switch {
-	case inputs.member.Timeline < inputs.currentPrimary.Timeline:
-		assessment.Diverged = true
-		assessment.RequiresRewind = true
 	case inputs.member.Timeline > inputs.currentPrimary.Timeline:
 		assessment.Diverged = true
 		assessment.RequiresReclone = true
 		assessment.Reasons = append(assessment.Reasons, reasonTimelineAheadOfCurrentPrimary)
+	case inputs.member.Timeline < inputs.currentPrimary.Timeline &&
+		inputs.member.State == cluster.MemberStateNeedsRejoin:
+		assessment.Diverged = true
+		assessment.RequiresRewind = true
 	}
 
 	return assessment.Clone()

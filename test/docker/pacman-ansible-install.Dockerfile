@@ -35,6 +35,7 @@ RUN set -eux; \
         findutils \
         hostname \
         iproute \
+        iputils \
         procps-ng \
         python3 \
         shadow-utils \

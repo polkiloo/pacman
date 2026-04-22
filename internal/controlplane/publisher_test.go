@@ -862,6 +862,64 @@ func TestMemoryStateStoreMemberMarksNeedsRejoinUnhealthy(t *testing.T) {
 	}
 }
 
+func TestMemoryStateStorePublishNodeStatusPreservesFormerPrimaryDetailsDuringRejoin(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.April, 19, 15, 0, 0, 0, time.UTC)
+	store := seededFailoverStore(t, cluster.ClusterSpec{
+		ClusterName: "alpha",
+		Members: []cluster.MemberSpec{
+			{Name: "alpha-1"},
+			{Name: "alpha-2"},
+		},
+	}, []agentmodel.NodeStatus{
+		rejoinFormerPrimaryStatus("alpha-1", now.Add(-time.Second), 10, "sys-alpha"),
+		rejoinPrimaryStatus("alpha-2", now, 11, "sys-alpha"),
+	})
+
+	if _, err := store.PublishNodeStatus(context.Background(), agentmodel.NodeStatus{
+		NodeName:   "alpha-1",
+		MemberName: "alpha-1",
+		Role:       cluster.MemberRoleUnknown,
+		State:      cluster.MemberStateFailed,
+		Postgres: agentmodel.PostgresStatus{
+			Managed:   true,
+			Up:        false,
+			Role:      cluster.MemberRoleUnknown,
+			CheckedAt: now.Add(time.Second),
+		},
+		ObservedAt: now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("publish offline former primary status: %v", err)
+	}
+
+	status, ok := store.NodeStatus("alpha-1")
+	if !ok {
+		t.Fatal("expected stored former primary node status")
+	}
+
+	if !status.NeedsRejoin {
+		t.Fatalf("expected former primary to remain marked for rejoin, got %+v", status)
+	}
+
+	if status.Role != cluster.MemberRoleReplica {
+		t.Fatalf("expected replica role to be preserved while offline, got %+v", status)
+	}
+
+	if status.Postgres.Details.SystemIdentifier != "sys-alpha" || status.Postgres.Details.Timeline != 10 {
+		t.Fatalf("expected last known postgres identity to be preserved, got %+v", status.Postgres.Details)
+	}
+
+	decision, err := store.DecideRejoinStrategy("alpha-1")
+	if err != nil {
+		t.Fatalf("decide rejoin strategy after offline heartbeat: %v", err)
+	}
+
+	if !decision.Decided || decision.Strategy != cluster.RejoinStrategyRewind || decision.DirectRejoinPossible {
+		t.Fatalf("expected rewind strategy for former primary behind current timeline, got %+v", decision)
+	}
+}
+
 func TestMemoryStateStoreStoresDesiredStateAndSourceOfTruth(t *testing.T) {
 	t.Parallel()
 

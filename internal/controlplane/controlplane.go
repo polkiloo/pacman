@@ -27,10 +27,10 @@ const (
 // a compatibility alias for the existing unit and integration test surface.
 type ControlPlane = MemoryStateStore
 
-// NewControlPlane constructs the HA orchestration layer over the supplied DCS.
-func NewControlPlane(store dcs.DCS, clusterName string, logger *slog.Logger) *ControlPlane {
+// OpenControlPlane constructs the HA orchestration layer over the supplied DCS.
+func OpenControlPlane(ctx context.Context, store dcs.DCS, clusterName string, logger *slog.Logger) (*ControlPlane, error) {
 	if store == nil {
-		panic("controlplane dcs backend is required")
+		return nil, errors.New("controlplane dcs backend is required")
 	}
 
 	resolvedClusterName := strings.TrimSpace(clusterName)
@@ -40,11 +40,11 @@ func NewControlPlane(store dcs.DCS, clusterName string, logger *slog.Logger) *Co
 
 	space, err := dcs.NewKeySpace(resolvedClusterName)
 	if err != nil {
-		panic(fmt.Sprintf("construct controlplane keyspace: %v", err))
+		return nil, fmt.Errorf("construct controlplane keyspace: %w", err)
 	}
 
-	if err := store.Initialize(context.Background()); err != nil {
-		panic(fmt.Sprintf("initialize controlplane dcs: %v", err))
+	if err := store.Initialize(ctx); err != nil {
+		return nil, fmt.Errorf("initialize controlplane dcs: %w", err)
 	}
 
 	if logger == nil {
@@ -70,6 +70,16 @@ func NewControlPlane(store dcs.DCS, clusterName string, logger *slog.Logger) *Co
 	}
 
 	controlPlane.startCacheWatch()
+	return controlPlane, nil
+}
+
+// NewControlPlane constructs the HA orchestration layer over the supplied DCS.
+func NewControlPlane(store dcs.DCS, clusterName string, logger *slog.Logger) *ControlPlane {
+	controlPlane, err := OpenControlPlane(context.Background(), store, clusterName, logger)
+	if err != nil {
+		panic(err.Error())
+	}
+
 	return controlPlane
 }
 

@@ -190,8 +190,8 @@ ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload`)
 		t.Fatal("expected former primary state after switchover")
 	}
 
-	if formerPrimary.Role != cluster.MemberRoleReplica || formerPrimary.State != cluster.MemberStateStopping || formerPrimary.NeedsRejoin {
-		t.Fatalf("expected former primary to be demoted without rejoin flag, got %+v", formerPrimary)
+	if formerPrimary.Role != cluster.MemberRoleReplica || formerPrimary.State != cluster.MemberStateStopping || !formerPrimary.NeedsRejoin {
+		t.Fatalf("expected former primary to be demoted with needs_rejoin=true for reconnect, got %+v", formerPrimary)
 	}
 
 	history := store.History()

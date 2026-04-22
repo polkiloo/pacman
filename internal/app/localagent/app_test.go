@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -110,5 +112,70 @@ func TestRunWrapsDaemonStartError(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "start local agent daemon") {
 		t.Fatalf("expected error to contain start wrap prefix, got %q", err)
+	}
+}
+
+func TestLocalPostgresOptionsReturnNilWithoutPostgresConfig(t *testing.T) {
+	t.Parallel()
+
+	if opts := localPostgresOptions(config.Config{}); len(opts) != 0 {
+		t.Fatalf("expected no local postgres options without postgres config, got %d", len(opts))
+	}
+}
+
+func TestLocalPostgresOptionsConfigurePgCtlAndAdminToken(t *testing.T) {
+	t.Parallel()
+
+	opts := localPostgresOptions(config.Config{
+		Postgres: &config.PostgresLocalConfig{
+			BinDir:  "/usr/pgsql-17/bin",
+			DataDir: "/var/lib/pgsql/17/data",
+		},
+		Security: &config.SecurityConfig{
+			AdminBearerToken: " secret-token ",
+		},
+	})
+	if len(opts) != 2 {
+		t.Fatalf("expected pg_ctl and admin token options, got %d", len(opts))
+	}
+
+	daemon := &agent.Daemon{}
+	for _, option := range opts {
+		option(daemon)
+	}
+
+	fields := reflect.ValueOf(daemon).Elem()
+	pgCtl := fields.FieldByName("pgCtl")
+	if pgCtl.IsNil() {
+		t.Fatal("expected local postgres options to configure pg_ctl")
+	}
+
+	if got := pgCtl.Elem().FieldByName("BinDir").String(); got != "/usr/pgsql-17/bin" {
+		t.Fatalf("pg_ctl bin dir: got %q, want %q", got, "/usr/pgsql-17/bin")
+	}
+
+	if got := pgCtl.Elem().FieldByName("DataDir").String(); got != "/var/lib/pgsql/17/data" {
+		t.Fatalf("pg_ctl data dir: got %q, want %q", got, "/var/lib/pgsql/17/data")
+	}
+
+	if got := fields.FieldByName("adminToken").String(); got != "secret-token" {
+		t.Fatalf("admin token: got %q, want %q", got, "secret-token")
+	}
+}
+
+func TestLocalPostgresOptionsSkipUnreadableAdminTokenFile(t *testing.T) {
+	t.Parallel()
+
+	opts := localPostgresOptions(config.Config{
+		Postgres: &config.PostgresLocalConfig{
+			BinDir:  "/usr/pgsql-17/bin",
+			DataDir: "/var/lib/pgsql/17/data",
+		},
+		Security: &config.SecurityConfig{
+			AdminBearerTokenFile: filepath.Join(t.TempDir(), "missing-token"),
+		},
+	})
+	if len(opts) != 1 {
+		t.Fatalf("expected unreadable token file to leave only pg_ctl option, got %d", len(opts))
 	}
 }

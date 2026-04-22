@@ -35,6 +35,8 @@ postgres:
   binDir: /usr/lib/postgresql/17/bin
   listenAddress: 127.0.0.1
   port: 5432
+  replicationUser: replicator
+  replicationPassword: secret
   parameters:
     max_connections: "100"
 bootstrap:
@@ -70,10 +72,12 @@ bootstrap:
 			AdminBearerTokenFile: "/run/secrets/pacman-admin-token",
 		},
 		Postgres: &PostgresLocalConfig{
-			DataDir:       "/var/lib/postgresql/data",
-			BinDir:        "/usr/lib/postgresql/17/bin",
-			ListenAddress: "127.0.0.1",
-			Port:          5432,
+			DataDir:             "/var/lib/postgresql/data",
+			BinDir:              "/usr/lib/postgresql/17/bin",
+			ListenAddress:       "127.0.0.1",
+			Port:                5432,
+			ReplicationUser:     "replicator",
+			ReplicationPassword: "secret",
 			Parameters: map[string]string{
 				"max_connections": "100",
 			},

@@ -15,6 +15,7 @@ type preparedRejoinExecution struct {
 	decision           RejoinStrategyDecision
 	memberNode         agentmodel.NodeStatus
 	currentPrimaryNode agentmodel.NodeStatus
+	rewindSourceServer string
 	operation          cluster.Operation
 	currentEpoch       cluster.Epoch
 	standby            postgres.StandbyConfig
@@ -82,7 +83,112 @@ func (store *MemoryStateStore) prepareRejoinRewindExecution(request RejoinReques
 		return preparedRejoinExecution{}, err
 	}
 
+	primaryAddress := store.primaryPostgresAddressLocked(decision.CurrentPrimary.Name, inputs.currentPrimaryNode.Postgres.Address)
+	rewindSourceServer, err := rejoinPrimaryConnInfo(primaryAddress, "")
+	if err != nil {
+		return preparedRejoinExecution{}, err
+	}
+
 	operation, err := buildRejoinOperation(normalized, decision, executedAt)
+	if err != nil {
+		return preparedRejoinExecution{}, err
+	}
+
+	store.journalOperationLocked(operation, executedAt)
+	store.refreshSourceOfTruthLocked(executedAt)
+
+	return preparedRejoinExecution{
+		request:            normalized,
+		decision:           decision.Clone(),
+		memberNode:         inputs.memberNode.Clone(),
+		currentPrimaryNode: inputs.currentPrimaryNode.Clone(),
+		rewindSourceServer: rewindSourceServer,
+		operation:          operation.Clone(),
+		currentEpoch:       inputs.currentEpoch,
+		executedAt:         executedAt,
+	}, nil
+}
+
+func validateRejoinRewindDecision(decision RejoinStrategyDecision) error {
+	switch {
+	case decision.Strategy == cluster.RejoinStrategyReclone:
+		return ErrRejoinRecloneRequired
+	case !decision.Decided && !decision.DirectRejoinPossible && len(decision.Reasons) > 0:
+		return ErrRejoinStrategyUndetermined
+	default:
+		return nil
+	}
+}
+
+// validateRejoinContinuationDecision accepts both direct rejoin and post-rewind
+// paths for the standby config and restart continuation phases.
+func validateRejoinContinuationDecision(decision RejoinStrategyDecision) error {
+	if decision.DirectRejoinPossible {
+		return nil
+	}
+	if !decision.Decided {
+		return ErrRejoinStrategyUndetermined
+	}
+	if decision.Strategy != cluster.RejoinStrategyRewind {
+		return ErrRejoinRecloneRequired
+	}
+	return nil
+}
+
+// ExecuteRejoinDirect creates a rejoin operation for a former primary that does
+// not require pg_rewind (same timeline, no divergence) and transitions it into
+// the standby configuration phase.
+func (store *MemoryStateStore) ExecuteRejoinDirect(ctx context.Context, request RejoinRequest) (RejoinExecution, error) {
+	if err := ctx.Err(); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.ensureCacheFresh(ctx); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	prepared, err := store.prepareRejoinDirectExecution(request)
+	if err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.persistActiveOperation(ctx, prepared.operation); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.refreshCache(ctx); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	return store.publishRejoinDirect(prepared)
+}
+
+func (store *MemoryStateStore) prepareRejoinDirectExecution(request RejoinRequest) (preparedRejoinExecution, error) {
+	normalized := normalizeDirectRejoinRequest(request)
+	if normalized.Member == "" {
+		return preparedRejoinExecution{}, ErrRejoinTargetRequired
+	}
+
+	executedAt := store.now().UTC()
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	if store.activeOperation != nil {
+		return preparedRejoinExecution{}, ErrRejoinOperationInProgress
+	}
+
+	inputs, err := store.rejoinInputsLocked(normalized.Member)
+	if err != nil {
+		return preparedRejoinExecution{}, err
+	}
+
+	decision := buildRejoinStrategyDecision(buildRejoinDivergenceAssessment(inputs))
+	if !decision.DirectRejoinPossible {
+		return preparedRejoinExecution{}, ErrRejoinStrategyUndetermined
+	}
+
+	operation, err := buildRejoinDirectOperation(normalized, decision, executedAt)
 	if err != nil {
 		return preparedRejoinExecution{}, err
 	}
@@ -101,17 +207,82 @@ func (store *MemoryStateStore) prepareRejoinRewindExecution(request RejoinReques
 	}, nil
 }
 
-func validateRejoinRewindDecision(decision RejoinStrategyDecision) error {
-	switch {
-	case decision.DirectRejoinPossible:
-		return ErrRejoinRewindNotRequired
-	case !decision.Decided:
-		return ErrRejoinStrategyUndetermined
-	case decision.Strategy != cluster.RejoinStrategyRewind:
-		return ErrRejoinRecloneRequired
-	default:
-		return nil
+func (store *MemoryStateStore) publishRejoinDirect(prepared preparedRejoinExecution) (RejoinExecution, error) {
+	store.mu.Lock()
+	updatedOperation := prepared.operation.Clone()
+	updatedOperation.Message = rejoinDirectReadyMessage(prepared.decision.Member.Name, prepared.decision.CurrentPrimary.Name)
+	store.activeOperation = &updatedOperation
+	store.nodeStatuses[prepared.decision.Member.Name] = rewoundFormerPrimaryStatus(prepared.memberNode, prepared.executedAt)
+	store.refreshSourceOfTruthLocked(prepared.executedAt)
+	member := store.nodeStatuses[prepared.decision.Member.Name].Clone()
+	store.mu.Unlock()
+
+	if err := store.persistActiveOperation(context.Background(), updatedOperation); err != nil {
+		return RejoinExecution{}, err
 	}
+
+	if err := store.persistNodeStatus(context.Background(), member); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	if err := store.refreshCache(context.Background()); err != nil {
+		return RejoinExecution{}, err
+	}
+
+	return RejoinExecution{
+		Operation:    updatedOperation.Clone(),
+		Decision:     prepared.decision.Clone(),
+		CurrentEpoch: prepared.currentEpoch,
+		State:        cluster.RejoinStateConfiguringStandby,
+		ExecutedAt:   prepared.executedAt,
+	}.Clone(), nil
+}
+
+func buildRejoinDirectOperation(request RejoinRequest, decision RejoinStrategyDecision, executedAt time.Time) (cluster.Operation, error) {
+	operation := cluster.Operation{
+		ID:          rejoinOperationID(executedAt),
+		Kind:        cluster.OperationKindRejoin,
+		State:       cluster.OperationStateRunning,
+		RequestedBy: request.RequestedBy,
+		RequestedAt: executedAt,
+		Reason:      request.Reason,
+		FromMember:  decision.Member.Name,
+		ToMember:    decision.CurrentPrimary.Name,
+		StartedAt:   executedAt,
+		Result:      cluster.OperationResultPending,
+		Message:     rejoinDirectRunningMessage(decision.Member.Name, decision.CurrentPrimary.Name),
+	}
+
+	if err := operation.Validate(); err != nil {
+		return cluster.Operation{}, err
+	}
+
+	return operation, nil
+}
+
+func normalizeDirectRejoinRequest(request RejoinRequest) RejoinRequest {
+	normalized := request
+	normalized.Member = strings.TrimSpace(normalized.Member)
+	normalized.RequestedBy = strings.TrimSpace(normalized.RequestedBy)
+	normalized.Reason = strings.TrimSpace(normalized.Reason)
+
+	if normalized.RequestedBy == "" {
+		normalized.RequestedBy = "controlplane"
+	}
+
+	if normalized.Reason == "" {
+		normalized.Reason = "direct rejoin of former primary without pg_rewind"
+	}
+
+	return normalized
+}
+
+func rejoinDirectRunningMessage(member, currentPrimary string) string {
+	return "preparing direct rejoin for " + member + " to follow " + currentPrimary
+}
+
+func rejoinDirectReadyMessage(member, currentPrimary string) string {
+	return "direct rejoin ready for " + member + " to follow " + currentPrimary + "; standby configuration is pending"
 }
 
 func buildRejoinOperation(request RejoinRequest, decision RejoinStrategyDecision, executedAt time.Time) (cluster.Operation, error) {
@@ -143,6 +314,7 @@ func buildRewindRequest(prepared preparedRejoinExecution) RewindRequest {
 		MemberNode:         prepared.memberNode.Clone(),
 		CurrentPrimaryNode: prepared.currentPrimaryNode.Clone(),
 		CurrentEpoch:       prepared.currentEpoch,
+		SourceServer:       prepared.rewindSourceServer,
 	}
 }
 

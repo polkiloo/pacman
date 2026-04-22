@@ -1,0 +1,127 @@
+---
+- name: Skip vip-manager installation when disabled
+  ansible.builtin.meta: end_host
+  when: not (vip_manager_enabled | bool)
+
+- name: Validate vip-manager network inputs
+  ansible.builtin.assert:
+    that:
+      - vip_manager_ip | length > 0
+      - vip_manager_interface | length > 0
+      - vip_manager_trigger_path | length > 0
+      - vip_manager_dcs_endpoints | length > 0
+    fail_msg: "vip-manager is enabled but one or more required settings are missing"
+
+- name: Resolve vip-manager release architecture
+  ansible.builtin.set_fact:
+    vip_manager_release_arch: "{{ vip_manager_release_arch_overrides.get(ansible_architecture | lower, ansible_architecture | lower) }}"
+
+- name: Resolve vip-manager download URL
+  ansible.builtin.set_fact:
+    vip_manager_download_url: >-
+      {{
+        vip_manager_package_url
+        if (vip_manager_package_url | length > 0)
+        else
+        ('https://github.com/cybertec-postgresql/vip-manager/releases/download/v'
+          ~ vip_manager_version
+          ~ '/vip-manager_'
+          ~ vip_manager_version
+          ~ '_Linux_'
+          ~ vip_manager_release_arch
+          ~ '.tar.gz')
+      }}
+
+- name: Download vip-manager release archive
+  ansible.builtin.get_url:
+    url: "{{ vip_manager_download_url }}"
+    dest: "{{ vip_manager_download_path }}"
+    mode: "0644"
+
+- name: Remove previous vip-manager extraction contents
+  ansible.builtin.file:
+    path: "{{ vip_manager_extract_dir }}"
+    state: absent
+
+- name: Recreate vip-manager extract directory
+  ansible.builtin.file:
+    path: "{{ vip_manager_extract_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure vip-manager binary directory exists
+  ansible.builtin.file:
+    path: "{{ vip_manager_binary_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Extract vip-manager release archive
+  ansible.builtin.unarchive:
+    src: "{{ vip_manager_download_path }}"
+    dest: "{{ vip_manager_extract_dir }}"
+    remote_src: true
+
+- name: Locate extracted vip-manager binary
+  ansible.builtin.find:
+    paths: "{{ vip_manager_extract_dir }}"
+    patterns: vip-manager
+    file_type: file
+    recurse: true
+  register: vip_manager_extracted_files
+
+- name: Validate extracted vip-manager binary presence
+  ansible.builtin.assert:
+    that:
+      - vip_manager_extracted_files.files | length > 0
+    fail_msg: "vip-manager archive did not contain an executable named vip-manager"
+
+- name: Install vip-manager binary
+  ansible.builtin.copy:
+    src: "{{ vip_manager_extracted_files.files[0].path }}"
+    dest: "{{ vip_manager_binary_path }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  notify:
+    - Restart vip-manager
+
+- name: Ensure vip-manager config directory exists
+  ansible.builtin.file:
+    path: "{{ vip_manager_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install vip-manager config
+  ansible.builtin.template:
+    src: vip-manager.yml.j2
+    dest: "{{ vip_manager_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Restart vip-manager
+
+- name: Install vip-manager systemd unit
+  ansible.builtin.template:
+    src: vip-manager.service.j2
+    dest: "/etc/systemd/system/{{ vip_manager_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Restart vip-manager
+
+- name: Ensure vip-manager service is enabled and started
+  when: vip_manager_manage_service | bool
+  ansible.builtin.systemd:
+    name: "{{ vip_manager_service_name }}"
+    daemon_reload: true
+    enabled: true
+    state: started

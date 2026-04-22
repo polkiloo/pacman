@@ -823,6 +823,99 @@ func TestDaemonPublishesNodeStatusToControlPlane(t *testing.T) {
 	daemon.Wait()
 }
 
+func TestDaemonUsesControlPlaneStateStoreForHTTPAPI(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.April, 19, 14, 30, 0, 0, time.UTC)
+	store := staticControlPlaneStore{
+		clusterStatus: cluster.ClusterStatus{
+			ClusterName:    "alpha",
+			Phase:          cluster.ClusterPhaseHealthy,
+			CurrentPrimary: "alpha-1",
+			ObservedAt:     now,
+			Members: []cluster.MemberStatus{
+				{
+					Name:       "alpha-1",
+					APIURL:     "http://10.0.0.10:8080",
+					Host:       "10.0.0.10",
+					Port:       8080,
+					Role:       cluster.MemberRolePrimary,
+					State:      cluster.MemberStateRunning,
+					Healthy:    true,
+					Leader:     true,
+					Timeline:   1,
+					LastSeenAt: now,
+				},
+				{
+					Name:       "alpha-2",
+					APIURL:     "http://10.0.0.20:8080",
+					Host:       "10.0.0.20",
+					Port:       8080,
+					Role:       cluster.MemberRoleReplica,
+					State:      cluster.MemberStateStreaming,
+					Healthy:    true,
+					Timeline:   1,
+					LastSeenAt: now,
+				},
+			},
+		},
+	}
+
+	cfg := config.Config{
+		APIVersion: config.APIVersionV1Alpha1,
+		Kind:       config.KindNodeConfig,
+		Node: config.NodeConfig{
+			Name:           "alpha-api",
+			Role:           cluster.NodeRoleWitness,
+			APIAddress:     reserveLoopbackAddress(),
+			ControlAddress: reserveLoopbackAddress(),
+		},
+	}
+
+	daemon, err := NewDaemon(
+		cfg,
+		logging.New("pacmand", &bytes.Buffer{}),
+		WithControlPlaneStateStore(store),
+		withHeartbeatInterval(time.Hour),
+	)
+	if err != nil {
+		t.Fatalf("new daemon: %v", err)
+	}
+
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	if err := daemon.Start(ctx); err != nil {
+		t.Fatalf("start daemon: %v", err)
+	}
+	defer func() {
+		cancel()
+		daemon.Wait()
+	}()
+
+	waitForHTTPServer(t, client, "http://"+cfg.Node.APIAddress+"/health")
+
+	response := mustGET(t, client, "http://"+cfg.Node.APIAddress+"/api/v1/members", "")
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected members status: got %d want %d", response.StatusCode, http.StatusOK)
+	}
+
+	var payload struct {
+		Items []struct {
+			Name string `json:"name"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode members response: %v", err)
+	}
+
+	if len(payload.Items) != 2 || payload.Items[0].Name != "alpha-1" || payload.Items[1].Name != "alpha-2" {
+		t.Fatalf("unexpected members payload: %+v", payload.Items)
+	}
+}
+
 func TestDaemonRecordsControlPlanePublishFailure(t *testing.T) {
 	t.Parallel()
 
@@ -1442,4 +1535,52 @@ type failingPublisher struct {
 
 func (publisher failingPublisher) PublishNodeStatus(context.Context, agentmodel.NodeStatus) (agentmodel.ControlPlaneStatus, error) {
 	return agentmodel.ControlPlaneStatus{ClusterReachable: false}, publisher.err
+}
+
+type staticControlPlaneStore struct {
+	clusterStatus cluster.ClusterStatus
+}
+
+func (store staticControlPlaneStore) PublishNodeStatus(context.Context, agentmodel.NodeStatus) (agentmodel.ControlPlaneStatus, error) {
+	return agentmodel.ControlPlaneStatus{ClusterReachable: true}, nil
+}
+
+func (store staticControlPlaneStore) NodeStatus(string) (agentmodel.NodeStatus, bool) {
+	return agentmodel.NodeStatus{}, false
+}
+
+func (store staticControlPlaneStore) NodeStatuses() []agentmodel.NodeStatus {
+	return nil
+}
+
+func (store staticControlPlaneStore) ClusterSpec() (cluster.ClusterSpec, bool) {
+	return cluster.ClusterSpec{}, false
+}
+
+func (store staticControlPlaneStore) ClusterStatus() (cluster.ClusterStatus, bool) {
+	return store.clusterStatus.Clone(), true
+}
+
+func (store staticControlPlaneStore) MaintenanceStatus() cluster.MaintenanceModeStatus {
+	return cluster.MaintenanceModeStatus{}
+}
+
+func (store staticControlPlaneStore) UpdateMaintenanceMode(context.Context, cluster.MaintenanceModeUpdateRequest) (cluster.MaintenanceModeStatus, error) {
+	return cluster.MaintenanceModeStatus{}, errors.New("unsupported")
+}
+
+func (store staticControlPlaneStore) History() []cluster.HistoryEntry {
+	return nil
+}
+
+func (store staticControlPlaneStore) CreateSwitchoverIntent(context.Context, controlplane.SwitchoverRequest) (controlplane.SwitchoverIntent, error) {
+	return controlplane.SwitchoverIntent{}, errors.New("unsupported")
+}
+
+func (store staticControlPlaneStore) CancelSwitchover(context.Context) (cluster.Operation, error) {
+	return cluster.Operation{}, errors.New("unsupported")
+}
+
+func (store staticControlPlaneStore) CreateFailoverIntent(context.Context, controlplane.FailoverIntentRequest) (controlplane.FailoverIntent, error) {
+	return controlplane.FailoverIntent{}, errors.New("unsupported")
 }

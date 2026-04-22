@@ -7,6 +7,7 @@ import (
 
 	"github.com/polkiloo/pacman/internal/agent"
 	"github.com/polkiloo/pacman/internal/config"
+	"github.com/polkiloo/pacman/internal/postgres"
 )
 
 // Run constructs the shared PACMAN local-agent runtime, starts it, and blocks
@@ -17,6 +18,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.Config, options ..
 	}
 
 	defaulted := cfg.WithDefaults()
+	options = append(options, localPostgresOptions(defaulted)...)
 
 	daemon, err := agent.NewDaemon(cfg, logger, options...)
 	if err != nil {
@@ -40,4 +42,25 @@ func Run(ctx context.Context, logger *slog.Logger, cfg config.Config, options ..
 	}
 
 	return nil
+}
+
+func localPostgresOptions(cfg config.Config) []agent.Option {
+	if cfg.Postgres == nil {
+		return nil
+	}
+
+	ctl := &postgres.PGCtl{
+		BinDir:  cfg.Postgres.BinDir,
+		DataDir: cfg.Postgres.DataDir,
+	}
+
+	opts := []agent.Option{agent.WithLocalPostgresCtl(ctl)}
+
+	if cfg.Security != nil {
+		if token, err := cfg.Security.ResolveAdminBearerToken(nil); err == nil && token != "" {
+			opts = append(opts, agent.WithAdminToken(token))
+		}
+	}
+
+	return opts
 }

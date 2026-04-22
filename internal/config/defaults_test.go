@@ -65,10 +65,12 @@ func TestConfigWithDefaultsPreservesExplicitValues(t *testing.T) {
 			AdminBearerTokenFile: "/run/secrets/pacman-admin-token",
 		},
 		Postgres: &PostgresLocalConfig{
-			DataDir:       "/var/lib/postgresql/data",
-			BinDir:        "/usr/lib/postgresql/17/bin",
-			ListenAddress: "127.0.0.1",
-			Port:          6432,
+			DataDir:             "/var/lib/postgresql/data",
+			BinDir:              "/usr/lib/postgresql/17/bin",
+			ListenAddress:       "127.0.0.1",
+			Port:                6432,
+			ReplicationUser:     "replicator",
+			ReplicationPassword: "replicator-secret",
 			Parameters: map[string]string{
 				"max_connections": "100",
 			},

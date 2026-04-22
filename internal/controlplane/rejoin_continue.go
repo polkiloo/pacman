@@ -91,7 +91,8 @@ func (store *MemoryStateStore) prepareRejoinStandbyConfig(configurator StandbyCo
 		return preparedRejoinExecution{}, err
 	}
 
-	standby, err := buildRejoinStandbyConfig(store.clusterSpec.Clone(), prepared.decision.Member.Name, prepared.currentPrimaryNode.Postgres.Address)
+	primaryAddr := store.primaryPostgresAddressLocked(prepared.decision.CurrentPrimary.Name, prepared.currentPrimaryNode.Postgres.Address)
+	standby, err := buildRejoinStandbyConfig(store.clusterSpec.Clone(), prepared.decision.Member.Name, primaryAddr)
 	if err != nil {
 		return preparedRejoinExecution{}, err
 	}
@@ -152,7 +153,7 @@ func (store *MemoryStateStore) prepareActiveRejoinContinuationLocked(executedAt 
 	}
 
 	decision := buildRejoinStrategyDecision(buildRejoinDivergenceAssessment(inputs))
-	if err := validateRejoinRewindDecision(decision); err != nil {
+	if err := validateRejoinContinuationDecision(decision); err != nil {
 		return preparedRejoinExecution{}, err
 	}
 
@@ -450,4 +451,27 @@ func rejoinRestartCompletedMessage(member, currentPrimary string) string {
 
 func rejoinRestartFailedMessage(member, currentPrimary string) string {
 	return "restart as standby failed for " + member + " against " + currentPrimary
+}
+
+// primaryPostgresAddressLocked derives the postgres address the rejoining
+// member should use to reach the current primary. It replaces the localhost
+// probe host with the API hostname so the address is reachable across nodes.
+// Must be called with store.mu held.
+func (store *MemoryStateStore) primaryPostgresAddressLocked(primaryName, fallback string) string {
+	reg, ok := store.registrations[primaryName]
+	if !ok {
+		return fallback
+	}
+
+	apiHost, _, err := net.SplitHostPort(reg.APIAddress)
+	if err != nil || strings.TrimSpace(apiHost) == "" {
+		return fallback
+	}
+
+	_, port, err := net.SplitHostPort(fallback)
+	if err != nil || port == "" {
+		return fallback
+	}
+
+	return net.JoinHostPort(apiHost, port)
 }

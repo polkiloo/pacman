@@ -16,6 +16,13 @@ type Option func(*Daemon)
 type postgresAvailabilityProbe func(context.Context, string) error
 type postgresStateProbe func(context.Context, string) (postgres.Observation, error)
 
+// ControlPlaneStore captures the shared read/write control-plane surface used
+// by the daemon heartbeat loop and the HTTP API.
+type ControlPlaneStore interface {
+	controlplane.NodeStatePublisher
+	httpapi.NodeStatusReader
+}
+
 // WithNoAPIServer disables the HTTP API server for the daemon. Use this in
 // tests that verify control-plane state without needing a bound network address.
 func WithNoAPIServer() Option {
@@ -70,6 +77,17 @@ func WithControlPlanePublisher(publisher controlplane.NodeStatePublisher) Option
 	}
 }
 
+// WithControlPlaneStateStore overrides the shared control-plane store used by
+// the daemon for both state publication and HTTP API reads.
+func WithControlPlaneStateStore(store ControlPlaneStore) Option {
+	return func(daemon *Daemon) {
+		if store != nil {
+			daemon.statePublisher = store
+			daemon.stateReader = store
+		}
+	}
+}
+
 func withNow(now func() time.Time) Option {
 	return func(daemon *Daemon) {
 		if now != nil {
@@ -99,5 +117,24 @@ func withPostgresStateProbe(probe postgresStateProbe) Option {
 		if probe != nil {
 			daemon.postgresStateProbe = probe
 		}
+	}
+}
+
+// WithLocalPostgresCtl wires the local pg_ctl for switchover execution.
+// When set, the daemon's primary reconciler can demote the local postgres and
+// the HTTP API /api/v1/promote endpoint can promote it.
+func WithLocalPostgresCtl(ctl *postgres.PGCtl) Option {
+	return func(daemon *Daemon) {
+		if ctl != nil {
+			daemon.pgCtl = ctl
+		}
+	}
+}
+
+// WithAdminToken sets the bearer token used when calling peer promote endpoints
+// during switchover execution. Should match the token configured on peer nodes.
+func WithAdminToken(token string) Option {
+	return func(daemon *Daemon) {
+		daemon.adminToken = token
 	}
 }

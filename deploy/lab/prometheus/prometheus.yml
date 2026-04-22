@@ -1,0 +1,57 @@
+global:
+  scrape_interval: 2s
+  evaluation_interval: 2s
+
+scrape_configs:
+  - job_name: pacman
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - pacman-primary:8080
+        labels:
+          lab_member: alpha-1
+          lab_node: alpha-1
+          lab_role: postgres
+          lab_service: pacman-primary
+      - targets:
+          - pacman-replica:8080
+        labels:
+          lab_member: alpha-2
+          lab_node: alpha-2
+          lab_role: postgres
+          lab_service: pacman-replica
+
+  - job_name: node-exporter
+    static_configs:
+      - targets:
+          - pacman-dcs:9100
+        labels:
+          lab_member: alpha-dcs
+          lab_node: alpha-dcs
+          lab_role: dcs
+          lab_service: pacman-dcs
+      - targets:
+          - pacman-primary:9100
+        labels:
+          lab_member: alpha-1
+          lab_node: alpha-1
+          lab_role: postgres
+          lab_service: pacman-primary
+      - targets:
+          - pacman-replica:9100
+        labels:
+          lab_member: alpha-2
+          lab_node: alpha-2
+          lab_role: postgres
+          lab_service: pacman-replica
+
+  - job_name: etcd
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - pacman-dcs:2379
+        labels:
+          lab_member: alpha-dcs
+          lab_node: alpha-dcs
+          lab_role: dcs
+          lab_service: pacman-dcs

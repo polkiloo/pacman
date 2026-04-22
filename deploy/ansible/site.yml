@@ -16,3 +16,9 @@
   become: true
   roles:
     - role: pacman
+
+- name: Configure vip-manager on PostgreSQL nodes
+  hosts: postgres_nodes
+  become: true
+  roles:
+    - role: vip_manager

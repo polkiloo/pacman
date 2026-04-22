@@ -34,6 +34,14 @@ func (srv *Server) handleSwitchoverCreate(c *fiber.Ctx) error {
 	requestContext := paclog.WithMember(srv.requestContext(c), request.Candidate)
 	c.SetUserContext(requestContext)
 
+	if requestBody.Force {
+		if _, err := srv.store.CancelSwitchover(requestContext); err != nil &&
+			!errors.Is(err, controlplane.ErrScheduledSwitchoverNotFound) &&
+			!errors.Is(err, controlplane.ErrSwitchoverIntentRequired) {
+			return writeSwitchoverCancelError(c, err)
+		}
+	}
+
 	intent, err := srv.store.CreateSwitchoverIntent(requestContext, request)
 	if err != nil {
 		return writeSwitchoverCreateError(c, err)

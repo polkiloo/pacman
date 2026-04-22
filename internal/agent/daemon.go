@@ -36,6 +36,7 @@ type Daemon struct {
 	postgresProbe       postgresAvailabilityProbe
 	postgresStateProbe  postgresStateProbe
 	statePublisher      controlplane.NodeStatePublisher
+	stateReader         httpapi.NodeStatusReader
 	apiServer           httpServer
 	apiTLSConfig        *tls.Config
 	apiAuthorizer       httpapi.Authorizer
@@ -46,6 +47,8 @@ type Daemon struct {
 	peerClientTLSConfig *tls.Config
 	probeTimeout        time.Duration
 	peerProbeTimeout    time.Duration
+	pgCtl               *postgres.PGCtl
+	adminToken          string
 	startedFlag         atomic.Bool
 
 	mu         sync.RWMutex
@@ -89,6 +92,7 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 		postgresProbe:      dialPostgresAvailability,
 		postgresStateProbe: postgres.QueryObservation,
 		statePublisher:     store,
+		stateReader:        store,
 		apiAuthorizer:      apiAuthorizer,
 		probeTimeout:       defaultPostgresProbeTimeout,
 		peerProbeTimeout:   defaultPeerProbeTimeout,
@@ -128,13 +132,19 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 				continue
 			}
 
-			apiMiddlewares = append(apiMiddlewares, factory(store))
+			apiMiddlewares = append(apiMiddlewares, factory(daemon.stateReader))
 		}
 
-		daemon.apiServer = httpapi.New(defaulted.Node.Name, store, logger, httpapi.Config{
-			TLSConfig:   daemon.apiTLSConfig,
-			Authorizer:  daemon.apiAuthorizer,
-			Middlewares: apiMiddlewares,
+		var localPromoter httpapi.LocalPromoter
+		if daemon.pgCtl != nil {
+			localPromoter = &pgCtlLocalPromoter{pgCtl: daemon.pgCtl}
+		}
+
+		daemon.apiServer = httpapi.New(defaulted.Node.Name, daemon.stateReader, logger, httpapi.Config{
+			TLSConfig:     daemon.apiTLSConfig,
+			Authorizer:    daemon.apiAuthorizer,
+			Middlewares:   apiMiddlewares,
+			LocalPromoter: localPromoter,
 		})
 	}
 

@@ -148,6 +148,16 @@
   notify:
     - Restart pacmand
 
+- name: Install pacmand sysconfig environment file
+  ansible.builtin.template:
+    src: pacmand.sysconfig.j2
+    dest: /etc/sysconfig/pacmand
+    owner: root
+    group: "{{ pacmand_service_group }}"
+    mode: "0640"
+  notify:
+    - Restart pacmand
+
 - name: Install pacmand systemd unit
   ansible.builtin.template:
     src: pacmand.service.j2

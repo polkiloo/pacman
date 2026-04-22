@@ -36,10 +36,12 @@ func TestConfigValidate(t *testing.T) {
 					AdminBearerTokenFile: "/run/secrets/pacman-admin-token",
 				},
 				Postgres: &PostgresLocalConfig{
-					DataDir:       "/var/lib/postgresql/data",
-					BinDir:        "/usr/lib/postgresql/17/bin",
-					ListenAddress: "127.0.0.1",
-					Port:          5432,
+					DataDir:             "/var/lib/postgresql/data",
+					BinDir:              "/usr/lib/postgresql/17/bin",
+					ListenAddress:       "127.0.0.1",
+					Port:                5432,
+					ReplicationUser:     "replicator",
+					ReplicationPassword: "replicator-secret",
 					Parameters: map[string]string{
 						"max_connections": "100",
 					},
@@ -51,6 +53,26 @@ func TestConfigValidate(t *testing.T) {
 					ExpectedMembers: []string{"alpha-1", "alpha-2"},
 				},
 			},
+		},
+		{
+			name: "postgres replication password requires user",
+			config: Config{
+				APIVersion: APIVersionV1Alpha1,
+				Kind:       KindNodeConfig,
+				Node: NodeConfig{
+					Name:           "alpha-1",
+					Role:           cluster.NodeRoleData,
+					APIAddress:     "0.0.0.0:8080",
+					ControlAddress: "0.0.0.0:9090",
+				},
+				Postgres: &PostgresLocalConfig{
+					DataDir:             "/var/lib/postgresql/data",
+					ListenAddress:       "127.0.0.1",
+					Port:                5432,
+					ReplicationPassword: "replicator-secret",
+				},
+			},
+			wantErr: ErrPostgresReplicationUserRequired,
 		},
 		{
 			name: "valid config with dcs",

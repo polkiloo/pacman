@@ -26,6 +26,7 @@ var (
 	ErrPostgresListenAddressRequired       = errors.New("config postgres listenAddress is required")
 	ErrPostgresListenAddressInvalid        = errors.New("config postgres listenAddress is invalid")
 	ErrPostgresPortOutOfRange              = errors.New("config postgres port must be between 1 and 65535")
+	ErrPostgresReplicationUserRequired     = errors.New("config postgres replicationUser is required when replicationPassword is set")
 	ErrUnsafeClusterParameterOverride      = errors.New("config postgres parameters contain unsafe local override")
 	ErrBootstrapClusterNameRequired        = errors.New("config bootstrap clusterName is required")
 	ErrBootstrapInitialPrimaryRequired     = errors.New("config bootstrap initialPrimary is required")

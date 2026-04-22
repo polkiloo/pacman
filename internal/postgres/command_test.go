@@ -2,72 +2,76 @@ package postgres
 
 import (
 	"context"
-	"errors"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
-func TestBinaryPathUsesBinDir(t *testing.T) {
+func TestExecuteCommandCapturesOutputAndExitCode(t *testing.T) {
 	t.Parallel()
 
-	got := binaryPath("/usr/lib/postgresql/17/bin", "pg_ctl")
-	if got != "/usr/lib/postgresql/17/bin/pg_ctl" {
-		t.Fatalf("unexpected binary path: got %q", got)
-	}
-}
-
-func TestBinaryPathFallsBackToBinaryName(t *testing.T) {
-	t.Parallel()
-
-	if got := binaryPath("", "pg_ctl"); got != "pg_ctl" {
-		t.Fatalf("unexpected binary path fallback: got %q", got)
-	}
-}
-
-func TestWrapCommandErrorIncludesOutput(t *testing.T) {
-	t.Parallel()
-
-	err := wrapCommandError("start postgres", commandResult{output: "boom"}, errors.New("exit status 1"))
-	if err == nil {
-		t.Fatal("expected wrapped error")
-	}
-
-	message := err.Error()
-	if !strings.Contains(message, "start postgres") || !strings.Contains(message, "boom") {
-		t.Fatalf("unexpected wrapped error: %q", message)
-	}
-}
-
-func TestExecuteCommandReturnsSuccessOutput(t *testing.T) {
-	t.Parallel()
-
-	result, err := executeCommand(context.Background(), "/bin/sh", "-lc", "printf ok")
+	result, err := executeCommand(context.Background(), "sh", "-c", "printf 'ready'")
 	if err != nil {
 		t.Fatalf("execute command: %v", err)
 	}
 
-	if result.output != "ok" {
-		t.Fatalf("unexpected output: got %q", result.output)
+	if result.output != "ready" {
+		t.Fatalf("unexpected command output: got %q, want %q", result.output, "ready")
 	}
 
 	if result.exitCode != 0 {
-		t.Fatalf("unexpected exit code: got %d", result.exitCode)
+		t.Fatalf("unexpected command exit code: got %d, want %d", result.exitCode, 0)
 	}
 }
 
-func TestExecuteCommandReturnsExitCodeOnFailure(t *testing.T) {
+func TestExecuteCommandCapturesFailureExitCodeAndStderr(t *testing.T) {
 	t.Parallel()
 
-	result, err := executeCommand(context.Background(), "/bin/sh", "-lc", "printf boom && exit 7")
+	result, err := executeCommand(context.Background(), "sh", "-c", "printf 'boom' >&2; exit 7")
 	if err == nil {
-		t.Fatal("expected command failure")
-	}
-
-	if result.output != "boom" {
-		t.Fatalf("unexpected output: got %q", result.output)
+		t.Fatal("expected execute command failure")
 	}
 
 	if result.exitCode != 7 {
-		t.Fatalf("unexpected exit code: got %d", result.exitCode)
+		t.Fatalf("unexpected failed command exit code: got %d, want %d", result.exitCode, 7)
+	}
+
+	if !strings.Contains(result.output, "boom") {
+		t.Fatalf("expected failed command output to include stderr, got %q", result.output)
+	}
+}
+
+func TestExecutePassthroughCommandReturnsWithoutWaitingForBackgroundChild(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("shell background process semantics differ on windows")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	startedAt := time.Now()
+	_, err := executePassthroughCommand(ctx, "sh", "-c", "sleep 1 &")
+	if err != nil {
+		t.Fatalf("execute passthrough command: %v", err)
+	}
+
+	if elapsed := time.Since(startedAt); elapsed >= 500*time.Millisecond {
+		t.Fatalf("passthrough command blocked for background child: elapsed=%s", elapsed)
+	}
+}
+
+func TestExecutePassthroughCommandCapturesFailureExitCode(t *testing.T) {
+	t.Parallel()
+
+	result, err := executePassthroughCommand(context.Background(), "sh", "-c", "exit 9")
+	if err == nil {
+		t.Fatal("expected passthrough command failure")
+	}
+
+	if result.exitCode != 9 {
+		t.Fatalf("unexpected passthrough exit code: got %d, want %d", result.exitCode, 9)
 	}
 }

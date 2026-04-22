@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	dockercontainer "github.com/docker/docker/api/types/container"
+	dockernetwork "github.com/docker/docker/api/types/network"
 	"github.com/docker/go-connections/nat"
 	testcontainers "github.com/testcontainers/testcontainers-go"
 	tcexec "github.com/testcontainers/testcontainers-go/exec"
@@ -22,6 +24,8 @@ type ServiceConfig struct {
 	Name         string
 	Image        string
 	Aliases      []string
+	IPv4Address  string
+	CapAdd       []string
 	Env          map[string]string
 	Files        []testcontainers.ContainerFile
 	Entrypoint   []string
@@ -63,6 +67,27 @@ func (e *Environment) StartService(t *testing.T, cfg ServiceConfig) *Service {
 		testcontainers.WithLogConsumerConfig(&testcontainers.LogConsumerConfig{
 			Consumers: []testcontainers.LogConsumer{&testLogConsumer{t: t, name: cfg.Name}},
 		}),
+	}
+
+	if strings.TrimSpace(cfg.IPv4Address) != "" {
+		options = append(options, testcontainers.WithEndpointSettingsModifier(func(settings map[string]*dockernetwork.EndpointSettings) {
+			endpoint := settings[e.network.Name]
+			if endpoint == nil {
+				endpoint = &dockernetwork.EndpointSettings{}
+				settings[e.network.Name] = endpoint
+			}
+			if endpoint.IPAMConfig == nil {
+				endpoint.IPAMConfig = &dockernetwork.EndpointIPAMConfig{}
+			}
+			endpoint.IPAMConfig.IPv4Address = cfg.IPv4Address
+		}))
+	}
+
+	if len(cfg.CapAdd) > 0 {
+		capAdd := append([]string(nil), cfg.CapAdd...)
+		options = append(options, testcontainers.WithHostConfigModifier(func(hostConfig *dockercontainer.HostConfig) {
+			hostConfig.CapAdd = append(hostConfig.CapAdd, capAdd...)
+		}))
 	}
 
 	if len(cfg.ExposedPorts) > 0 {

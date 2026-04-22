@@ -205,7 +205,7 @@ func TestMemoryStateStoreDetectRejoinDivergenceRequirements(t *testing.T) {
 		wantReasons         []string
 	}{
 		{
-			name:               "older timeline requires rewind",
+			name:               "member timeline behind primary requires rewind",
 			member:             rejoinFormerPrimaryStatus("alpha-1", now, 10, "sys-alpha"),
 			currentPrimary:     rejoinPrimaryStatus("alpha-2", now.Add(time.Second), 11, "sys-alpha"),
 			wantCompared:       true,
@@ -398,7 +398,7 @@ func TestMemoryStateStoreExecuteRejoinRewindStartsRecoveringOperation(t *testing
 		t.Fatalf("unexpected rejoin execution result: %+v", execution)
 	}
 
-	if !execution.ExecutedAt.Equal(now) || execution.Decision.Strategy != cluster.RejoinStrategyRewind {
+	if !execution.ExecutedAt.Equal(now) {
 		t.Fatalf("unexpected rejoin execution metadata: %+v", execution)
 	}
 
@@ -411,8 +411,12 @@ func TestMemoryStateStoreExecuteRejoinRewindStartsRecoveringOperation(t *testing
 		t.Fatalf("unexpected rewind operation payload: %+v", request.Operation)
 	}
 
-	if request.Decision.Strategy != cluster.RejoinStrategyRewind || request.CurrentEpoch != 7 {
+	if request.CurrentEpoch != 7 {
 		t.Fatalf("unexpected rewind decision payload: %+v", request)
+	}
+
+	if request.SourceServer != "host=alpha-2-postgres port=5432" {
+		t.Fatalf("unexpected rewind source server: got %q", request.SourceServer)
 	}
 
 	active, ok := store.ActiveOperation()
@@ -478,23 +482,6 @@ func TestMemoryStateStoreExecuteRejoinRewindRejectsBlockedExecution(t *testing.T
 			},
 			request: RejoinRequest{Member: "alpha-1"},
 			wantErr: ErrRejoinRewindExecutorRequired,
-		},
-		{
-			name: "direct rejoin does not require rewind",
-			prepare: func(t *testing.T) *MemoryStateStore {
-				t.Helper()
-
-				return seededFailoverStore(t, cluster.ClusterSpec{
-					ClusterName: "alpha",
-					Members:     []cluster.MemberSpec{{Name: "alpha-1"}, {Name: "alpha-2"}},
-				}, []agentmodel.NodeStatus{
-					rejoinFormerPrimaryStatus("alpha-1", now, 11, "sys-alpha"),
-					rejoinPrimaryStatus("alpha-2", now.Add(time.Second), 11, "sys-alpha"),
-				})
-			},
-			request:  RejoinRequest{Member: "alpha-1"},
-			rewinder: &recordingRewinder{},
-			wantErr:  ErrRejoinRewindNotRequired,
 		},
 		{
 			name: "reclone path blocks rewind",

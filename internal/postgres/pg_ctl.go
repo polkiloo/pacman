@@ -35,8 +35,27 @@ type PGCtl struct {
 
 // Start waits for PostgreSQL to report successful startup through pg_ctl.
 func (ctl PGCtl) Start(ctx context.Context) error {
-	result, err := ctl.run(ctx, "start", "-w")
+	result, err := ctl.runStartCommand(ctx, "start", "-w")
 	if err != nil {
+		return wrapCommandError("start postgres via pg_ctl", result, err)
+	}
+
+	return nil
+}
+
+// StartNoWait asks PostgreSQL to start through pg_ctl without blocking for the
+// server to finish recovery. The caller must verify readiness separately.
+// Idempotent: returns nil if the server is already running or starting.
+func (ctl PGCtl) StartNoWait(ctx context.Context) error {
+	if running, _ := ctl.Status(ctx); running {
+		return nil
+	}
+
+	result, err := ctl.runStartCommand(ctx, "start", "-W")
+	if err != nil {
+		if strings.Contains(result.output, "already running") {
+			return nil
+		}
 		return wrapCommandError("start postgres via pg_ctl", result, err)
 	}
 
@@ -116,6 +135,15 @@ func (ctl PGCtl) run(ctx context.Context, action string, extraArgs ...string) (c
 	return ctl.commandRunner()(ctx, binaryPath(ctl.BinDir, "pg_ctl"), args...)
 }
 
+func (ctl PGCtl) runStartCommand(ctx context.Context, action string, extraArgs ...string) (commandResult, error) {
+	args, err := ctl.commandArgs(action, extraArgs...)
+	if err != nil {
+		return commandResult{}, err
+	}
+
+	return ctl.startCommandRunner()(ctx, binaryPath(ctl.BinDir, "pg_ctl"), args...)
+}
+
 func (ctl PGCtl) commandArgs(action string, extraArgs ...string) ([]string, error) {
 	dataDir := strings.TrimSpace(ctl.DataDir)
 	if dataDir == "" {
@@ -132,4 +160,12 @@ func (ctl PGCtl) commandRunner() commandRunner {
 	}
 
 	return runCommand
+}
+
+func (ctl PGCtl) startCommandRunner() commandRunner {
+	if ctl.runner != nil {
+		return ctl.runner
+	}
+
+	return runPassthroughCommand
 }

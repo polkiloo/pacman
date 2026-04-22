@@ -1,0 +1,7 @@
+---
+- name: Restart vip-manager
+  when: vip_manager_manage_service | bool
+  ansible.builtin.systemd:
+    name: "{{ vip_manager_service_name }}"
+    daemon_reload: true
+    state: restarted

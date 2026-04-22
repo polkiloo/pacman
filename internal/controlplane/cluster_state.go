@@ -629,6 +629,15 @@ func (store *MemoryStateStore) persistJournaledOperation(ctx context.Context, op
 			return err
 		}
 
+		activeOperation, _, err := store.loadActiveOperation(ctx)
+		if err != nil {
+			return err
+		}
+
+		if activeOperation == nil || activeOperation.ID != operation.ID {
+			return nil
+		}
+
 		return store.deleteKey(ctx, store.keyspace.Operation())
 	}
 
