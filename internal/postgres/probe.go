@@ -32,6 +32,7 @@ type Details struct {
 	SystemIdentifier    string
 	Timeline            int64
 	PostmasterStartAt   time.Time
+	DatabaseSizeBytes   int64
 	ReplicationLagBytes int64
 }
 
@@ -80,6 +81,7 @@ type observationRow struct {
 	receiveLSN          string
 	replayLSN           string
 	replayTimestamp     sql.NullTime
+	databaseSizeBytes   int64
 	replicationLagBytes int64
 }
 
@@ -97,6 +99,7 @@ func queryObservationRow(ctx context.Context, db *sql.DB) (observationRow, error
 		&row.receiveLSN,
 		&row.replayLSN,
 		&row.replayTimestamp,
+		&row.databaseSizeBytes,
 		&row.replicationLagBytes,
 	)
 	return row, err
@@ -112,6 +115,7 @@ func (row observationRow) observation() Observation {
 			SystemIdentifier:    row.systemIdentifier,
 			Timeline:            row.timeline,
 			PostmasterStartAt:   row.postmasterStartAt,
+			DatabaseSizeBytes:   row.databaseSizeBytes,
 			ReplicationLagBytes: row.replicationLagBytes,
 		},
 		WAL: WALProgress{

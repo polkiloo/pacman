@@ -102,6 +102,7 @@ type PostgresDetails struct {
 	SystemIdentifier    string     `json:"systemIdentifier,omitempty"`
 	Timeline            int64      `json:"timeline,omitempty"`
 	PostmasterStartAt   *time.Time `json:"postmasterStartAt,omitempty"`
+	DatabaseSizeBytes   int64      `json:"databaseSizeBytes,omitempty"`
 	ReplicationLagBytes int64      `json:"replicationLagBytes,omitempty"`
 }
 

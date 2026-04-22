@@ -39,6 +39,7 @@ type PostgresDetails struct {
 	SystemIdentifier    string
 	Timeline            int64
 	PostmasterStartAt   time.Time
+	DatabaseSizeBytes   int64
 	ReplicationLagBytes int64
 }
 

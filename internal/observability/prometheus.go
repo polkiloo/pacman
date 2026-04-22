@@ -203,6 +203,12 @@ func NewPrometheusCollector(state StateReader) prometheus.Collector {
 			[]string{"node"},
 			nil,
 		),
+		nodePostgresDatabaseSizeBytes: prometheus.NewDesc(
+			"pacman_node_postgres_database_size_bytes",
+			"Observed size in bytes of the current database for the node-local PostgreSQL instance.",
+			[]string{"node"},
+			nil,
+		),
 		nodePostgresReplicationLagBytes: prometheus.NewDesc(
 			"pacman_node_postgres_replication_lag_bytes",
 			"Observed replication lag in bytes for the node-local PostgreSQL instance.",
@@ -264,6 +270,7 @@ type prometheusCollector struct {
 	nodePostgresCheckedAtSeconds         *prometheus.Desc
 	nodePostgresServerVersion            *prometheus.Desc
 	nodePostgresTimeline                 *prometheus.Desc
+	nodePostgresDatabaseSizeBytes        *prometheus.Desc
 	nodePostgresReplicationLagBytes      *prometheus.Desc
 	nodeControlPlaneLastHeartbeatSeconds *prometheus.Desc
 	nodeControlPlaneLastDCSSeenSeconds   *prometheus.Desc
@@ -296,6 +303,7 @@ func (collector *prometheusCollector) Describe(ch chan<- *prometheus.Desc) {
 		collector.nodePostgresCheckedAtSeconds,
 		collector.nodePostgresServerVersion,
 		collector.nodePostgresTimeline,
+		collector.nodePostgresDatabaseSizeBytes,
 		collector.nodePostgresReplicationLagBytes,
 		collector.nodeControlPlaneLastHeartbeatSeconds,
 		collector.nodeControlPlaneLastDCSSeenSeconds,
@@ -382,6 +390,7 @@ func (collector *prometheusCollector) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.MustNewConstMetric(collector.nodePostgresCheckedAtSeconds, prometheus.GaugeValue, unixSeconds(node.Postgres.CheckedAt), node.NodeName)
 		ch <- prometheus.MustNewConstMetric(collector.nodePostgresServerVersion, prometheus.GaugeValue, float64(node.Postgres.Details.ServerVersion), node.NodeName)
 		ch <- prometheus.MustNewConstMetric(collector.nodePostgresTimeline, prometheus.GaugeValue, float64(node.Postgres.Details.Timeline), node.NodeName)
+		ch <- prometheus.MustNewConstMetric(collector.nodePostgresDatabaseSizeBytes, prometheus.GaugeValue, float64(node.Postgres.Details.DatabaseSizeBytes), node.NodeName)
 		ch <- prometheus.MustNewConstMetric(collector.nodePostgresReplicationLagBytes, prometheus.GaugeValue, float64(node.Postgres.Details.ReplicationLagBytes), node.NodeName)
 		ch <- prometheus.MustNewConstMetric(collector.nodeControlPlaneLastHeartbeatSeconds, prometheus.GaugeValue, unixSeconds(node.ControlPlane.LastHeartbeatAt), node.NodeName)
 		ch <- prometheus.MustNewConstMetric(collector.nodeControlPlaneLastDCSSeenSeconds, prometheus.GaugeValue, unixSeconds(node.ControlPlane.LastDCSSeenAt), node.NodeName)

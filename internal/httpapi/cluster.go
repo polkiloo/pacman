@@ -192,6 +192,7 @@ func buildPostgresDetailsJSON(details agentmodel.PostgresDetails) postgresDetail
 		PendingRestart:      details.PendingRestart,
 		SystemIdentifier:    details.SystemIdentifier,
 		Timeline:            details.Timeline,
+		DatabaseSizeBytes:   details.DatabaseSizeBytes,
 		ReplicationLagBytes: details.ReplicationLagBytes,
 	}
 

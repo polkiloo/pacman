@@ -38,6 +38,7 @@ func TestMetricsEndpointReturnsPrometheusText(t *testing.T) {
 					Details: agentmodel.PostgresDetails{
 						ServerVersion:       170002,
 						Timeline:            3,
+						DatabaseSizeBytes:   1048576,
 						ReplicationLagBytes: 0,
 					},
 				},
@@ -129,6 +130,7 @@ func TestMetricsEndpointReturnsPrometheusText(t *testing.T) {
 		`pacman_cluster_primary{member="alpha-1"} 1`,
 		`pacman_member_info{member="alpha-1",role="primary",state="running"} 1`,
 		`pacman_node_postgres_up{node="alpha-1"} 1`,
+		`pacman_node_postgres_database_size_bytes{node="alpha-1"} 1.048576e+06`,
 		`pacman_controlplane_operation_transitions_total{kind="switchover",state="completed"} 1`,
 	} {
 		if !strings.Contains(text, want) {
