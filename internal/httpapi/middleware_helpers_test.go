@@ -17,6 +17,12 @@ type testLocalPromoter struct {
 	err   error
 }
 
+type httpResponseSnapshot struct {
+	statusCode int
+	headers    http.Header
+	body       []byte
+}
+
 func (promoter *testLocalPromoter) PromoteLocal(context.Context) error {
 	promoter.calls++
 	return promoter.err
@@ -86,7 +92,6 @@ func TestDefaultAuthorizationMessage(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		testCase := testCase
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -103,27 +108,27 @@ func TestWriteAuthorizationErrorMapsResponses(t *testing.T) {
 	t.Run("authorization error", func(t *testing.T) {
 		t.Parallel()
 
-		response, body := exerciseAuthErrorResponse(t, Unauthorized(""))
-		if response.StatusCode != fiber.StatusUnauthorized {
-			t.Fatalf("status: got %d, want %d", response.StatusCode, fiber.StatusUnauthorized)
+		response := exerciseAuthErrorResponse(t, Unauthorized(""))
+		if response.statusCode != fiber.StatusUnauthorized {
+			t.Fatalf("status: got %d, want %d", response.statusCode, fiber.StatusUnauthorized)
 		}
 
-		if got := response.Header.Get(fiber.HeaderWWWAuthenticate); got != "Bearer" {
+		if got := response.headers.Get(fiber.HeaderWWWAuthenticate); got != "Bearer" {
 			t.Fatalf("www-authenticate header: got %q", got)
 		}
 
-		assertErrorBody(t, body, "unauthorized", "request is missing valid API authentication")
+		assertErrorBody(t, response.body, "unauthorized", "request is missing valid API authentication")
 	})
 
 	t.Run("generic error", func(t *testing.T) {
 		t.Parallel()
 
-		response, body := exerciseAuthErrorResponse(t, errors.New("boom"))
-		if response.StatusCode != fiber.StatusInternalServerError {
-			t.Fatalf("status: got %d, want %d", response.StatusCode, fiber.StatusInternalServerError)
+		response := exerciseAuthErrorResponse(t, errors.New("boom"))
+		if response.statusCode != fiber.StatusInternalServerError {
+			t.Fatalf("status: got %d, want %d", response.statusCode, fiber.StatusInternalServerError)
 		}
 
-		assertErrorBody(t, body, "authorization_error", "authorization hook failed")
+		assertErrorBody(t, response.body, "authorization_error", "authorization hook failed")
 	})
 }
 
@@ -133,39 +138,39 @@ func TestHandlePromoteResponses(t *testing.T) {
 	t.Run("unavailable", func(t *testing.T) {
 		t.Parallel()
 
-		response, body, calls := exercisePromote(t, nil)
-		if response.StatusCode != fiber.StatusServiceUnavailable {
-			t.Fatalf("status: got %d, want %d", response.StatusCode, fiber.StatusServiceUnavailable)
+		response, calls := exercisePromote(t, nil)
+		if response.statusCode != fiber.StatusServiceUnavailable {
+			t.Fatalf("status: got %d, want %d", response.statusCode, fiber.StatusServiceUnavailable)
 		}
 
 		if calls != 0 {
 			t.Fatalf("expected promoter not to be called, got %d calls", calls)
 		}
 
-		assertErrorBody(t, body, "promote_unavailable", "local promotion is not configured on this node")
+		assertErrorBody(t, response.body, "promote_unavailable", "local promotion is not configured on this node")
 	})
 
 	t.Run("promoter failure", func(t *testing.T) {
 		t.Parallel()
 
-		response, body, calls := exercisePromote(t, &testLocalPromoter{err: errors.New("promote failed")})
-		if response.StatusCode != fiber.StatusInternalServerError {
-			t.Fatalf("status: got %d, want %d", response.StatusCode, fiber.StatusInternalServerError)
+		response, calls := exercisePromote(t, &testLocalPromoter{err: errors.New("promote failed")})
+		if response.statusCode != fiber.StatusInternalServerError {
+			t.Fatalf("status: got %d, want %d", response.statusCode, fiber.StatusInternalServerError)
 		}
 
 		if calls != 1 {
 			t.Fatalf("expected promoter to be called once, got %d", calls)
 		}
 
-		assertErrorBody(t, body, "promote_failed", "failed to promote local postgres")
+		assertErrorBody(t, response.body, "promote_failed", "failed to promote local postgres")
 	})
 
 	t.Run("success", func(t *testing.T) {
 		t.Parallel()
 
-		response, body, calls := exercisePromote(t, &testLocalPromoter{})
-		if response.StatusCode != fiber.StatusOK {
-			t.Fatalf("status: got %d, want %d", response.StatusCode, fiber.StatusOK)
+		response, calls := exercisePromote(t, &testLocalPromoter{})
+		if response.statusCode != fiber.StatusOK {
+			t.Fatalf("status: got %d, want %d", response.statusCode, fiber.StatusOK)
 		}
 
 		if calls != 1 {
@@ -173,7 +178,7 @@ func TestHandlePromoteResponses(t *testing.T) {
 		}
 
 		var payload map[string]string
-		if err := json.Unmarshal(body, &payload); err != nil {
+		if err := json.Unmarshal(response.body, &payload); err != nil {
 			t.Fatalf("decode success body: %v", err)
 		}
 
@@ -183,7 +188,7 @@ func TestHandlePromoteResponses(t *testing.T) {
 	})
 }
 
-func exerciseAuthErrorResponse(t *testing.T, err error) (*http.Response, []byte) {
+func exerciseAuthErrorResponse(t *testing.T, err error) httpResponseSnapshot {
 	t.Helper()
 
 	app := fiber.New()
@@ -192,11 +197,10 @@ func exerciseAuthErrorResponse(t *testing.T, err error) (*http.Response, []byte)
 		return srv.writeAuthorizationError(c, AccessScopeClusterWrite, err)
 	})
 
-	response, responseBody := performFiberRequest(t, app, fiber.MethodGet, "/")
-	return response, responseBody
+	return performFiberRequest(t, app, fiber.MethodGet, "/")
 }
 
-func exercisePromote(t *testing.T, promoter *testLocalPromoter) (*http.Response, []byte, int) {
+func exercisePromote(t *testing.T, promoter *testLocalPromoter) (httpResponseSnapshot, int) {
 	t.Helper()
 
 	app := fiber.New()
@@ -206,29 +210,34 @@ func exercisePromote(t *testing.T, promoter *testLocalPromoter) (*http.Response,
 	}
 	app.Post("/promote", srv.handlePromote)
 
-	response, body := performFiberRequest(t, app, fiber.MethodPost, "/promote")
+	response := performFiberRequest(t, app, fiber.MethodPost, "/promote")
 	calls := 0
 	if promoter != nil {
 		calls = promoter.calls
 	}
 
-	return response, body, calls
+	return response, calls
 }
 
-func performFiberRequest(t *testing.T, app *fiber.App, method, path string) (*http.Response, []byte) {
+func performFiberRequest(t *testing.T, app *fiber.App, method, path string) httpResponseSnapshot {
 	t.Helper()
 
 	response, err := app.Test(httptest.NewRequest(method, path, nil))
 	if err != nil {
 		t.Fatalf("perform %s %s: %v", method, path, err)
 	}
+	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		t.Fatalf("read %s %s response body: %v", method, path, err)
 	}
 
-	return response, body
+	return httpResponseSnapshot{
+		statusCode: response.StatusCode,
+		headers:    response.Header.Clone(),
+		body:       body,
+	}
 }
 
 func assertErrorBody(t *testing.T, payload []byte, wantCode, wantMessage string) {

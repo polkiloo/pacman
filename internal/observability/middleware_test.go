@@ -3,6 +3,7 @@ package observability
 import (
 	"context"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -14,41 +15,34 @@ import (
 	"github.com/polkiloo/pacman/internal/controlplane"
 )
 
+type httpResponseSnapshot struct {
+	statusCode int
+	headers    http.Header
+	body       []byte
+}
+
 func TestPrometheusExporterMiddlewareServesMetricsOnGetAndHead(t *testing.T) {
 	t.Parallel()
 
 	app := fiber.New()
 	app.Use(fiber.Handler(PrometheusExporterMiddleware(testStateReader{})))
 
-	getResponse, err := app.Test(httptest.NewRequest(fiber.MethodGet, "/metrics", nil))
-	if err != nil {
-		t.Fatalf("perform GET /metrics: %v", err)
+	getResponse := performFiberTestRequest(t, app, fiber.MethodGet, "/metrics")
+	if getResponse.statusCode != fiber.StatusOK {
+		t.Fatalf("GET /metrics status: got %d, want %d", getResponse.statusCode, fiber.StatusOK)
 	}
 
-	if getResponse.StatusCode != fiber.StatusOK {
-		t.Fatalf("GET /metrics status: got %d, want %d", getResponse.StatusCode, fiber.StatusOK)
-	}
-
-	if contentType := getResponse.Header.Get(fiber.HeaderContentType); !strings.HasPrefix(contentType, "text/plain;") {
+	if contentType := getResponse.headers.Get(fiber.HeaderContentType); !strings.HasPrefix(contentType, "text/plain;") {
 		t.Fatalf("GET /metrics content type: got %q", contentType)
 	}
 
-	getBody, err := io.ReadAll(getResponse.Body)
-	if err != nil {
-		t.Fatalf("read GET /metrics body: %v", err)
+	if !strings.Contains(string(getResponse.body), "pacman_cluster_maintenance_mode") {
+		t.Fatalf("expected metrics output, got %q", string(getResponse.body))
 	}
 
-	if !strings.Contains(string(getBody), "pacman_cluster_maintenance_mode") {
-		t.Fatalf("expected metrics output, got %q", string(getBody))
-	}
-
-	headResponse, err := app.Test(httptest.NewRequest(fiber.MethodHead, "/metrics", nil))
-	if err != nil {
-		t.Fatalf("perform HEAD /metrics: %v", err)
-	}
-
-	if headResponse.StatusCode != fiber.StatusOK {
-		t.Fatalf("HEAD /metrics status: got %d, want %d", headResponse.StatusCode, fiber.StatusOK)
+	headResponse := performFiberTestRequest(t, app, fiber.MethodHead, "/metrics")
+	if headResponse.statusCode != fiber.StatusOK {
+		t.Fatalf("HEAD /metrics status: got %d, want %d", headResponse.statusCode, fiber.StatusOK)
 	}
 }
 
@@ -64,40 +58,43 @@ func TestPrometheusExporterMiddlewareDelegatesRequestsItDoesNotHandle(t *testing
 		return c.Status(fiber.StatusAccepted).SendString("delegated health")
 	})
 
-	postResponse, err := app.Test(httptest.NewRequest(fiber.MethodPost, "/metrics", nil))
+	postResponse := performFiberTestRequest(t, app, fiber.MethodPost, "/metrics")
+	if postResponse.statusCode != fiber.StatusCreated {
+		t.Fatalf("POST /metrics status: got %d, want %d", postResponse.statusCode, fiber.StatusCreated)
+	}
+
+	if string(postResponse.body) != "delegated metrics" {
+		t.Fatalf("POST /metrics body: got %q", string(postResponse.body))
+	}
+
+	healthResponse := performFiberTestRequest(t, app, fiber.MethodGet, "/health")
+	if healthResponse.statusCode != fiber.StatusAccepted {
+		t.Fatalf("GET /health status: got %d, want %d", healthResponse.statusCode, fiber.StatusAccepted)
+	}
+
+	if string(healthResponse.body) != "delegated health" {
+		t.Fatalf("GET /health body: got %q", string(healthResponse.body))
+	}
+}
+
+func performFiberTestRequest(t *testing.T, app *fiber.App, method, path string) httpResponseSnapshot {
+	t.Helper()
+
+	response, err := app.Test(httptest.NewRequest(method, path, nil))
 	if err != nil {
-		t.Fatalf("perform POST /metrics: %v", err)
+		t.Fatalf("perform %s %s: %v", method, path, err)
 	}
+	defer response.Body.Close()
 
-	if postResponse.StatusCode != fiber.StatusCreated {
-		t.Fatalf("POST /metrics status: got %d, want %d", postResponse.StatusCode, fiber.StatusCreated)
-	}
-
-	postBody, err := io.ReadAll(postResponse.Body)
+	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		t.Fatalf("read POST /metrics body: %v", err)
+		t.Fatalf("read %s %s body: %v", method, path, err)
 	}
 
-	if string(postBody) != "delegated metrics" {
-		t.Fatalf("POST /metrics body: got %q", string(postBody))
-	}
-
-	healthResponse, err := app.Test(httptest.NewRequest(fiber.MethodGet, "/health", nil))
-	if err != nil {
-		t.Fatalf("perform GET /health: %v", err)
-	}
-
-	if healthResponse.StatusCode != fiber.StatusAccepted {
-		t.Fatalf("GET /health status: got %d, want %d", healthResponse.StatusCode, fiber.StatusAccepted)
-	}
-
-	healthBody, err := io.ReadAll(healthResponse.Body)
-	if err != nil {
-		t.Fatalf("read GET /health body: %v", err)
-	}
-
-	if string(healthBody) != "delegated health" {
-		t.Fatalf("GET /health body: got %q", string(healthBody))
+	return httpResponseSnapshot{
+		statusCode: response.StatusCode,
+		headers:    response.Header.Clone(),
+		body:       body,
 	}
 }
 

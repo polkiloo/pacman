@@ -563,6 +563,14 @@ func mergeControlPlaneManagedNodeFlags(previous, current agentmodel.NodeStatus) 
 	// during switchover/rejoin. Keep the last known identity/timeline so the
 	// control plane can still decide and continue the rejoin workflow.
 	if previous.NeedsRejoin && merged.Postgres.Managed && !merged.Postgres.Up {
+		// Preserve the needs_rejoin state so the divergence assessment can
+		// distinguish a crashed former primary (needs pg_rewind) from a cleanly
+		// demoted one (direct rejoin). The agent always reports failed when
+		// postgres is down, which would otherwise erase this distinction.
+		if previous.State == cluster.MemberStateNeedsRejoin {
+			merged.State = cluster.MemberStateNeedsRejoin
+		}
+
 		if merged.Role == "" || merged.Role == cluster.MemberRoleUnknown {
 			merged.Role = previous.Role
 		}
