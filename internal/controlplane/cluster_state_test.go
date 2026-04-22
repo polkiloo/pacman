@@ -347,6 +347,108 @@ func TestMemoryStateStoreUpdateMaintenanceModeRequiresDesiredState(t *testing.T)
 	}
 }
 
+func TestMemoryStateStoreUpdateMaintenanceModeKeepsActiveFailoverVisible(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStateStore()
+	now := time.Date(2026, time.March, 27, 13, 30, 0, 0, time.UTC)
+	setTestNow(store, func() time.Time { return now })
+
+	if _, err := store.StoreClusterSpec(context.Background(), cluster.ClusterSpec{
+		ClusterName: "alpha",
+		Members: []cluster.MemberSpec{
+			{Name: "alpha-1"},
+			{Name: "alpha-2"},
+		},
+	}); err != nil {
+		t.Fatalf("store cluster spec: %v", err)
+	}
+
+	if _, err := store.PublishNodeStatus(context.Background(), agentmodel.NodeStatus{
+		NodeName: "alpha-1",
+		Role:     cluster.MemberRolePrimary,
+		State:    cluster.MemberStateFailed,
+		Postgres: agentmodel.PostgresStatus{
+			Managed: true,
+		},
+		ObservedAt: now,
+	}); err != nil {
+		t.Fatalf("publish failed primary node status: %v", err)
+	}
+
+	if _, err := store.PublishNodeStatus(context.Background(), agentmodel.NodeStatus{
+		NodeName: "alpha-2",
+		Role:     cluster.MemberRoleReplica,
+		State:    cluster.MemberStateStreaming,
+		Postgres: agentmodel.PostgresStatus{
+			Managed: true,
+			Up:      true,
+			Details: agentmodel.PostgresDetails{
+				Timeline: 4,
+			},
+			WAL: agentmodel.WALProgress{
+				ReplayLSN: "0/4000100",
+			},
+		},
+		ObservedAt: now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("publish standby node status: %v", err)
+	}
+
+	failover, err := store.JournalOperation(context.Background(), cluster.Operation{
+		ID:          "failover-1",
+		Kind:        cluster.OperationKindFailover,
+		State:       cluster.OperationStateAccepted,
+		RequestedBy: "operator",
+		RequestedAt: now.Add(2 * time.Second),
+		FromMember:  "alpha-1",
+		ToMember:    "alpha-2",
+	})
+	if err != nil {
+		t.Fatalf("journal failover operation: %v", err)
+	}
+
+	maintenance, err := store.UpdateMaintenanceMode(context.Background(), cluster.MaintenanceModeUpdateRequest{
+		Enabled:     true,
+		Reason:      "operator freeze",
+		RequestedBy: "operator",
+	})
+	if err != nil {
+		t.Fatalf("update maintenance mode: %v", err)
+	}
+
+	if !maintenance.Enabled || maintenance.Reason != "operator freeze" {
+		t.Fatalf("unexpected maintenance status: %+v", maintenance)
+	}
+
+	active, ok := store.ActiveOperation()
+	if !ok {
+		t.Fatal("expected failover to remain active after maintenance change")
+	}
+
+	if active.ID != failover.ID || active.Kind != cluster.OperationKindFailover {
+		t.Fatalf("unexpected active operation after maintenance change: %+v", active)
+	}
+
+	status, ok := store.ClusterStatus()
+	if !ok {
+		t.Fatal("expected cluster status after maintenance change")
+	}
+
+	if status.Phase != cluster.ClusterPhaseMaintenance {
+		t.Fatalf("expected maintenance phase to override failover phase, got %+v", status)
+	}
+
+	if status.ActiveOperation == nil || status.ActiveOperation.ID != failover.ID || status.ActiveOperation.Kind != cluster.OperationKindFailover {
+		t.Fatalf("expected active failover projection during maintenance, got %+v", status.ActiveOperation)
+	}
+
+	history := store.History()
+	if len(history) != 1 || history[0].Kind != cluster.OperationKindMaintenanceChange {
+		t.Fatalf("expected only maintenance history entry, got %+v", history)
+	}
+}
+
 func TestMemoryStateStoreJournalOperationTracksActiveAndFinishedState(t *testing.T) {
 	t.Parallel()
 
