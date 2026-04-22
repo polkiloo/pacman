@@ -92,6 +92,7 @@ func (a *App) Run(ctx context.Context) error {
 		return a.runtimeConfig.Err
 	}
 
+	a.logConfigWarnings(ctx, a.runtimeConfig.Source, a.runtimeConfig.Path, a.runtimeConfig.Format, a.runtimeConfig.Warnings)
 	a.logLoadedConfig(ctx, a.runtimeConfig.Config, a.runtimeConfig.Source, a.runtimeConfig.Path)
 	a.logRuntimeStart(ctx, a.runtimeConfig.Source)
 
@@ -133,6 +134,29 @@ func (a *App) logLoadedConfig(ctx context.Context, loadedConfig config.Config, s
 	}
 
 	a.logger.LogAttrs(ctx, slog.LevelInfo, "loaded node configuration", attributes...)
+}
+
+func (a *App) logConfigWarnings(ctx context.Context, source, path string, format config.DocumentFormat, warnings []string) {
+	if a.logger == nil || len(warnings) == 0 {
+		return
+	}
+
+	for _, warning := range warnings {
+		attributes := []slog.Attr{
+			slog.String("component", "config"),
+			slog.String("source", source),
+			slog.String("warning", warning),
+		}
+		if format != "" {
+			attributes = append(attributes, slog.String("document_format", string(format)))
+		}
+		if path != "" {
+			attributes = append(attributes, slog.String("path", path))
+		}
+		attributes = append(attributes, runtimeModeAttrs(source)...)
+
+		a.logger.LogAttrs(ctx, slog.LevelWarn, "configuration translation warning", attributes...)
+	}
 }
 
 func (a *App) logRuntimeStart(ctx context.Context, source string) {

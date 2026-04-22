@@ -27,10 +27,12 @@ type commandOptionsParams struct {
 }
 
 type runtimeConfig struct {
-	Config config.Config
-	Source string
-	Path   string
-	Err    error
+	Config   config.Config
+	Source   string
+	Path     string
+	Format   config.DocumentFormat
+	Warnings []string
+	Err      error
 }
 
 // ConfigModule wires command argument parsing and runtime config loading into
@@ -83,12 +85,14 @@ func newRuntimeConfig(options commandOptions) *runtimeConfig {
 	case options.ConfigPath == "":
 		return &runtimeConfig{Err: errConfigPathRequired}
 	default:
-		loadedConfig, err := config.Load(options.ConfigPath)
+		report, err := config.LoadWithReport(options.ConfigPath)
 		return &runtimeConfig{
-			Config: loadedConfig,
-			Source: "file",
-			Path:   options.ConfigPath,
-			Err:    err,
+			Config:   report.Config,
+			Source:   "file",
+			Path:     options.ConfigPath,
+			Format:   report.Format,
+			Warnings: append([]string(nil), report.Warnings...),
+			Err:      err,
 		}
 	}
 }

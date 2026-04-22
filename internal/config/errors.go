@@ -5,6 +5,9 @@ import "errors"
 var (
 	ErrUnsupportedAPIVersion               = errors.New("config apiVersion is unsupported")
 	ErrUnexpectedKind                      = errors.New("config kind is invalid")
+	ErrPatroniDCSBackendRequired           = errors.New("Patroni config requires a supported DCS backend")
+	ErrPatroniDCSBackendConflict           = errors.New("Patroni config declares multiple DCS backends")
+	ErrPatroniDCSBackendUnsupported        = errors.New("Patroni config DCS backend is unsupported")
 	ErrNodeNameRequired                    = errors.New("config node name is required")
 	ErrNodeRoleRequired                    = errors.New("config node role is required")
 	ErrNodeRoleInvalid                     = errors.New("config node role is invalid")
