@@ -19,7 +19,7 @@ grafana_user="${PACMAN_DEMO_GRAFANA_USER:-admin}"
 grafana_password="${PACMAN_DEMO_GRAFANA_PASSWORD:-pacman-demo}"
 api_token="${PACMAN_DEMO_API_TOKEN:-lab-admin-token}"
 rpm_dir="${PACMAN_DEMO_RPM_DIR:-${repo_root}/bin/ansible-install-rpm}"
-default_candidate="${PACMAN_DEMO_SWITCHOVER_CANDIDATE:-alpha-2}"
+fallback_candidate="${PACMAN_DEMO_SWITCHOVER_CANDIDATE:-}"
 watch_iterations="${PACMAN_DEMO_WATCH_ITERATIONS:-10}"
 watch_delay="${PACMAN_DEMO_WATCH_DELAY:-2}"
 postgres_config_parameter="${PACMAN_DEMO_POSTGRES_PARAMETER:-log_min_duration_statement}"
@@ -36,7 +36,7 @@ pgbench_db="${PACMAN_DEMO_PGBENCH_DB:-postgres}"
 pgbench_scale="${PACMAN_DEMO_PGBENCH_SCALE:-10}"
 pgbench_clients="${PACMAN_DEMO_PGBENCH_CLIENTS:-4}"
 pgbench_threads="${PACMAN_DEMO_PGBENCH_THREADS:-2}"
-pgbench_duration="${PACMAN_DEMO_PGBENCH_DURATION:-120}"
+pgbench_duration="${PACMAN_DEMO_PGBENCH_DURATION:-0}"
 pgbench_chunk_duration="${PACMAN_DEMO_PGBENCH_CHUNK_DURATION:-15}"
 pause_load_on_switchover="${PACMAN_DEMO_PAUSE_LOAD_ON_SWITCHOVER:-false}"
 
@@ -87,7 +87,7 @@ Environment:
   PACMAN_DEMO_GRAFANA_PASSWORD     default: ${grafana_password}
   PACMAN_DEMO_API_TOKEN            default: ${api_token}
   PACMAN_DEMO_RPM_DIR              default: ${rpm_dir}
-  PACMAN_DEMO_SWITCHOVER_CANDIDATE default: ${default_candidate}
+  PACMAN_DEMO_SWITCHOVER_CANDIDATE fallback: ${fallback_candidate:-<auto>}
   PACMAN_DEMO_WATCH_ITERATIONS     default: ${watch_iterations}
   PACMAN_DEMO_WATCH_DELAY          default: ${watch_delay}
   PACMAN_DEMO_POSTGRES_PARAMETER   default: ${postgres_config_parameter}
@@ -103,7 +103,7 @@ Environment:
   PACMAN_DEMO_PGBENCH_SCALE        default: ${pgbench_scale}
   PACMAN_DEMO_PGBENCH_CLIENTS      default: ${pgbench_clients}
   PACMAN_DEMO_PGBENCH_THREADS      default: ${pgbench_threads}
-  PACMAN_DEMO_PGBENCH_DURATION     default: ${pgbench_duration}s
+  PACMAN_DEMO_PGBENCH_DURATION     default: ${pgbench_duration} (0 means until load-off)
   PACMAN_DEMO_PGBENCH_CHUNK_DURATION default: ${pgbench_chunk_duration}s
   PACMAN_DEMO_PAUSE_LOAD_ON_SWITCHOVER default: ${pause_load_on_switchover}
 
@@ -119,15 +119,19 @@ Notes:
   - the Grafana stack auto-loads the "PACMAN Demo Overview" dashboard with
     Prometheus as the default datasource.
   - The local lab member names are alpha-1 and alpha-2.
+  - switchover auto-selects a healthy non-primary member when you omit the
+    candidate argument. PACMAN_DEMO_SWITCHOVER_CANDIDATE is only a fallback
+    when automatic discovery is unavailable.
   - postgres-config updates the desired cluster PostgreSQL parameter map in DCS
     and waits for /api/v1/cluster/spec to reflect the new value.
   - postgres-config does not hot-reload the running PostgreSQL instances yet;
     it demonstrates desired-state propagation, not live config application.
   - pgbench runs inside pacman-primary against ${pgbench_host}:${pgbench_port}.
-    The default behavior keeps load running across switchover and retries
-    interrupted pgbench chunks after reconnect. Set
-    PACMAN_DEMO_PAUSE_LOAD_ON_SWITCHOVER=true only when you want a quieter
-    stage-managed handoff for presentations.
+    The default behavior keeps load running until load-off, survives
+    switchovers, and retries interrupted pgbench chunks after reconnect. Set
+    PACMAN_DEMO_PGBENCH_DURATION to a positive number only when you want a
+    time-limited run. Set PACMAN_DEMO_PAUSE_LOAD_ON_SWITCHOVER=true only when
+    you want a quieter stage-managed handoff for presentations.
   - After switchover the former primary automatically rejoins as a standby.
     The watch loop shows it recovering — final state should show both members healthy.
 EOF
@@ -287,6 +291,62 @@ ensure_container_api_url() {
 	esac
 }
 
+service_api_url() {
+	local service=$1
+
+	case "${service}" in
+		"${primary_service}")
+			printf '%s\n' "${primary_api_url}"
+			;;
+		"${replica_service}")
+			printf '%s\n' "${replica_api_url}"
+			;;
+		*)
+			printf 'http://%s:8080\n' "${service}"
+			;;
+	esac
+}
+
+service_is_primary() {
+	local service=$1
+	local api_url
+
+	api_url=$(service_api_url "${service}")
+	require_python "${service}"
+	ensure_container_api_url "${api_url}" "PACMAN API URL" "${service}"
+	compose_exec "${service}" python3 - "${api_url}/primary" <<'PY'
+import sys
+import urllib.error
+import urllib.request
+
+url = sys.argv[1]
+request = urllib.request.Request(url, headers={"Accept": "application/json"})
+try:
+    with urllib.request.urlopen(request, timeout=3) as response:
+        raise SystemExit(0 if response.status == 200 else 1)
+except urllib.error.HTTPError as exc:
+    raise SystemExit(1 if exc.code == 503 else 2)
+PY
+}
+
+resolve_current_controlplane_service() {
+	local service
+
+	if "${dry_run}"; then
+		printf '%s\n' "${primary_service}"
+		return 0
+	fi
+
+	for service in "${primary_service}" "${replica_service}"; do
+		if service_is_primary "${service}"; then
+			printf '%s\n' "${service}"
+			return 0
+		fi
+	done
+
+	printf '%s\n' "${primary_service}"
+}
+
 python_get_json() {
 	local service=$1
 	local url=$2
@@ -349,13 +409,15 @@ wait_for_vip_postgres_route() {
 
 run_pacmanctl() {
 	local service=$1
+	local api_url
 	shift
 
+	api_url=$(service_api_url "${service}")
 	require_pacmanctl
-	ensure_container_api_url "${primary_api_url}" "PACMAN_DEMO_PRIMARY_API_URL" "${primary_service}"
+	ensure_container_api_url "${api_url}" "PACMAN API URL" "${service}"
 	compose_exec "${service}" \
 		env \
-			PACMANCTL_API_URL="${primary_api_url}" \
+			PACMANCTL_API_URL="${api_url}" \
 			PACMANCTL_API_TOKEN="${api_token}" \
 			pacmanctl "$@"
 }
@@ -424,9 +486,13 @@ PY
 }
 
 current_primary_timeline() {
-	require_python "${primary_service}"
-	ensure_container_api_url "${primary_api_url}" "PACMAN_DEMO_PRIMARY_API_URL" "${primary_service}"
-	compose_exec "${primary_service}" python3 - "${primary_api_url}/api/v1/members" "${api_token}" <<'PY'
+	local service=${1:-$(resolve_current_controlplane_service)}
+	local api_url
+
+	api_url=$(service_api_url "${service}")
+	require_python "${service}"
+	ensure_container_api_url "${api_url}" "PACMAN API URL" "${service}"
+	compose_exec "${service}" python3 - "${api_url}/api/v1/members" "${api_token}" <<'PY'
 import json
 import sys
 import urllib.request
@@ -462,6 +528,74 @@ for member in members:
     raise SystemExit(0)
 
 print(0)
+PY
+}
+
+resolve_switchover_candidate() {
+	local requested_candidate=${1:-}
+
+	if [[ -n "${requested_candidate}" ]]; then
+		printf '%s\n' "${requested_candidate}"
+		return 0
+	fi
+
+	if "${dry_run}"; then
+		if [[ -n "${fallback_candidate}" ]]; then
+			printf '%s\n' "${fallback_candidate}"
+		else
+			printf '%s\n' "<auto-candidate>"
+		fi
+		return 0
+	fi
+
+	require_python "${primary_service}"
+	ensure_container_api_url "${primary_api_url}" "PACMAN_DEMO_PRIMARY_API_URL" "${primary_service}"
+	compose_exec "${primary_service}" python3 - "${primary_api_url}/api/v1/members" "${api_token}" "${fallback_candidate}" <<'PY'
+import json
+import sys
+import urllib.request
+
+url, token, fallback = sys.argv[1:4]
+request = urllib.request.Request(
+    url,
+    headers={
+        "Accept": "application/json",
+        "Authorization": f"Bearer {token}",
+    },
+)
+with urllib.request.urlopen(request, timeout=5) as response:
+    body = json.load(response)
+
+if isinstance(body, dict):
+    members = body.get("items") or []
+elif isinstance(body, list):
+    members = body
+else:
+    members = []
+
+healthy_candidates = []
+other_candidates = []
+for member in members:
+    if not isinstance(member, dict):
+        continue
+    name = str(member.get("name") or "").strip()
+    role = str(member.get("role") or "").strip()
+    if not name or role == "primary":
+        continue
+    other_candidates.append(name)
+    if member.get("healthy") is True:
+        healthy_candidates.append(name)
+
+for candidate in healthy_candidates + other_candidates:
+    print(candidate)
+    raise SystemExit(0)
+
+fallback = fallback.strip()
+if fallback:
+    print(fallback)
+    raise SystemExit(0)
+
+raise SystemExit("could not determine switchover candidate from /api/v1/members")
 PY
 }
 
@@ -665,13 +799,19 @@ stage_probes() {
 }
 
 stage_cluster() {
-	log "cluster status via pacmanctl in ${primary_service} [PACMAN-native API]"
-	run_pacmanctl "${primary_service}" cluster status
+	local service
+
+	service=$(resolve_current_controlplane_service)
+	log "cluster status via pacmanctl in ${service} [PACMAN-native API]"
+	run_pacmanctl "${service}" cluster status
 }
 
 stage_members() {
-	log "members via pacmanctl in ${primary_service} [PACMAN-native API]"
-	run_pacmanctl "${primary_service}" members list
+	local service
+
+	service=$(resolve_current_controlplane_service)
+	log "members via pacmanctl in ${service} [PACMAN-native API]"
+	run_pacmanctl "${service}" members list
 }
 
 stage_postgres_config() {
@@ -728,22 +868,33 @@ stage_verify() {
 }
 
 stage_maintenance_enable() {
-	log "enable maintenance mode via pacmanctl in ${primary_service} [PACMAN-native API]"
-	run_pacmanctl "${primary_service}" cluster maintenance enable -reason demo-maintenance -requested-by demo-script
+	local service
+
+	service=$(resolve_current_controlplane_service)
+	log "enable maintenance mode via pacmanctl in ${service} [PACMAN-native API]"
+	run_pacmanctl "${service}" cluster maintenance enable -reason demo-maintenance -requested-by demo-script
 }
 
 stage_maintenance_disable() {
-	log "disable maintenance mode via pacmanctl in ${primary_service} [PACMAN-native API]"
-	run_pacmanctl "${primary_service}" cluster maintenance disable -reason demo-maintenance-complete -requested-by demo-script
+	local service
+
+	service=$(resolve_current_controlplane_service)
+	log "disable maintenance mode via pacmanctl in ${service} [PACMAN-native API]"
+	run_pacmanctl "${service}" cluster maintenance disable -reason demo-maintenance-complete -requested-by demo-script
 }
 
 stage_cancel_switchover() {
+	local service
+	local api_url
+
+	service=$(resolve_current_controlplane_service)
+	api_url=$(service_api_url "${service}")
 	log "cancel any pending switchover [PACMAN-native API]"
-	require_python "${primary_service}"
-	ensure_container_api_url "${primary_api_url}" "PACMAN_DEMO_PRIMARY_API_URL" "${primary_service}"
-	compose_exec "${primary_service}" python3 -c \
+	require_python "${service}"
+	ensure_container_api_url "${api_url}" "PACMAN API URL" "${service}"
+	compose_exec "${service}" python3 -c \
 		"import sys, urllib.request, urllib.error
-req = urllib.request.Request('${primary_api_url}/api/v1/operations/switchover', method='DELETE', headers={'Authorization': 'Bearer ${api_token}'})
+req = urllib.request.Request('${api_url}/api/v1/operations/switchover', method='DELETE', headers={'Authorization': 'Bearer ${api_token}'})
 try:
     urllib.request.urlopen(req, timeout=5)
     print('pending switchover cancelled')
@@ -757,12 +908,20 @@ except urllib.error.URLError as e:
 }
 
 stage_switchover() {
-	local candidate=${1:-${default_candidate}}
+	local requested_candidate=${1:-}
+	local controlplane_service
+	local candidate
 	local pgbench_paused=false
 	local previous_timeline=0
 
+	controlplane_service=$(resolve_current_controlplane_service)
 	if ! "${dry_run}"; then
-		previous_timeline=$(current_primary_timeline || printf '0')
+		previous_timeline=$(current_primary_timeline "${controlplane_service}" || printf '0')
+	fi
+	candidate=$(resolve_switchover_candidate "${requested_candidate}")
+
+	if [[ -z "${requested_candidate}" ]]; then
+		log "auto-selected switchover candidate ${candidate} from current cluster membership [PACMAN-native API]"
 	fi
 
 	if [[ "${pause_load_on_switchover}" == "true" ]] && pgbench_supervisor_running; then
@@ -771,14 +930,14 @@ stage_switchover() {
 		pgbench_paused=true
 	fi
 
-	log "request switchover to ${candidate} via pacmanctl in ${primary_service} [PACMAN-native API]"
-	if ! run_pacmanctl "${primary_service}" cluster switchover -candidate "${candidate}" -reason demo-switchover -requested-by demo-script -force; then
+	log "request switchover to ${candidate} via pacmanctl in ${controlplane_service} [PACMAN-native API]"
+	if ! run_pacmanctl "${controlplane_service}" cluster switchover -candidate "${candidate}" -reason demo-switchover -requested-by demo-script -force; then
 		if "${pgbench_paused}"; then
 			resume_pgbench_load
 		fi
 		return 1
 	fi
-	if ! wait_for_member_primary "${candidate}" "${previous_timeline}"; then
+	if ! wait_for_member_primary "${candidate}" "${previous_timeline}" "${controlplane_service}"; then
 		if "${pgbench_paused}"; then
 			resume_pgbench_load
 		fi
@@ -818,8 +977,11 @@ stage_watch_members() {
 }
 
 stage_history() {
-	log "history via pacmanctl in ${primary_service} [PACMAN-native API]"
-	run_pacmanctl "${primary_service}" history list
+	local service
+
+	service=$(resolve_current_controlplane_service)
+	log "history via pacmanctl in ${service} [PACMAN-native API]"
+	run_pacmanctl "${service}" history list
 }
 
 resolve_pgbench() {
@@ -888,13 +1050,36 @@ resume_pgbench_load() {
 	compose_shell "${primary_service}" "rm -f ${pgbench_pause_file}"
 }
 
+validate_pgbench_runtime_config() {
+	if ! [[ "${pgbench_duration}" =~ ^[0-9]+$ ]]; then
+		printf 'PACMAN_DEMO_PGBENCH_DURATION must be a non-negative integer, got %s\n' "${pgbench_duration}" >&2
+		exit 1
+	fi
+
+	if ! [[ "${pgbench_chunk_duration}" =~ ^[1-9][0-9]*$ ]]; then
+		printf 'PACMAN_DEMO_PGBENCH_CHUNK_DURATION must be a positive integer, got %s\n' "${pgbench_chunk_duration}" >&2
+		exit 1
+	fi
+}
+
+pgbench_runtime_label() {
+	if [[ "${pgbench_duration}" == "0" ]]; then
+		printf 'until load-off'
+	else
+		printf '%ss' "${pgbench_duration}"
+	fi
+}
+
 wait_for_member_primary() {
 	local candidate=$1
 	local minimum_timeline=${2:-0}
+	local service=${3:-$(resolve_current_controlplane_service)}
+	local api_url
 
-	require_python "${primary_service}"
-	ensure_container_api_url "${primary_api_url}" "PACMAN_DEMO_PRIMARY_API_URL" "${primary_service}"
-	compose_exec "${primary_service}" python3 - "${candidate}" "${minimum_timeline}" "${primary_api_url}/api/v1/members" "${api_token}" <<'PY'
+	api_url=$(service_api_url "${service}")
+	require_python "${service}"
+	ensure_container_api_url "${api_url}" "PACMAN API URL" "${service}"
+	compose_exec "${service}" python3 - "${candidate}" "${minimum_timeline}" "${api_url}/api/v1/members" "${api_token}" <<'PY'
 import json
 import sys
 import time
@@ -964,11 +1149,15 @@ stage_pgbench_init() {
 }
 
 stage_load_on() {
+	local runtime_label
+
+	validate_pgbench_runtime_config
 	require_pgbench
 	ensure_vip_managers_running
 	wait_for_vip_postgres_route
+	runtime_label=$(pgbench_runtime_label)
 
-	log "start pgbench background load against ${pgbench_host}:${pgbench_port}: ${pgbench_clients} clients / ${pgbench_threads} threads / ${pgbench_duration}s [vip-manager PostgreSQL VIP]"
+	log "start pgbench background load against ${pgbench_host}:${pgbench_port}: ${pgbench_clients} clients / ${pgbench_threads} threads / ${runtime_label} [vip-manager PostgreSQL VIP]"
 	# --progress-timestamp prints a Unix timestamp on each progress line so
 	# the log shows when during the switchover transactions were failing.
 	# shellcheck disable=SC2046
@@ -977,21 +1166,26 @@ stage_load_on() {
 			set -u
 			child_pid=
 			trap '\''if [ -n \"\${child_pid:-}\" ]; then kill \"\${child_pid}\" 2>/dev/null || true; fi; rm -f ${pgbench_child_pid_file} ${pgbench_pause_file} ${pgbench_pid_file}; exit 0'\'' INT TERM
-			end=\$(( \$(date +%s) + ${pgbench_duration} ))
+			duration=${pgbench_duration}
 			chunk=${pgbench_chunk_duration}
 			: >${pgbench_log_file}
 			rm -f ${pgbench_child_pid_file} ${pgbench_pause_file}
-			while [ \$(date +%s) -lt \${end} ]; do
+			if [ \${duration} -gt 0 ]; then
+				end=\$(( \$(date +%s) + \${duration} ))
+			fi
+			while :; do
 				while [ -f ${pgbench_pause_file} ]; do
 					sleep 1
 				done
-				remaining=\$(( end - \$(date +%s) ))
 				run_for=\${chunk}
-				if [ \${remaining} -lt \${run_for} ]; then
-					run_for=\${remaining}
-				fi
-				if [ \${run_for} -le 0 ]; then
-					break
+				if [ \${duration} -gt 0 ]; then
+					remaining=\$(( end - \$(date +%s) ))
+					if [ \${remaining} -le 0 ]; then
+						break
+					fi
+					if [ \${remaining} -lt \${run_for} ]; then
+						run_for=\${remaining}
+					fi
 				fi
 				status=0
 				$(pgbench_bin) $(pgbench_connect_args) \

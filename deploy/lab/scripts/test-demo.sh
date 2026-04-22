@@ -84,9 +84,25 @@ assert_contains "${switchover_output}" "pacmanctl cluster switchover"
 assert_contains "${switchover_output}" "-candidate"
 assert_contains "${switchover_output}" "alpha-2"
 
+printf '==> dry-run switchover with fallback candidate\n'
+switchover_fallback_output=$(run_and_capture env PACMAN_DEMO_SWITCHOVER_CANDIDATE=alpha-1 "${demo_script}" --dry-run switchover)
+assert_contains "${switchover_fallback_output}" "pacmanctl cluster switchover"
+assert_contains "${switchover_fallback_output}" "-candidate"
+assert_contains "${switchover_fallback_output}" "alpha-1"
+
 printf '==> dry-run history\n'
 history_output=$(run_and_capture "${demo_script}" --dry-run history)
 assert_contains "${history_output}" "pacmanctl history list"
+
+printf '==> dry-run load-on\n'
+load_on_output=$(run_and_capture "${demo_script}" --dry-run load-on)
+assert_contains "${load_on_output}" "start pgbench background load"
+assert_contains "${load_on_output}" "until load-off"
+assert_contains "${load_on_output}" "pgbench supervisor started"
+
+printf '==> dry-run load-on with duration cap\n'
+timed_load_on_output=$(run_and_capture env PACMAN_DEMO_PGBENCH_DURATION=30 "${demo_script}" --dry-run load-on)
+assert_contains "${timed_load_on_output}" "30s"
 
 printf '==> dry-run watch-members\n'
 watch_output=$(run_and_capture "${demo_script}" --dry-run watch-members 2)
