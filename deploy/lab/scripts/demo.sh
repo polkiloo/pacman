@@ -247,6 +247,31 @@ require_pg_isready() {
 	compose_exec "${service}" command -v /usr/pgsql-17/bin/pg_isready >/dev/null
 }
 
+ensure_vip_manager_running_service() {
+	local service=$1
+	local vip_manager_pattern='[v]ip-manager --config /etc/pacman/vip-manager.yml'
+
+	if "${dry_run}"; then
+		return 0
+	fi
+
+	if compose_exec "${service}" /bin/sh -lc \
+		"ps -ef | grep '${vip_manager_pattern}' >/dev/null 2>&1"; then
+		return 0
+	fi
+
+	log "start vip-manager on ${service} [vip-manager PostgreSQL VIP]"
+	compose_exec "${service}" /bin/bash -lc \
+		"mkdir -p /var/log/pacman && nohup /usr/local/bin/vip-manager --config /etc/pacman/vip-manager.yml </dev/null >>/var/log/pacman/vip-manager.log 2>&1 &"
+	compose_exec "${service}" /bin/sh -lc \
+		"deadline=\$(( \$(date +%s) + 20 )); while ! ps -ef | grep '${vip_manager_pattern}' >/dev/null 2>&1; do if [ \$(date +%s) -ge \${deadline} ]; then echo 'timed out waiting for vip-manager to start' >&2; cat /var/log/pacman/vip-manager.log 2>/dev/null || true; exit 1; fi; sleep 1; done"
+}
+
+ensure_vip_managers_running() {
+	ensure_vip_manager_running_service "${primary_service}"
+	ensure_vip_manager_running_service "${replica_service}"
+}
+
 ensure_container_api_url() {
 	local url=$1
 	local variable_name=$2
@@ -629,6 +654,7 @@ stage_bootstrap() {
 stage_probes() {
 	ensure_container_api_url "${primary_api_url}" "PACMAN_DEMO_PRIMARY_API_URL" "${primary_service}"
 	ensure_container_api_url "${replica_api_url}" "PACMAN_DEMO_REPLICA_API_URL" "${replica_service}"
+	ensure_vip_managers_running
 	show_probe "${primary_service}" "${primary_api_url}/health" "primary /health [Patroni-compatible API]"
 	show_probe "${replica_service}" "${replica_api_url}/health" "replica /health [Patroni-compatible API]"
 	show_probe "${primary_service}" "${primary_api_url}/primary" "primary /primary [Patroni-compatible API]"
@@ -928,6 +954,8 @@ PY
 
 stage_pgbench_init() {
 	require_pgbench
+	ensure_vip_managers_running
+	wait_for_vip_postgres_route
 
 	log "initialize pgbench schema on ${pgbench_host}:${pgbench_port} (scale=${pgbench_scale}, db=${pgbench_db}) [vip-manager PostgreSQL VIP]"
 	# shellcheck disable=SC2046
@@ -937,6 +965,8 @@ stage_pgbench_init() {
 
 stage_load_on() {
 	require_pgbench
+	ensure_vip_managers_running
+	wait_for_vip_postgres_route
 
 	log "start pgbench background load against ${pgbench_host}:${pgbench_port}: ${pgbench_clients} clients / ${pgbench_threads} threads / ${pgbench_duration}s [vip-manager PostgreSQL VIP]"
 	# --progress-timestamp prints a Unix timestamp on each progress line so

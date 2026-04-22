@@ -190,15 +190,18 @@ start_pacmand() {
 
 start_vip_manager() {
   local service=$1
+  local vip_manager_pattern='[v]ip-manager --config /etc/pacman/vip-manager.yml'
 
   compose_exec "${service}" /bin/sh -lc \
     "pkill -f '/usr/local/bin/vip-manager --config /etc/pacman/vip-manager.yml' 2>/dev/null || true"
   compose_exec "${service}" /bin/sh -lc \
-    "deadline=\$(( \$(date +%s) + 20 )); while pgrep -f '/usr/local/bin/vip-manager --config /etc/pacman/vip-manager.yml' >/dev/null 2>&1; do if [ \$(date +%s) -ge \${deadline} ]; then echo 'timed out waiting for vip-manager to stop' >&2; exit 1; fi; sleep 1; done"
+    "deadline=\$(( \$(date +%s) + 20 )); while ps -ef | grep '${vip_manager_pattern}' >/dev/null 2>&1; do if [ \$(date +%s) -ge \${deadline} ]; then echo 'timed out waiting for vip-manager to stop' >&2; exit 1; fi; sleep 1; done"
 
-  compose_exec_detached "${service}" \
-    /bin/sh -lc \
-    "exec /usr/local/bin/vip-manager --config /etc/pacman/vip-manager.yml >>/var/log/pacman/vip-manager.log 2>&1"
+  compose_exec "${service}" \
+    /bin/bash -lc \
+    "mkdir -p /var/log/pacman && nohup /usr/local/bin/vip-manager --config /etc/pacman/vip-manager.yml </dev/null >>/var/log/pacman/vip-manager.log 2>&1 &"
+  compose_exec "${service}" /bin/sh -lc \
+    "deadline=\$(( \$(date +%s) + 20 )); while ! ps -ef | grep '${vip_manager_pattern}' >/dev/null 2>&1; do if [ \$(date +%s) -ge \${deadline} ]; then echo 'timed out waiting for vip-manager to start' >&2; cat /var/log/pacman/vip-manager.log 2>/dev/null || true; exit 1; fi; sleep 1; done"
 }
 
 main() {
