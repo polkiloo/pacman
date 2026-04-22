@@ -77,6 +77,7 @@ func TestEncodePrometheusTextIncludesClusterNodeAndTraceMetrics(t *testing.T) {
 					Details: agentmodel.PostgresDetails{
 						ServerVersion:       170002,
 						Timeline:            4,
+						DatabaseSizeBytes:   1048576,
 						ReplicationLagBytes: 0,
 					},
 				},
@@ -116,6 +117,7 @@ func TestEncodePrometheusTextIncludesClusterNodeAndTraceMetrics(t *testing.T) {
 		`pacman_member_needs_rejoin{member="alpha-2"} 1`,
 		`pacman_node_info{member="alpha-1",node="alpha-1",role="primary",state="running"} 1`,
 		`pacman_node_postgres_up{node="alpha-1"} 1`,
+		`pacman_node_postgres_database_size_bytes{node="alpha-1"} 1.048576e+06`,
 		`pacman_node_controlplane_leader{node="alpha-1"} 1`,
 		`pacman_controlplane_operation_transitions_total{kind="switchover",state="completed"} 1`,
 	} {

@@ -76,6 +76,7 @@ func observedPostgresStatus(status agentmodel.PostgresStatus, observation postgr
 		SystemIdentifier:    observation.Details.SystemIdentifier,
 		Timeline:            observation.Details.Timeline,
 		PostmasterStartAt:   observation.Details.PostmasterStartAt,
+		DatabaseSizeBytes:   observation.Details.DatabaseSizeBytes,
 		ReplicationLagBytes: observation.Details.ReplicationLagBytes,
 	}
 	status.WAL = agentmodel.WALProgress{

@@ -28,7 +28,8 @@ with local as (
 		end as flush_lsn,
 		pg_last_wal_receive_lsn()::text as receive_lsn,
 		pg_last_wal_replay_lsn()::text as replay_lsn,
-		pg_last_xact_replay_timestamp() as replay_timestamp
+		pg_last_xact_replay_timestamp() as replay_timestamp,
+		pg_database_size(current_database())::bigint as database_size_bytes
 )
 select
 	local.in_recovery,
@@ -42,6 +43,7 @@ select
 	coalesce(local.receive_lsn, ''),
 	coalesce(local.replay_lsn, ''),
 	local.replay_timestamp,
+	local.database_size_bytes,
 	case
 		when local.receive_lsn is not null and local.replay_lsn is not null
 			then pg_wal_lsn_diff(local.receive_lsn::pg_lsn, local.replay_lsn::pg_lsn)::bigint

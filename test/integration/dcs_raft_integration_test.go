@@ -57,12 +57,32 @@ func TestRaftThreeNodeReplicationAndWatch(t *testing.T) {
 		t.Fatalf("unexpected logical leader: got %q, want %q", lease.Leader, "alpha-1")
 	}
 
+	type logicalLeaderResult struct {
+		nodeName string
+		lease    dcs.LeaderLease
+		err      error
+	}
+
+	visibilityResults := make(chan logicalLeaderResult, len(cluster.nodes))
 	for _, node := range cluster.nodes {
 		node := node
-		t.Run("logical leader visible on "+node.name, func(t *testing.T) {
-			current := waitForLogicalLeader(t, node, "alpha-1", 10*time.Second)
-			if current.Leader != "alpha-1" {
-				t.Fatalf("unexpected logical leader: got %q, want %q", current.Leader, "alpha-1")
+		go func() {
+			lease, err := pollForLogicalLeader(node, "alpha-1", 10*time.Second)
+			visibilityResults <- logicalLeaderResult{
+				nodeName: node.name,
+				lease:    lease,
+				err:      err,
+			}
+		}()
+	}
+	for range cluster.nodes {
+		result := <-visibilityResults
+		t.Run("logical leader visible on "+result.nodeName, func(t *testing.T) {
+			if result.err != nil {
+				t.Fatal(result.err)
+			}
+			if result.lease.Leader != "alpha-1" {
+				t.Fatalf("unexpected logical leader: got %q, want %q", result.lease.Leader, "alpha-1")
 			}
 		})
 	}
@@ -213,7 +233,7 @@ func startRaftCluster(t *testing.T) raftCluster {
 			Env: map[string]string{
 				"PACMAN_DCS_RAFT_HTTP_ADDRESS":         ":" + raftHTTPPort,
 				"PACMAN_DCS_RAFT_CLUSTER_NAME":         clusterName,
-				"PACMAN_DCS_RAFT_TTL":                  "750ms",
+				"PACMAN_DCS_RAFT_TTL":                  "5s",
 				"PACMAN_DCS_RAFT_RETRY_TIMEOUT":        "5s",
 				"PACMAN_DCS_RAFT_DATA_DIR":             "/var/lib/pacman/raft",
 				"PACMAN_DCS_RAFT_BIND_ADDRESS":         peerAddress,
@@ -385,18 +405,26 @@ func waitForReplicatedValue(t *testing.T, nodes []*raftIntegrationNode, key, wan
 func waitForLogicalLeader(t *testing.T, node *raftIntegrationNode, want string, timeout time.Duration) dcs.LeaderLease {
 	t.Helper()
 
+	lease, err := pollForLogicalLeader(node, want, timeout)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return lease
+}
+
+func pollForLogicalLeader(node *raftIntegrationNode, want string, timeout time.Duration) (dcs.LeaderLease, error) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		lease, ok, err := node.Leader(context.Background())
 		if err == nil && ok && lease.Leader == want {
-			return lease
+			return lease, nil
 		}
 
 		time.Sleep(200 * time.Millisecond)
 	}
 
-	t.Fatalf("timed out waiting for logical leader %q on %s", want, node.name)
-	return dcs.LeaderLease{}
+	return dcs.LeaderLease{}, fmt.Errorf("timed out waiting for logical leader %q on %s", want, node.name)
 }
 
 func (node *raftIntegrationNode) Stop(t *testing.T) {

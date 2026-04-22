@@ -91,6 +91,7 @@ func TestQueryObservationMapsPrimaryObservation(t *testing.T) {
 				"",
 				"",
 				nil,
+				int64(1048576),
 				int64(0),
 			},
 		}), nil
@@ -126,6 +127,10 @@ func TestQueryObservationMapsPrimaryObservation(t *testing.T) {
 		t.Fatalf("unexpected postmaster start time: got %v", observation.Details.PostmasterStartAt)
 	}
 
+	if observation.Details.DatabaseSizeBytes != 1048576 {
+		t.Fatalf("unexpected database size bytes: got %d", observation.Details.DatabaseSizeBytes)
+	}
+
 	if observation.WAL.WriteLSN != "0/5000200" || observation.WAL.FlushLSN != "0/5000200" {
 		t.Fatalf("unexpected WAL progress: got %+v", observation.WAL)
 	}
@@ -149,6 +154,7 @@ func TestQueryObservationMapsReplicaObservation(t *testing.T) {
 				"0/7000200",
 				"0/7000100",
 				replayAt,
+				int64(2097152),
 				int64(256),
 			},
 		}), nil
@@ -174,6 +180,10 @@ func TestQueryObservationMapsReplicaObservation(t *testing.T) {
 
 	if observation.Details.ReplicationLagBytes != 256 {
 		t.Fatalf("unexpected replication lag: got %d", observation.Details.ReplicationLagBytes)
+	}
+
+	if observation.Details.DatabaseSizeBytes != 2097152 {
+		t.Fatalf("unexpected database size bytes: got %d", observation.Details.DatabaseSizeBytes)
 	}
 
 	if observation.WAL.ReceiveLSN != "0/7000200" || observation.WAL.ReplayLSN != "0/7000100" {
@@ -302,6 +312,7 @@ func (rows *probeTestRows) Columns() []string {
 		"receive_lsn",
 		"replay_lsn",
 		"replay_timestamp",
+		"database_size_bytes",
 		"replication_lag_bytes",
 	}
 }

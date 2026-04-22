@@ -26,6 +26,7 @@ func TestQueryRoleReturnsDetectedRole(t *testing.T) {
 				"",
 				"",
 				nil,
+				int64(1048576),
 				int64(0),
 			},
 		}), nil
@@ -90,6 +91,7 @@ func TestQueryRecoveryStateReturnsReplicaState(t *testing.T) {
 				"0/7000200",
 				"0/7000100",
 				time.Date(2026, time.March, 25, 12, 1, 0, 0, time.UTC),
+				int64(1048576),
 				int64(128),
 			},
 		}), nil
@@ -154,6 +156,7 @@ func TestQuerySystemIdentifierReturnsValue(t *testing.T) {
 				"",
 				"",
 				nil,
+				int64(1048576),
 				int64(0),
 			},
 		}), nil
@@ -220,6 +223,7 @@ func TestQueryWALProgressReturnsValue(t *testing.T) {
 				"0/7000200",
 				"0/7000100",
 				replayAt,
+				int64(1048576),
 				int64(128),
 			},
 		}), nil

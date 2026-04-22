@@ -112,6 +112,7 @@ func TestClientQueryLagReturnsEstimate(t *testing.T) {
 				"0/7000200",
 				"0/7000100",
 				time.Date(2026, time.March, 25, 12, 4, 30, 0, time.UTC),
+				int64(1048576),
 				int64(128),
 			},
 		}),
