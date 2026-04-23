@@ -63,6 +63,10 @@ type pgCtlLocalPromoter struct {
 	pgCtl *postgres.PGCtl
 }
 
+func (p *pgCtlLocalPromoter) Promote(ctx context.Context, _ controlplane.PromotionRequest) error {
+	return p.pgCtl.Promote(ctx)
+}
+
 func (p *pgCtlLocalPromoter) PromoteLocal(ctx context.Context) error {
 	return p.pgCtl.Promote(ctx)
 }

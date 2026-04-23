@@ -337,6 +337,10 @@ func (store *MemoryStateStore) reconcileMaintenanceLocked(now time.Time) {
 func (store *MemoryStateStore) aggregateClusterStatusLocked(now time.Time) cluster.ClusterStatus {
 	members := store.membersLocked()
 	currentPrimary, hasPrimary := currentPrimaryMember(members)
+	currentPrimaryName := currentPrimary.Name
+	if strings.TrimSpace(currentPrimaryName) == "" {
+		currentPrimaryName = store.currentPrimaryNameLocked()
+	}
 	currentEpoch := cluster.Epoch(0)
 	if store.clusterStatus != nil {
 		currentEpoch = store.clusterStatus.CurrentEpoch
@@ -344,8 +348,8 @@ func (store *MemoryStateStore) aggregateClusterStatusLocked(now time.Time) clust
 
 	status := cluster.ClusterStatus{
 		ClusterName:         store.clusterSpec.ClusterName,
-		Phase:               aggregateClusterPhase(store.clusterSpec.Clone(), store.maintenance, store.activeOperation, members, hasPrimary, currentPrimary.Name),
-		CurrentPrimary:      currentPrimary.Name,
+		Phase:               aggregateClusterPhase(store.clusterSpec.Clone(), store.maintenance, store.activeOperation, members, hasPrimary, currentPrimaryName),
+		CurrentPrimary:      currentPrimaryName,
 		CurrentEpoch:        currentEpoch,
 		Maintenance:         store.maintenance,
 		ActiveOperation:     cloneOperationValue(store.activeOperation),

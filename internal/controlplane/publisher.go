@@ -559,18 +559,11 @@ func mergeControlPlaneManagedNodeFlags(previous, current agentmodel.NodeStatus) 
 		merged.PendingRestart = true
 	}
 
-	// Former primaries publish an offline heartbeat while PostgreSQL is stopped
-	// during switchover/rejoin. Keep the last known identity/timeline so the
-	// control plane can still decide and continue the rejoin workflow.
-	if previous.NeedsRejoin && merged.Postgres.Managed && !merged.Postgres.Up {
-		// Preserve the needs_rejoin state so the divergence assessment can
-		// distinguish a crashed former primary (needs pg_rewind) from a cleanly
-		// demoted one (direct rejoin). The agent always reports failed when
-		// postgres is down, which would otherwise erase this distinction.
-		if previous.State == cluster.MemberStateNeedsRejoin {
-			merged.State = cluster.MemberStateNeedsRejoin
-		}
-
+	// During shutdown or probe failures the agent can temporarily lose role and
+	// timeline visibility before PostgreSQL is fully down. Preserve the last
+	// known identity so failover and rejoin planning can still reason about the
+	// member across those transitions.
+	if shouldPreserveManagedPostgresIdentityLocked(merged) {
 		if merged.Role == "" || merged.Role == cluster.MemberRoleUnknown {
 			merged.Role = previous.Role
 		}
@@ -588,11 +581,35 @@ func mergeControlPlaneManagedNodeFlags(previous, current agentmodel.NodeStatus) 
 		}
 	}
 
+	// Former primaries publish an offline heartbeat while PostgreSQL is stopped
+	// during switchover/rejoin. Keep the needs-rejoin state so the control plane
+	// can continue the recovery workflow instead of collapsing to generic failure.
+	if previous.NeedsRejoin && merged.Postgres.Managed && !merged.Postgres.Up {
+		if previous.State == cluster.MemberStateNeedsRejoin {
+			merged.State = cluster.MemberStateNeedsRejoin
+		}
+	}
+
 	if merged.PendingRestart {
 		merged.Postgres.Details.PendingRestart = true
 	}
 
 	return merged
+}
+
+func shouldPreserveManagedPostgresIdentityLocked(current agentmodel.NodeStatus) bool {
+	if !current.Postgres.Managed {
+		return false
+	}
+
+	if !current.Postgres.Up {
+		return true
+	}
+
+	return current.Role == "" ||
+		current.Role == cluster.MemberRoleUnknown ||
+		current.Postgres.Role == "" ||
+		current.Postgres.Role == cluster.MemberRoleUnknown
 }
 
 func observedMemberHealthy(observation agentmodel.NodeStatus) bool {

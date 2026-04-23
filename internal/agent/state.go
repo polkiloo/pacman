@@ -12,7 +12,7 @@ import (
 )
 
 func (daemon *Daemon) buildNodeStatus(observedAt time.Time, postgres agentmodel.PostgresStatus) agentmodel.NodeStatus {
-	return agentmodel.NodeStatus{
+	status := agentmodel.NodeStatus{
 		NodeName:       daemon.config.Node.Name,
 		MemberName:     daemon.config.Node.Name,
 		Role:           postgres.Role,
@@ -22,6 +22,59 @@ func (daemon *Daemon) buildNodeStatus(observedAt time.Time, postgres agentmodel.
 		Postgres:       postgres,
 		ObservedAt:     observedAt,
 	}
+
+	if shouldPreserveManagedPostgresIdentity(status) {
+		daemon.mu.RLock()
+		previous := daemon.nodeStatus.Clone()
+		daemon.mu.RUnlock()
+
+		status = preserveManagedPostgresIdentity(previous, status)
+	}
+
+	return status
+}
+
+func shouldPreserveManagedPostgresIdentity(current agentmodel.NodeStatus) bool {
+	if !current.Postgres.Managed {
+		return false
+	}
+
+	if !current.Postgres.Up {
+		return true
+	}
+
+	return current.Role == "" ||
+		current.Role == cluster.MemberRoleUnknown ||
+		current.Postgres.Role == "" ||
+		current.Postgres.Role == cluster.MemberRoleUnknown
+}
+
+func preserveManagedPostgresIdentity(previous, current agentmodel.NodeStatus) agentmodel.NodeStatus {
+	if previous.NodeName == "" || previous.NodeName != current.NodeName {
+		return current
+	}
+
+	if current.MemberName == "" {
+		current.MemberName = previous.MemberName
+	}
+
+	if current.Role == "" || current.Role == cluster.MemberRoleUnknown {
+		current.Role = previous.Role
+	}
+
+	if current.Postgres.Role == "" || current.Postgres.Role == cluster.MemberRoleUnknown {
+		current.Postgres.Role = previous.Postgres.Role
+	}
+
+	if current.Postgres.Details == (agentmodel.PostgresDetails{}) {
+		current.Postgres.Details = previous.Postgres.Details
+	}
+
+	if current.Postgres.WAL == (agentmodel.WALProgress{}) {
+		current.Postgres.WAL = previous.Postgres.WAL
+	}
+
+	return current
 }
 
 func (daemon *Daemon) publishNodeStatus(ctx context.Context, status agentmodel.NodeStatus) agentmodel.ControlPlaneStatus {
