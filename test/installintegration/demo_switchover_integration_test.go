@@ -38,6 +38,8 @@ const (
 	demoPGbenchAfterPath       = "/tmp/pacman-demo-pgbench.after-success"
 	demoPGbenchFailurePath     = "/tmp/pacman-demo-pgbench.failures"
 	demoPGbenchMarkerPath      = "/tmp/pacman-demo-pgbench.after-switchover"
+	demoPGbenchInitialTimeout  = 45 * time.Second
+	demoPGbenchLoadDuration    = 2 * time.Minute
 	demoSwitchoverWaitTimeout  = 2 * time.Minute
 	demoObservationWaitTimeout = 2 * time.Minute
 )
@@ -199,8 +201,8 @@ func TestAnsibleDemoSwitchoverWithVIPManagerUnderLoad(t *testing.T) {
 	}
 
 	initializePGbenchDataset(t, primary, networkCfg.VIP)
-	startPGbenchLoad(t, primary, networkCfg.VIP)
-	waitForPGbenchCounter(t, primary, demoPGbenchSuccessPath, 1, 45*time.Second, "pgbench successful chunks")
+	startPGbenchLoad(t, primary, networkCfg.VIP, demoPGbenchLoadDuration)
+	waitForPGbenchCounter(t, primary, demoPGbenchSuccessPath, 1, demoPGbenchInitialTimeout, "pgbench successful chunks")
 
 	triggerSwitchoverViaPacmanctl(t, primary)
 	markPGbenchAfterSwitchover(t, primary)
@@ -516,7 +518,7 @@ func initializePGbenchDataset(t *testing.T, svc *testenv.Service, vipAddress str
 	)
 }
 
-func startPGbenchLoad(t *testing.T, svc *testenv.Service, vipAddress string) {
+func startPGbenchLoad(t *testing.T, svc *testenv.Service, vipAddress string, duration time.Duration) {
 	t.Helper()
 
 	script := fmt.Sprintf(`cat > /tmp/pacman-demo-pgbench.sh <<'SH'
@@ -528,7 +530,7 @@ printf '0\n' > %[2]s
 printf '0\n' > %[3]s
 printf '0\n' > %[4]s
 
-deadline=$(( $(date +%%s) + 45 ))
+deadline=$(( $(date +%%s) + %[8]d ))
 total_success=0
 after_success=0
 failures=0
@@ -564,11 +566,11 @@ while [ "$(date +%%s)" -lt "${deadline}" ]; do
   sleep 1
 done
 
-touch %[8]s
+touch %[9]s
 SH
 chmod +x /tmp/pacman-demo-pgbench.sh
 nohup /tmp/pacman-demo-pgbench.sh >/tmp/pacman-demo-pgbench.supervisor.log 2>&1 </dev/null &
-`, demoPGbenchLogPath, demoPGbenchSuccessPath, demoPGbenchAfterPath, demoPGbenchFailurePath, demoPGbenchMarkerPath, demoPostgresPassword, vipAddress, demoPGbenchDonePath)
+`, demoPGbenchLogPath, demoPGbenchSuccessPath, demoPGbenchAfterPath, demoPGbenchFailurePath, demoPGbenchMarkerPath, demoPostgresPassword, vipAddress, int(duration/time.Second), demoPGbenchDonePath)
 
 	svc.RequireExec(t, "/bin/bash", "-lc", script)
 }
