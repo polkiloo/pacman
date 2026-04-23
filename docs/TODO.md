@@ -434,11 +434,11 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] add failover policy unit tests
 
 ### Integration Tests
-- [ ] add PostgreSQL role detection integration tests
-- [ ] add promote workflow integration tests
-- [ ] add standby configuration integration tests
-- [ ] add rejoin / rewind integration tests
-- [ ] add maintenance mode integration tests
+- [x] add PostgreSQL role detection integration tests
+- [x] add promote workflow integration tests
+- [x] add standby configuration integration tests
+- [x] add rejoin / rewind integration tests
+- [x] add maintenance mode integration tests
 
 ### End-to-End Tests
 - [ ] add 3-node cluster bootstrap end-to-end test

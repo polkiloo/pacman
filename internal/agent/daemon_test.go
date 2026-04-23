@@ -456,6 +456,7 @@ func TestDaemonStartBootstrapsClusterSpecIntoControlPlane(t *testing.T) {
 			}, nil
 		}),
 		WithControlPlanePublisher(store),
+		WithNoAPIServer(),
 	)
 	if err != nil {
 		t.Fatalf("new daemon: %v", err)
