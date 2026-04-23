@@ -442,7 +442,7 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 
 ### End-to-End Tests
 - [x] add 3-node cluster bootstrap end-to-end test
-- [ ] add planned switchover end-to-end test
+- [x] add planned switchover end-to-end test
 - [ ] add automatic failover end-to-end test
 - [ ] add former primary rejoin end-to-end test
 - [ ] add network partition end-to-end test
