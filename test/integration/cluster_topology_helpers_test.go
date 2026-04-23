@@ -75,6 +75,35 @@ bootstrap:
     - %s
 `
 
+// daemonEtcdThreeNodeConfig is a three-member pacmand config using an external
+// etcd DCS backend.  Args: nodeName, postgresAlias, etcdAlias, initialPrimary,
+// member1, member2, member3.
+const daemonEtcdThreeNodeConfig = `
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: %s
+  role: data
+  apiAddress: 0.0.0.0:8080
+postgres:
+  dataDir: /var/lib/postgresql/data
+  listenAddress: %s
+  port: 5432
+dcs:
+  backend: etcd
+  clusterName: alpha
+  etcd:
+    endpoints:
+      - http://%s:2379
+bootstrap:
+  clusterName: alpha
+  initialPrimary: %s
+  expectedMembers:
+    - %s
+    - %s
+    - %s
+`
+
 // ---------------------------------------------------------------------------
 // Shared topology types and helpers
 // ---------------------------------------------------------------------------
@@ -84,6 +113,7 @@ const (
 
 	topologyPGPostgresSuffix = "-pg-postgres"
 	topologyClusterAPI       = "/api/v1/cluster"
+	topologyClusterSpecAPI   = "/api/v1/cluster/spec"
 	topologyMembersAPI       = "/api/v1/members"
 	topologyMaintenanceAPI   = "/api/v1/maintenance"
 	topologyValidateConfig   = "validate config"
@@ -183,11 +213,11 @@ func clusterJSON(t *testing.T, client *http.Client, url string, v any) {
 }
 
 // waitForTopologyMemberCount polls /api/v1/members until at least wantCount
-// members appear or the 30-second deadline expires.
+// members appear or the startup deadline expires.
 func waitForTopologyMemberCount(t *testing.T, client *http.Client, base string, wantCount int) {
 	t.Helper()
 
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(topologyStartupTimeout)
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(base + "/api/v1/members")
 		if err != nil {
@@ -196,13 +226,20 @@ func waitForTopologyMemberCount(t *testing.T, client *http.Client, base string, 
 		}
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			time.Sleep(300 * time.Millisecond)
+			continue
+		}
 
 		var payload struct {
+			Items []struct {
+				Name string `json:"name"`
+			} `json:"items"`
 			Members []struct {
 				Member string `json:"member"`
 			} `json:"members"`
 		}
-		if json.Unmarshal(body, &payload) == nil && len(payload.Members) >= wantCount {
+		if json.Unmarshal(body, &payload) == nil && (len(payload.Items) >= wantCount || len(payload.Members) >= wantCount) {
 			return
 		}
 

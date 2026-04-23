@@ -25,11 +25,12 @@ func TestEtcdBackedDaemonBootstrapsAndServesHealth(t *testing.T) {
 
 	env := testenv.New(t)
 	etcd := startTopologyEtcd(t, env, "etcd-single-health")
+	serviceName := "alpha-1-health"
 
 	cfg := fmt.Sprintf(daemonEtcdSingleNodeConfig,
-		nodeName, nodeName+topologyPGPostgresSuffix, etcd.Alias, nodeName, nodeName,
+		nodeName, serviceName+topologyPGPostgresSuffix, etcd.Alias, nodeName, nodeName,
 	)
-	node := startEtcdBackedDaemonNode(t, env, "alpha-1-health", cfg)
+	node := startEtcdBackedDaemonNode(t, env, serviceName, cfg)
 
 	var cluster struct {
 		ClusterName string `json:"clusterName"`
@@ -57,30 +58,31 @@ func TestEtcdBackedDaemonReportsCorrectMemberName(t *testing.T) {
 
 	env := testenv.New(t)
 	etcd := startTopologyEtcd(t, env, "etcd-single-member")
+	serviceName := nodeName + "-svc"
 
 	cfg := fmt.Sprintf(daemonEtcdSingleNodeConfig,
-		nodeName, nodeName+topologyPGPostgresSuffix, etcd.Alias, nodeName, nodeName,
+		nodeName, serviceName+topologyPGPostgresSuffix, etcd.Alias, nodeName, nodeName,
 	)
-	node := startEtcdBackedDaemonNode(t, env, nodeName+"-svc", cfg)
+	node := startEtcdBackedDaemonNode(t, env, serviceName, cfg)
 
 	waitForTopologyMemberCount(t, node.Client, node.Base, 1)
 
 	var payload struct {
-		Members []struct {
-			Member string `json:"member"`
-			Role   string `json:"role"`
-		} `json:"members"`
+		Items []struct {
+			Name string `json:"name"`
+			Role string `json:"role"`
+		} `json:"items"`
 	}
 	clusterJSON(t, node.Client, node.Base+topologyMembersAPI, &payload)
 
-	if len(payload.Members) != 1 {
-		t.Fatalf("expected 1 member, got %d: %+v", len(payload.Members), payload.Members)
+	if len(payload.Items) != 1 {
+		t.Fatalf("expected 1 member, got %d: %+v", len(payload.Items), payload.Items)
 	}
-	if payload.Members[0].Member != nodeName {
-		t.Fatalf("expected member name %q, got %q", nodeName, payload.Members[0].Member)
+	if payload.Items[0].Name != nodeName {
+		t.Fatalf("expected member name %q, got %q", nodeName, payload.Items[0].Name)
 	}
-	if payload.Members[0].Role != "primary" {
-		t.Fatalf("expected primary role for only member, got %q", payload.Members[0].Role)
+	if payload.Items[0].Role != "primary" {
+		t.Fatalf("expected primary role for only member, got %q", payload.Items[0].Role)
 	}
 }
 
@@ -101,22 +103,28 @@ func TestEtcdBackedTwoNodeTopologySharesClusterSpec(t *testing.T) {
 
 	env := testenv.New(t)
 	startTopologyEtcd(t, env, etcdAlias)
+	service1Name := node1Name + "-svc"
+	service2Name := node2Name + "-svc"
 
 	cfg1 := fmt.Sprintf(daemonEtcdTwoNodeConfig,
-		node1Name, node1Name+topologyPGPostgresSuffix, etcdAlias, node1Name, node1Name, node2Name,
+		node1Name, service1Name+topologyPGPostgresSuffix, etcdAlias, node1Name, node1Name, node2Name,
 	)
 	cfg2 := fmt.Sprintf(daemonEtcdTwoNodeConfig,
-		node2Name, node2Name+topologyPGPostgresSuffix, etcdAlias, node1Name, node1Name, node2Name,
+		node2Name, service2Name+topologyPGPostgresSuffix, etcdAlias, node1Name, node1Name, node2Name,
 	)
 
-	node1 := startEtcdBackedDaemonNode(t, env, node1Name+"-svc", cfg1)
-	node2 := startEtcdBackedDaemonNode(t, env, node2Name+"-svc", cfg2)
+	node1 := startEtcdBackedDaemonNode(t, env, service1Name, cfg1)
+	node2 := startEtcdBackedDaemonNode(t, env, service2Name, cfg2)
 
 	waitForTopologyMemberCount(t, node1.Client, node1.Base, 2)
 	waitForTopologyMemberCount(t, node2.Client, node2.Base, 2)
 
-	var spec1 struct{ ClusterName string `json:"clusterName"` }
-	var spec2 struct{ ClusterName string `json:"clusterName"` }
+	var spec1 struct {
+		ClusterName string `json:"clusterName"`
+	}
+	var spec2 struct {
+		ClusterName string `json:"clusterName"`
+	}
 	clusterJSON(t, node1.Client, node1.Base+topologyClusterAPI, &spec1)
 	clusterJSON(t, node2.Client, node2.Base+topologyClusterAPI, &spec2)
 
@@ -142,16 +150,18 @@ func TestEtcdBackedMaintenanceModeIsVisibleAcrossNodes(t *testing.T) {
 
 	env := testenv.New(t)
 	startTopologyEtcd(t, env, etcdAlias)
+	service1Name := node1Name + "-svc"
+	service2Name := node2Name + "-svc"
 
 	cfg1 := fmt.Sprintf(daemonEtcdTwoNodeConfig,
-		node1Name, node1Name+topologyPGPostgresSuffix, etcdAlias, node1Name, node1Name, node2Name,
+		node1Name, service1Name+topologyPGPostgresSuffix, etcdAlias, node1Name, node1Name, node2Name,
 	)
 	cfg2 := fmt.Sprintf(daemonEtcdTwoNodeConfig,
-		node2Name, node2Name+topologyPGPostgresSuffix, etcdAlias, node1Name, node1Name, node2Name,
+		node2Name, service2Name+topologyPGPostgresSuffix, etcdAlias, node1Name, node1Name, node2Name,
 	)
 
-	node1 := startEtcdBackedDaemonNode(t, env, node1Name+"-svc", cfg1)
-	node2 := startEtcdBackedDaemonNode(t, env, node2Name+"-svc", cfg2)
+	node1 := startEtcdBackedDaemonNode(t, env, service1Name, cfg1)
+	node2 := startEtcdBackedDaemonNode(t, env, service2Name, cfg2)
 
 	req := performHTTPRequest(t, http.MethodPut, node1.Base+topologyMaintenanceAPI,
 		[]byte(`{"enabled":true,"reason":"cross-node-test"}`),
@@ -186,11 +196,12 @@ func TestEtcdBackedDaemonMetricsReflectClusterState(t *testing.T) {
 
 	env := testenv.New(t)
 	etcd := startTopologyEtcd(t, env, "etcd-metrics")
+	serviceName := nodeName + "-svc"
 
 	cfg := fmt.Sprintf(daemonEtcdSingleNodeConfig,
-		nodeName, nodeName+topologyPGPostgresSuffix, etcd.Alias, nodeName, nodeName,
+		nodeName, serviceName+topologyPGPostgresSuffix, etcd.Alias, nodeName, nodeName,
 	)
-	node := startEtcdBackedDaemonNode(t, env, nodeName+"-svc", cfg)
+	node := startEtcdBackedDaemonNode(t, env, serviceName, cfg)
 
 	resp, err := node.Client.Get(node.Base + "/metrics")
 	if err != nil {
