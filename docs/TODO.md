@@ -427,11 +427,11 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] write a migration guide from Patroni sample configs to PACMAN process mode and PostgreSQL extension mode
 
 ### Unit Tests
-- [ ] add cluster domain model unit tests
-- [ ] add config validation unit tests
-- [ ] add state machine unit tests
-- [ ] add candidate ranking unit tests
-- [ ] add failover policy unit tests
+- [x] add cluster domain model unit tests
+- [x] add config validation unit tests
+- [x] add state machine unit tests
+- [x] add candidate ranking unit tests
+- [x] add failover policy unit tests
 
 ### Integration Tests
 - [ ] add PostgreSQL role detection integration tests
