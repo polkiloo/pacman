@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -33,10 +34,10 @@ type patroniRestAPIConfig struct {
 }
 
 type patroniEtcdConfig struct {
-	Host     string   `yaml:"host"`
-	Hosts    []string `yaml:"hosts"`
-	Username string   `yaml:"username"`
-	Password string   `yaml:"password"`
+	Host     string            `yaml:"host"`
+	Hosts    patroniStringList `yaml:"hosts"`
+	Username string            `yaml:"username"`
+	Password string            `yaml:"password"`
 }
 
 type patroniRaftConfig struct {
@@ -61,21 +62,129 @@ type patroniBootstrapPostgresDCS struct {
 }
 
 type patroniPostgresConfig struct {
-	Listen         string `yaml:"listen"`
-	ConnectAddress string `yaml:"connect_address"`
-	DataDir        string `yaml:"data_dir"`
-	BinDir         string `yaml:"bin_dir"`
+	Listen         string         `yaml:"listen"`
+	ConnectAddress string         `yaml:"connect_address"`
+	DataDir        string         `yaml:"data_dir"`
+	BinDir         string         `yaml:"bin_dir"`
+	Parameters     map[string]any `yaml:"parameters"`
+}
+
+type patroniStringList []string
+
+type patroniFieldRule struct {
+	children map[string]patroniFieldRule
+	openMap  bool
+	warning  string
+}
+
+var patroniFieldRules = map[string]patroniFieldRule{
+	"scope": {},
+	"name":  {},
+	"restapi": {
+		children: map[string]patroniFieldRule{
+			"listen":          {},
+			"connect_address": {},
+			"authentication": {
+				warning: `Patroni key "restapi.authentication" is not translated; PACMAN uses bearer-token authentication instead of Patroni Basic Auth`,
+			},
+		},
+	},
+	"etcd": {
+		children: map[string]patroniFieldRule{
+			"host":     {},
+			"hosts":    {},
+			"username": {},
+			"password": {},
+		},
+	},
+	"etcd3": {
+		children: map[string]patroniFieldRule{
+			"host":     {},
+			"hosts":    {},
+			"username": {},
+			"password": {},
+		},
+	},
+	"raft": {
+		children: map[string]patroniFieldRule{
+			"data_dir":      {},
+			"self_addr":     {},
+			"partner_addrs": {},
+		},
+	},
+	"bootstrap": {
+		children: map[string]patroniFieldRule{
+			"dcs": {
+				children: map[string]patroniFieldRule{
+					"ttl":           {},
+					"retry_timeout": {},
+					"loop_wait": {
+						warning: `Patroni key "bootstrap.dcs.loop_wait" is not translated; PACMAN uses its own reconciliation cadence`,
+					},
+					"maximum_lag_on_failover": {
+						warning: `Patroni key "bootstrap.dcs.maximum_lag_on_failover" is not translated; PACMAN applies built-in lag checks without a config override`,
+					},
+					"postgresql": {
+						children: map[string]patroniFieldRule{
+							"use_pg_rewind": {
+								warning: `Patroni key "bootstrap.dcs.postgresql.use_pg_rewind" is not translated; configure PACMAN rewind policy separately from bootstrap.dcs`,
+							},
+							"pg_hba": {
+								warning: `Patroni key "bootstrap.dcs.postgresql.pg_hba" is not translated; manage pg_hba.conf outside PACMAN`,
+							},
+							"parameters": {
+								warning: `Patroni key "bootstrap.dcs.postgresql.parameters" is not translated; PACMAN does not import Patroni bootstrap-managed PostgreSQL parameter sets`,
+							},
+						},
+					},
+				},
+			},
+			"initdb": {
+				warning: `Patroni key "bootstrap.initdb" is not translated; PACMAN manages initdb automatically on first boot`,
+			},
+		},
+	},
+	"postgresql": {
+		children: map[string]patroniFieldRule{
+			"listen":          {},
+			"connect_address": {},
+			"data_dir":        {},
+			"bin_dir":         {},
+			"parameters": {
+				openMap: true,
+			},
+			"pgpass": {
+				warning: `Patroni key "postgresql.pgpass" is not translated; PACMAN does not require a .pgpass file`,
+			},
+			"authentication": {
+				warning: `Patroni key "postgresql.authentication" is not translated; manage PostgreSQL users and credentials outside PACMAN`,
+			},
+			"basebackup": {
+				warning: `Patroni key "postgresql.basebackup" is not translated; PACMAN does not import Patroni basebackup flags into node config`,
+			},
+		},
+	},
+	"tags": {
+		warning: `Patroni key "tags" is not translated; configure load-balancer and placement hints outside PACMAN`,
+	},
 }
 
 func decodePatroniConfig(payload []byte) (DecodeReport, error) {
+	var root yaml.Node
 	decoder := yaml.NewDecoder(bytes.NewReader(payload))
-
-	var source patroniConfig
-	if err := decoder.Decode(&source); err != nil {
+	if err := decoder.Decode(&root); err != nil {
 		return DecodeReport{}, fmt.Errorf("decode Patroni config document: %w", err)
 	}
 
-	config, warnings, err := translatePatroniConfig(source)
+	var source patroniConfig
+	if len(root.Content) == 0 {
+		return DecodeReport{}, fmt.Errorf("decode Patroni config document: empty document")
+	}
+	if err := root.Content[0].Decode(&source); err != nil {
+		return DecodeReport{}, fmt.Errorf("decode Patroni config document: %w", err)
+	}
+
+	config, warnings, err := translatePatroniConfig(source, &root)
 	if err != nil {
 		return DecodeReport{}, err
 	}
@@ -88,12 +197,13 @@ func decodePatroniConfig(payload []byte) (DecodeReport, error) {
 	return DecodeReport{
 		Config:   config,
 		Format:   DocumentFormatPatroni,
-		Warnings: warnings,
+		Warnings: dedupeStrings(warnings),
 	}, nil
 }
 
-func translatePatroniConfig(source patroniConfig) (Config, []string, error) {
+func translatePatroniConfig(source patroniConfig, root *yaml.Node) (Config, []string, error) {
 	warnings := patroniMigrationWarnings(source.Name)
+	warnings = append(warnings, patroniFieldWarnings(root)...)
 
 	apiAddress, addressWarnings, err := selectPatroniAddress(
 		"restapi.listen",
@@ -111,6 +221,9 @@ func translatePatroniConfig(source patroniConfig) (Config, []string, error) {
 	}
 	warnings = append(warnings, postgresWarnings...)
 
+	postgresParameters, parameterWarnings := translatePatroniPostgresParameters(source.PostgreSQL)
+	warnings = append(warnings, parameterWarnings...)
+
 	clusterName := strings.TrimSpace(source.Scope)
 	translated := Config{
 		Node: NodeConfig{
@@ -125,6 +238,7 @@ func translatePatroniConfig(source patroniConfig) (Config, []string, error) {
 			BinDir:        strings.TrimSpace(source.PostgreSQL.binDir()),
 			ListenAddress: postgresListenAddress,
 			Port:          postgresPort,
+			Parameters:    postgresParameters,
 		},
 		Bootstrap: &ClusterBootstrapConfig{
 			ClusterName: clusterName,
@@ -144,18 +258,6 @@ func translatePatroniConfig(source patroniConfig) (Config, []string, error) {
 		}
 		if retryTimeout := source.Bootstrap.DCS.RetryTimeout; retryTimeout != nil {
 			translated.DCS.RetryTimeout = time.Duration(*retryTimeout) * time.Second
-		}
-		if source.Bootstrap.DCS.MaximumLagOnFailover != nil {
-			warnings = append(
-				warnings,
-				`Patroni key "bootstrap.dcs.maximum_lag_on_failover" is not translated; PACMAN applies built-in lag checks without a config override`,
-			)
-		}
-		if source.Bootstrap.DCS.PostgreSQL != nil && source.Bootstrap.DCS.PostgreSQL.UsePGRewind != nil {
-			warnings = append(
-				warnings,
-				`Patroni key "bootstrap.dcs.postgresql.use_pg_rewind" is not translated; configure PACMAN rewind policy separately from bootstrap.dcs`,
-			)
 		}
 	}
 
@@ -277,6 +379,51 @@ func patroniRaftPeers(self string, partners []string) []string {
 	return dedupeStrings(peers)
 }
 
+func translatePatroniPostgresParameters(source *patroniPostgresConfig) (map[string]string, []string) {
+	if source == nil || len(source.Parameters) == 0 {
+		return nil, nil
+	}
+
+	keys := make([]string, 0, len(source.Parameters))
+	for key := range source.Parameters {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	parameters := make(map[string]string, len(keys))
+	warnings := make([]string, 0, len(keys))
+	for _, key := range keys {
+		normalized := strings.ToLower(strings.TrimSpace(key))
+		if _, unsafe := unsafeLocalPostgresParameters[normalized]; unsafe {
+			warnings = append(
+				warnings,
+				fmt.Sprintf(
+					`Patroni key "postgresql.parameters.%s" is not translated; PACMAN treats this PostgreSQL parameter as cluster-managed`,
+					key,
+				),
+			)
+			continue
+		}
+
+		parameters[key] = patroniParameterString(source.Parameters[key])
+	}
+
+	if len(parameters) == 0 {
+		return nil, warnings
+	}
+
+	return parameters, warnings
+}
+
+func patroniParameterString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		return fmt.Sprint(typed)
+	}
+}
+
 func selectPatroniPostgresAddress(source *patroniPostgresConfig) (string, int, []string, error) {
 	selected, warnings, err := selectPatroniAddress(
 		"postgresql.listen",
@@ -391,6 +538,99 @@ func patroniMigrationWarnings(nodeName string) []string {
 			`Patroni config has no PACMAN equivalent for "bootstrap.expectedMembers"; PACMAN will default it to [%q] unless you set the full member list`,
 			trimmedName,
 		),
+	}
+}
+
+func patroniFieldWarnings(root *yaml.Node) []string {
+	if root == nil {
+		return nil
+	}
+
+	node := root
+	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
+		node = node.Content[0]
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil
+	}
+
+	warnings := make([]string, 0, 8)
+	collectPatroniFieldWarnings(node, "", patroniFieldRules, &warnings)
+	return warnings
+}
+
+func collectPatroniFieldWarnings(node *yaml.Node, path string, rules map[string]patroniFieldRule, warnings *[]string) {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return
+	}
+
+	for index := 0; index+1 < len(node.Content); index += 2 {
+		keyNode := node.Content[index]
+		valueNode := node.Content[index+1]
+		key := strings.TrimSpace(keyNode.Value)
+		if key == "" {
+			continue
+		}
+
+		fullPath := key
+		if path != "" {
+			fullPath = path + "." + key
+		}
+
+		rule, ok := rules[key]
+		if !ok {
+			*warnings = append(
+				*warnings,
+				fmt.Sprintf(`Patroni key "%s" is not translated by PACMAN and was ignored during migration`, fullPath),
+			)
+			continue
+		}
+
+		if rule.warning != "" {
+			*warnings = append(*warnings, rule.warning)
+			continue
+		}
+
+		if rule.openMap {
+			continue
+		}
+
+		if valueNode.Kind == yaml.MappingNode && len(rule.children) > 0 {
+			collectPatroniFieldWarnings(valueNode, fullPath, rule.children, warnings)
+		}
+	}
+}
+
+func (values *patroniStringList) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.SequenceNode:
+		decoded := make([]string, 0, len(node.Content))
+		for _, item := range node.Content {
+			trimmed := strings.TrimSpace(item.Value)
+			if trimmed == "" {
+				continue
+			}
+			decoded = append(decoded, trimmed)
+		}
+		*values = decoded
+		return nil
+	case yaml.ScalarNode:
+		parts := strings.Split(node.Value, ",")
+		decoded := make([]string, 0, len(parts))
+		for _, part := range parts {
+			trimmed := strings.TrimSpace(part)
+			if trimmed == "" {
+				continue
+			}
+			decoded = append(decoded, trimmed)
+		}
+		*values = decoded
+		return nil
+	case 0:
+		*values = nil
+		return nil
+	default:
+		return fmt.Errorf("decode Patroni hosts: expected string or list, got yaml kind %d", node.Kind)
 	}
 }
 

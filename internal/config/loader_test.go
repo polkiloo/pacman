@@ -426,6 +426,102 @@ postgresql:
 	assertContains(t, err.Error(), "consul")
 }
 
+func TestDecodeWithReportTranslatesPatroniPostgresParametersAndWarnsOnUnsupportedBlocks(t *testing.T) {
+	t.Parallel()
+
+	payload := `
+scope: batman
+name: postgresql0
+restapi:
+  listen: 127.0.0.1:8008
+etcd:
+  host: 127.0.0.1:2379
+bootstrap:
+  dcs:
+    ttl: 30
+    retry_timeout: 10
+    postgresql:
+      pg_hba:
+        - host all all 0.0.0.0/0 md5
+      parameters:
+        max_connections: 100
+  initdb:
+    - encoding: UTF8
+postgresql:
+  listen: 127.0.0.1:5432
+  data_dir: data/postgresql0
+  pgpass: /tmp/pgpass0
+  authentication:
+    replication:
+      username: replicator
+      password: rep-pass
+  parameters:
+    unix_socket_directories: ".."
+    max_connections: 100
+    hot_standby: "on"
+tags:
+  clonefrom: false
+`
+
+	report, err := DecodeWithReport(strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("decode Patroni parameters config: %v", err)
+	}
+
+	if report.Config.Postgres == nil {
+		t.Fatal("expected translated postgres config")
+	}
+
+	wantParameters := map[string]string{
+		"max_connections":         "100",
+		"unix_socket_directories": "..",
+	}
+	if !reflect.DeepEqual(report.Config.Postgres.Parameters, wantParameters) {
+		t.Fatalf("unexpected translated postgres parameters: got %+v, want %+v", report.Config.Postgres.Parameters, wantParameters)
+	}
+
+	warnings := strings.Join(report.Warnings, "\n")
+	assertContains(t, warnings, `bootstrap.initdb`)
+	assertContains(t, warnings, `bootstrap.dcs.postgresql.pg_hba`)
+	assertContains(t, warnings, `bootstrap.dcs.postgresql.parameters`)
+	assertContains(t, warnings, `postgresql.pgpass`)
+	assertContains(t, warnings, `postgresql.authentication`)
+	assertContains(t, warnings, `postgresql.parameters.hot_standby`)
+	assertContains(t, warnings, `Patroni key "tags"`)
+}
+
+func TestDecodeWithReportWarnsForUnknownPatroniFields(t *testing.T) {
+	t.Parallel()
+
+	payload := `
+scope: batman
+name: postgresql0
+restapi:
+  listen: 127.0.0.1:8008
+bootstrap:
+  dcs:
+    ttl: 30
+    retry_timeout: 10
+  post_init: /usr/local/bin/setup_cluster.sh
+etcd:
+  host: 127.0.0.1:2379
+postgresql:
+  listen: 127.0.0.1:5432
+  data_dir: data/postgresql0
+watchdog:
+  mode: automatic
+`
+
+	report, err := DecodeWithReport(strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("decode Patroni config with unknown fields: %v", err)
+	}
+
+	warnings := strings.Join(report.Warnings, "\n")
+	assertContains(t, warnings, `Patroni key "bootstrap.post_init" is not translated by PACMAN`)
+	assertContains(t, warnings, `Patroni key "watchdog" is not translated by PACMAN`)
+}
+
 func TestDecodeRejectsUnknownFields(t *testing.T) {
 	t.Parallel()
 

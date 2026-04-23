@@ -1,0 +1,47 @@
+scope: batman
+name: postgresql0
+
+restapi:
+  listen: 127.0.0.1:8008
+  connect_address: 127.0.0.1:8008
+
+etcd:
+  host: 127.0.0.1:2379
+
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+    postgresql:
+      use_pg_rewind: true
+      pg_hba:
+        - host replication replicator 127.0.0.1/32 md5
+        - host all all 0.0.0.0/0 md5
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+
+postgresql:
+  listen: 127.0.0.1:5432
+  connect_address: 127.0.0.1:5432
+  data_dir: data/postgresql0
+  pgpass: /tmp/pgpass0
+  authentication:
+    replication:
+      username: replicator
+      password: rep-pass
+    superuser:
+      username: postgres
+      password: patroni
+    rewind:
+      username: rewind_user
+      password: rewind_password
+  parameters:
+    unix_socket_directories: ".."
+
+tags:
+  noloadbalance: false
+  clonefrom: false
+  nostream: false

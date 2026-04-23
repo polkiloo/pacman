@@ -421,10 +421,10 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] support translation of Patroni DCS discovery settings (`etcd.host` / `hosts`, optional `raft`) into PACMAN backend configuration
 - [x] support translation of Patroni node-local settings (`name`, REST listen/connect addresses, PostgreSQL listen/connect addresses, `data_dir`, `bin_dir`)
 - [x] support translation of Patroni bootstrap DCS settings (`ttl`, `retry_timeout`, `maximum_lag_on_failover`, `use_pg_rewind`) into PACMAN equivalents or explicit migration warnings
-- [ ] support translation or explicit migration diagnostics for Patroni PostgreSQL blocks such as `pg_hba`, `initdb`, `authentication`, `parameters`, and `tags`
-- [ ] emit explicit warnings for unsupported Patroni fields instead of silently dropping them during migration
-- [ ] add regression fixtures/tests that use the upstream Patroni `postgres0.yml`, `postgres1.yml`, and `postgres2.yml` files as migration inputs
-- [ ] write a migration guide from Patroni sample configs to PACMAN process mode and PostgreSQL extension mode
+- [x] support translation or explicit migration diagnostics for Patroni PostgreSQL blocks such as `pg_hba`, `initdb`, `authentication`, `parameters`, and `tags`
+- [x] emit explicit warnings for unsupported Patroni fields instead of silently dropping them during migration
+- [x] add regression fixtures/tests that use the upstream Patroni `postgres0.yml`, `postgres1.yml`, and `postgres2.yml` files as migration inputs
+- [x] write a migration guide from Patroni sample configs to PACMAN process mode and PostgreSQL extension mode
 
 ### Unit Tests
 - [ ] add cluster domain model unit tests
