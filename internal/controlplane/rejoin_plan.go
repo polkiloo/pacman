@@ -154,6 +154,12 @@ func buildRejoinDivergenceAssessment(inputs rejoinInputs) RejoinDivergenceAssess
 		inputs.member.State == cluster.MemberStateNeedsRejoin:
 		assessment.Diverged = true
 		assessment.RequiresRewind = true
+	case inputs.member.Timeline == inputs.currentPrimary.Timeline &&
+		inputs.member.State == cluster.MemberStateNeedsRejoin &&
+		walLSNAhead(preferredWALLSN(inputs.memberNode.Postgres.WAL), preferredWALLSN(inputs.currentPrimaryNode.Postgres.WAL)):
+		assessment.Diverged = true
+		assessment.RequiresRewind = true
+		assessment.Reasons = append(assessment.Reasons, reasonMemberWALAheadOfCurrentPrimary)
 	}
 
 	return assessment.Clone()
@@ -218,6 +224,14 @@ func assessRejoinMemberReasons(inputs rejoinInputs) []string {
 	if !inputs.hasMemberNode {
 		reasons = append(reasons, reasonNodeStateNotObserved)
 		return reasons
+	}
+
+	if inputs.hasCurrentPrimaryNode &&
+		(!inputs.currentPrimaryNode.Postgres.Up ||
+			!inputs.currentPrimaryNode.Postgres.RecoveryKnown ||
+			inputs.currentPrimaryNode.Postgres.InRecovery ||
+			inputs.currentPrimaryNode.Postgres.Role != cluster.MemberRolePrimary) {
+		reasons = append(reasons, reasonCurrentPrimaryNotReadyForRejoin)
 	}
 
 	if !inputs.memberNode.Postgres.Managed {

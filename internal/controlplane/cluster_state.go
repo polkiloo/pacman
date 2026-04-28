@@ -540,18 +540,7 @@ func (store *MemoryStateStore) memberWALLSNLocked(nodeName string) string {
 		return ""
 	}
 
-	switch {
-	case status.Postgres.WAL.FlushLSN != "":
-		return status.Postgres.WAL.FlushLSN
-	case status.Postgres.WAL.ReplayLSN != "":
-		return status.Postgres.WAL.ReplayLSN
-	case status.Postgres.WAL.WriteLSN != "":
-		return status.Postgres.WAL.WriteLSN
-	case status.Postgres.WAL.ReceiveLSN != "":
-		return status.Postgres.WAL.ReceiveLSN
-	default:
-		return ""
-	}
+	return preferredWALLSN(status.Postgres.WAL)
 }
 
 func (store *MemoryStateStore) membersLocked() []cluster.MemberStatus {

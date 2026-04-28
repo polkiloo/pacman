@@ -6,7 +6,11 @@ select current_setting('server_version_num')::integer
 
 const observationTimelineSQL = `
 case
-	when local.in_recovery then coalesce(nullif(recovery.min_recovery_end_timeline, 0), checkpoint.timeline_id)
+	when local.in_recovery then greatest(
+		coalesce(nullif(recovery.min_recovery_end_timeline, 0), 0),
+		coalesce((select max(received_tli) from pg_stat_wal_receiver), 0),
+		checkpoint.timeline_id
+	)
 	else ('x' || substr(pg_walfile_name(local.write_lsn::pg_lsn), 1, 8))::bit(32)::bigint
 end
 `

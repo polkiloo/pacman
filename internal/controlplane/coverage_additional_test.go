@@ -428,13 +428,8 @@ func TestRejoinHelperBranches(t *testing.T) {
 				Healthy:  true,
 				Timeline: 11,
 			},
-			hasCurrentPrimary: true,
-			currentPrimaryNode: agentmodel.NodeStatus{
-				NodeName: "alpha-2",
-				Postgres: agentmodel.PostgresStatus{
-					Details: agentmodel.PostgresDetails{SystemIdentifier: "sys-new"},
-				},
-			},
+			hasCurrentPrimary:     true,
+			currentPrimaryNode:    rejoinPrimaryStatus("alpha-2", time.Time{}, 11, "sys-new"),
 			hasCurrentPrimaryNode: true,
 		})
 
@@ -481,13 +476,8 @@ func TestRejoinHelperBranches(t *testing.T) {
 				Healthy:  true,
 				Timeline: 2,
 			},
-			hasCurrentPrimary: true,
-			currentPrimaryNode: agentmodel.NodeStatus{
-				NodeName: "alpha-2",
-				Postgres: agentmodel.PostgresStatus{
-					Details: agentmodel.PostgresDetails{SystemIdentifier: "sys-new"},
-				},
-			},
+			hasCurrentPrimary:     true,
+			currentPrimaryNode:    rejoinPrimaryStatus("alpha-2", time.Time{}, 2, "sys-new"),
 			hasCurrentPrimaryNode: true,
 		})
 

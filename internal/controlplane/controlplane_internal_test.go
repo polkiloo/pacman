@@ -194,6 +194,64 @@ func TestMemberWALLSNLocked(t *testing.T) {
 	})
 }
 
+func TestWALLSNAhead(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name  string
+		left  string
+		right string
+		want  bool
+	}{
+		{
+			name:  "higher low bits",
+			left:  "0/20",
+			right: "0/10",
+			want:  true,
+		},
+		{
+			name:  "higher high bits",
+			left:  "1/0",
+			right: "0/FFFFFFFF",
+			want:  true,
+		},
+		{
+			name:  "equal",
+			left:  "0/20",
+			right: "0/20",
+			want:  false,
+		},
+		{
+			name:  "lower",
+			left:  "0/10",
+			right: "0/20",
+			want:  false,
+		},
+		{
+			name:  "invalid left",
+			left:  "invalid",
+			right: "0/20",
+			want:  false,
+		},
+		{
+			name:  "invalid right",
+			left:  "0/20",
+			right: "invalid",
+			want:  false,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := walLSNAhead(testCase.left, testCase.right); got != testCase.want {
+				t.Fatalf("walLSNAhead(%q, %q): got %v, want %v", testCase.left, testCase.right, got, testCase.want)
+			}
+		})
+	}
+}
+
 type watchResult struct {
 	events <-chan dcs.WatchEvent
 	err    error

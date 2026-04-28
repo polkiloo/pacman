@@ -10,6 +10,7 @@ func TestObservationTimelineSQLUsesRecoveryAwareSources(t *testing.T) {
 
 	wantParts := []string{
 		"recovery.min_recovery_end_timeline",
+		"select max(received_tli) from pg_stat_wal_receiver",
 		"checkpoint.timeline_id",
 		"pg_walfile_name(local.write_lsn::pg_lsn)",
 		"pg_database_size(current_database())::bigint as database_size_bytes",
