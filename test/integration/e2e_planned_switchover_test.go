@@ -25,6 +25,8 @@ const (
 	e2eSwitchoverTarget      = "alpha-2"
 	e2eSwitchoverPGData      = "/var/lib/postgresql/data"
 	e2eSwitchoverPGBin       = "/usr/lib/postgresql/17/bin"
+	e2eSwitchoverReplUser    = "replicator"
+	e2eSwitchoverReplPass    = "replicator"
 )
 
 type e2eSwitchoverNode struct {
@@ -127,6 +129,70 @@ ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload`)
 	for _, testCase := range positiveCases {
 		t.Run(testCase.name, testCase.run)
 	}
+}
+
+func TestEndToEndFormerPrimaryRejoinsAfterPlannedSwitchover(t *testing.T) {
+	if testing.Short() {
+		t.Skip(skipShortMode)
+	}
+
+	scenario := startEndToEndSwitchoverScenario(t, "etcd-e2e-switchover-rejoin")
+
+	execServiceSQL(t, scenario.Source.Service, `
+CREATE TABLE IF NOT EXISTS e2e_rejoin_marker (
+	id integer PRIMARY KEY,
+	payload text NOT NULL
+)`)
+	execServiceSQL(t, scenario.Source.Service, `
+INSERT INTO e2e_rejoin_marker (id, payload)
+VALUES (1, 'before-switchover')
+ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload`)
+	waitForServiceQueryValue(t, scenario.Target.Service, `SELECT payload FROM e2e_rejoin_marker WHERE id = 1`, "before-switchover")
+
+	accepted := requestEndToEndSwitchover(t, scenario.Source)
+	waitForEndToEndSwitchoverCompletion(t, scenario.Target, accepted.Operation.ID)
+	waitForServicePostgresRecovery(t, scenario.Target.Service, false)
+	waitForServicePostgresUnavailable(t, scenario.Source.Service)
+	switchoverHistory := waitForEndToEndSwitchoverHistory(t, scenario.Target, accepted.Operation.ID)
+
+	execServiceSQL(t, scenario.Target.Service, `
+INSERT INTO e2e_rejoin_marker (id, payload)
+VALUES (2, 'after-switchover-before-rejoin')
+ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload`)
+
+	rejoinedStatus := waitForEndToEndRejoinCompletion(t, scenario.Target)
+	waitForServicePostgresRecovery(t, scenario.Source.Service, true)
+	waitForServiceQueryValue(t, scenario.Source.Service, `SELECT payload FROM e2e_rejoin_marker WHERE id = 2`, "after-switchover-before-rejoin")
+	rejoinHistory := waitForEndToEndRejoinHistory(t, scenario.Target)
+
+	rejoinedSource := requireE2ESwitchoverMember(t, rejoinedStatus, e2eSwitchoverSource)
+	rejoinedTarget := requireE2ESwitchoverMember(t, rejoinedStatus, e2eSwitchoverTarget)
+
+	if rejoinedStatus.CurrentPrimary != e2eSwitchoverTarget || rejoinedStatus.ActiveOperation != nil {
+		t.Fatalf("unexpected cluster status after former primary rejoin: %+v", rejoinedStatus)
+	}
+
+	if rejoinedSource.Role != "replica" || !rejoinedSource.Healthy || rejoinedSource.NeedsRejoin {
+		t.Fatalf("expected former primary to rejoin as a healthy replica, got %+v", rejoinedSource)
+	}
+
+	if rejoinedTarget.Role != "primary" || !rejoinedTarget.Healthy {
+		t.Fatalf("expected promoted member to remain healthy primary after rejoin, got %+v", rejoinedTarget)
+	}
+
+	if switchoverHistory.Kind != "switchover" || switchoverHistory.Result != "succeeded" {
+		t.Fatalf("unexpected switchover history entry before rejoin validation: %+v", switchoverHistory)
+	}
+
+	if rejoinHistory.Kind != "rejoin" || rejoinHistory.FromMember != e2eSwitchoverSource || rejoinHistory.ToMember != e2eSwitchoverTarget || rejoinHistory.Result != "succeeded" {
+		t.Fatalf("unexpected rejoin history entry: %+v", rejoinHistory)
+	}
+
+	if rejoinHistory.OperationID == "" {
+		t.Fatalf("expected rejoin history entry to expose an operation id, got %+v", rejoinHistory)
+	}
+
+	assertServiceQueryValue(t, scenario.Source.Service, `SELECT payload FROM e2e_rejoin_marker WHERE id = 2`, "after-switchover-before-rejoin")
 }
 
 func TestEndToEndPlannedSwitchoverNegativeCases(t *testing.T) {
@@ -343,6 +409,8 @@ postgres:
   binDir: %s
   listenAddress: 127.0.0.1
   port: 5432
+  replicationUser: %s
+  replicationPassword: %s
 dcs:
   backend: etcd
   clusterName: %s
@@ -362,6 +430,8 @@ bootstrap:
 		nodeName,
 		e2eSwitchoverPGData,
 		e2eSwitchoverPGBin,
+		e2eSwitchoverReplUser,
+		e2eSwitchoverReplPass,
 		e2eSwitchoverClusterName,
 		etcdAlias,
 		e2eSwitchoverClusterName,
@@ -570,6 +640,24 @@ func waitForEndToEndSwitchoverCompletion(t *testing.T, node *e2eSwitchoverNode, 
 	})
 }
 
+func waitForEndToEndRejoinCompletion(t *testing.T, node *e2eSwitchoverNode) nativeapi.ClusterStatusResponse {
+	t.Helper()
+
+	return waitForEndToEndSwitchoverStatus(t, node, "former primary rejoin", func(status nativeapi.ClusterStatusResponse) bool {
+		source := e2eSwitchoverMember(status, e2eSwitchoverSource)
+		target := e2eSwitchoverMember(status, e2eSwitchoverTarget)
+		return status.CurrentPrimary == e2eSwitchoverTarget &&
+			status.ActiveOperation == nil &&
+			source != nil &&
+			source.Role == "replica" &&
+			source.Healthy &&
+			!source.NeedsRejoin &&
+			target != nil &&
+			target.Role == "primary" &&
+			target.Healthy
+	})
+}
+
 func waitForEndToEndSwitchoverStatus(
 	t *testing.T,
 	node *e2eSwitchoverNode,
@@ -675,6 +763,28 @@ func waitForEndToEndSwitchoverHistory(t *testing.T, node *e2eSwitchoverNode, ope
 	}
 
 	t.Fatalf("switchover history entry %q did not appear; last history: %+v", operationID, last)
+	return nativeapi.HistoryEntry{}
+}
+
+func waitForEndToEndRejoinHistory(t *testing.T, node *e2eSwitchoverNode) nativeapi.HistoryEntry {
+	t.Helper()
+
+	deadline := time.Now().Add(topologyStartupTimeout)
+	var last nativeapi.HistoryResponse
+	for time.Now().Before(deadline) {
+		clusterJSON(t, node.Client, node.Base+"/api/v1/history", &last)
+		for _, entry := range last.Items {
+			if entry.Kind == "rejoin" &&
+				entry.FromMember == e2eSwitchoverSource &&
+				entry.ToMember == e2eSwitchoverTarget &&
+				entry.Result == "succeeded" {
+				return entry
+			}
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	t.Fatalf("rejoin history entry for %s did not appear; last history: %+v", e2eSwitchoverSource, last)
 	return nativeapi.HistoryEntry{}
 }
 
