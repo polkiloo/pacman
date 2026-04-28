@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	pgconfig "github.com/polkiloo/pacman/internal/postgres"
 	testcontainers "github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/network"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -75,6 +76,69 @@ func (e *Environment) StartStreamingStandby(t *testing.T, name, alias string, pr
 			},
 		},
 		Entrypoint:   []string{"/usr/local/bin/pacman-standby-entrypoint.sh"},
+		WaitStrategy: wait.ForListeningPort("5432/tcp").WithStartupTimeout(90 * time.Second),
+	})
+}
+
+// StartRenderedStreamingStandby starts a PostgreSQL fixture that clones from
+// the provided primary and uses PACMAN-rendered standby artifacts to stream.
+func (e *Environment) StartRenderedStreamingStandby(t *testing.T, name, alias string, primary *Postgres, slotName string) *Postgres {
+	t.Helper()
+
+	if primary == nil {
+		t.Fatal("primary postgres fixture must be provided")
+	}
+
+	if strings.TrimSpace(slotName) == "" {
+		t.Fatal("replication slot name must be provided")
+	}
+
+	rendered, err := pgconfig.RenderStandbyFiles(defaultPostgresData, pgconfig.StandbyConfig{
+		PrimaryConnInfo: fmt.Sprintf(
+			"host=%s port=5432 user=%s password=%s application_name=%s",
+			primary.Alias(),
+			replicationUsername,
+			replicationPassword,
+			slotName,
+		),
+		PrimarySlotName: slotName,
+	})
+	if err != nil {
+		t.Fatalf("render standby files for %q: %v", name, err)
+	}
+
+	return e.startCustomPostgres(t, postgresContainerConfig{
+		Name:     name,
+		Alias:    alias,
+		Database: primary.Database(),
+		Username: primary.Username(),
+		Password: primary.Password(),
+		Env: map[string]string{
+			"PRIMARY_HOST":          primary.Alias(),
+			"PRIMARY_PORT":          "5432",
+			"REPLICATION_USER":      replicationUsername,
+			"REPLICATION_PASSWORD":  replicationPassword,
+			"REPLICATION_SLOT_NAME": slotName,
+			"PGDATA":                defaultPostgresData,
+		},
+		Files: []testcontainers.ContainerFile{
+			{
+				Reader:            strings.NewReader(renderedStandbyEntrypoint()),
+				ContainerFilePath: "/usr/local/bin/pacman-rendered-standby-entrypoint.sh",
+				FileMode:          0o755,
+			},
+			{
+				Reader:            strings.NewReader(rendered.PostgresAutoConf),
+				ContainerFilePath: "/tmp/pacman-rendered-standby/postgresql.auto.conf",
+				FileMode:          0o644,
+			},
+			{
+				Reader:            strings.NewReader(""),
+				ContainerFilePath: "/tmp/pacman-rendered-standby/standby.signal",
+				FileMode:          0o644,
+			},
+		},
+		Entrypoint:   []string{"/usr/local/bin/pacman-rendered-standby-entrypoint.sh"},
 		WaitStrategy: wait.ForListeningPort("5432/tcp").WithStartupTimeout(90 * time.Second),
 	})
 }
@@ -238,6 +302,54 @@ if [ ! -s "$PGDATA/PG_VERSION" ]; then
 		-S "$REPLICATION_SLOT_NAME"
 	printf "primary_slot_name = '%s'\n" "$REPLICATION_SLOT_NAME" >> "$PGDATA/postgresql.auto.conf"
 	printf "hot_standby = 'on'\n" >> "$PGDATA/postgresql.auto.conf"
+fi
+
+if command -v gosu >/dev/null 2>&1; then
+	exec gosu postgres postgres -D "$PGDATA" -c "listen_addresses=*"
+fi
+
+exec su-exec postgres postgres -D "$PGDATA" -c "listen_addresses=*"
+`
+}
+
+func renderedStandbyEntrypoint() string {
+	return `#!/bin/sh
+set -eu
+
+run_as_postgres() {
+	if command -v gosu >/dev/null 2>&1; then
+		gosu postgres "$@"
+		return
+	fi
+
+	su-exec postgres "$@"
+}
+
+PGDATA="${PGDATA:-/var/lib/postgresql/data}"
+mkdir -p "$PGDATA"
+chown -R postgres:postgres "$(dirname "$PGDATA")"
+chown -R postgres:postgres "$PGDATA"
+chmod 0700 "$PGDATA"
+
+if [ ! -s "$PGDATA/PG_VERSION" ]; then
+	rm -rf "$PGDATA"/*
+	export PGPASSWORD="$REPLICATION_PASSWORD"
+	until pg_isready -h "$PRIMARY_HOST" -p "${PRIMARY_PORT:-5432}" -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; do
+		sleep 1
+	done
+	run_as_postgres pg_basebackup \
+		-h "$PRIMARY_HOST" \
+		-p "${PRIMARY_PORT:-5432}" \
+		-U "$REPLICATION_USER" \
+		-D "$PGDATA" \
+		-X stream \
+		-C \
+		-S "$REPLICATION_SLOT_NAME"
+	cat /tmp/pacman-rendered-standby/postgresql.auto.conf >> "$PGDATA/postgresql.auto.conf"
+	cp /tmp/pacman-rendered-standby/standby.signal "$PGDATA/standby.signal"
+	chown postgres:postgres "$PGDATA/postgresql.auto.conf" "$PGDATA/standby.signal"
+	chmod 0600 "$PGDATA/postgresql.auto.conf"
+	chmod 0640 "$PGDATA/standby.signal"
 fi
 
 if command -v gosu >/dev/null 2>&1; then

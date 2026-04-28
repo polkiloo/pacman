@@ -417,33 +417,33 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] define the minimum supported Patroni config subset for migration, anchored to upstream `postgres0.yml`, `postgres1.yml`, and `postgres2.yml`
 - [x] document field-by-field mapping between Patroni example config keys and PACMAN config / API surfaces
 - [x] add three PACMAN example configs mirroring the Patroni `postgres0/1/2.yml` topology for side-by-side infrastructure migration
-- [ ] implement a Patroni-config import / translation path for the supported subset
-- [ ] support translation of Patroni DCS discovery settings (`etcd.host` / `hosts`, optional `raft`) into PACMAN backend configuration
-- [ ] support translation of Patroni node-local settings (`name`, REST listen/connect addresses, PostgreSQL listen/connect addresses, `data_dir`, `bin_dir`)
-- [ ] support translation of Patroni bootstrap DCS settings (`ttl`, `retry_timeout`, `maximum_lag_on_failover`, `use_pg_rewind`) into PACMAN equivalents or explicit migration warnings
-- [ ] support translation or explicit migration diagnostics for Patroni PostgreSQL blocks such as `pg_hba`, `initdb`, `authentication`, `parameters`, and `tags`
-- [ ] emit explicit warnings for unsupported Patroni fields instead of silently dropping them during migration
-- [ ] add regression fixtures/tests that use the upstream Patroni `postgres0.yml`, `postgres1.yml`, and `postgres2.yml` files as migration inputs
-- [ ] write a migration guide from Patroni sample configs to PACMAN process mode and PostgreSQL extension mode
+- [x] implement a Patroni-config import / translation path for the supported subset
+- [x] support translation of Patroni DCS discovery settings (`etcd.host` / `hosts`, optional `raft`) into PACMAN backend configuration
+- [x] support translation of Patroni node-local settings (`name`, REST listen/connect addresses, PostgreSQL listen/connect addresses, `data_dir`, `bin_dir`)
+- [x] support translation of Patroni bootstrap DCS settings (`ttl`, `retry_timeout`, `maximum_lag_on_failover`, `use_pg_rewind`) into PACMAN equivalents or explicit migration warnings
+- [x] support translation or explicit migration diagnostics for Patroni PostgreSQL blocks such as `pg_hba`, `initdb`, `authentication`, `parameters`, and `tags`
+- [x] emit explicit warnings for unsupported Patroni fields instead of silently dropping them during migration
+- [x] add regression fixtures/tests that use the upstream Patroni `postgres0.yml`, `postgres1.yml`, and `postgres2.yml` files as migration inputs
+- [x] write a migration guide from Patroni sample configs to PACMAN process mode and PostgreSQL extension mode
 
 ### Unit Tests
-- [ ] add cluster domain model unit tests
-- [ ] add config validation unit tests
-- [ ] add state machine unit tests
-- [ ] add candidate ranking unit tests
-- [ ] add failover policy unit tests
+- [x] add cluster domain model unit tests
+- [x] add config validation unit tests
+- [x] add state machine unit tests
+- [x] add candidate ranking unit tests
+- [x] add failover policy unit tests
 
 ### Integration Tests
-- [ ] add PostgreSQL role detection integration tests
-- [ ] add promote workflow integration tests
-- [ ] add standby configuration integration tests
-- [ ] add rejoin / rewind integration tests
-- [ ] add maintenance mode integration tests
+- [x] add PostgreSQL role detection integration tests
+- [x] add promote workflow integration tests
+- [x] add standby configuration integration tests
+- [x] add rejoin / rewind integration tests
+- [x] add maintenance mode integration tests
 
 ### End-to-End Tests
-- [ ] add 3-node cluster bootstrap end-to-end test
-- [ ] add planned switchover end-to-end test
-- [ ] add automatic failover end-to-end test
+- [x] add 3-node cluster bootstrap end-to-end test
+- [x] add planned switchover end-to-end test
+- [x] add automatic failover end-to-end test
 - [ ] add former primary rejoin end-to-end test
 - [ ] add network partition end-to-end test
 - [ ] add witness-assisted quorum end-to-end test

@@ -17,6 +17,7 @@ import (
 
 	"go.uber.org/fx"
 
+	"github.com/polkiloo/pacman/internal/config"
 	"github.com/polkiloo/pacman/internal/logging"
 	"github.com/polkiloo/pacman/internal/pgext"
 	"github.com/polkiloo/pacman/internal/version"
@@ -331,6 +332,28 @@ func TestRunReturnsContextError(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context cancellation, got %v", err)
 	}
+}
+
+func TestLogConfigWarningsIncludesDocumentFormat(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	app := &App{
+		logger: logging.New("pacmand", &logs),
+	}
+
+	app.logConfigWarnings(
+		context.Background(),
+		"file",
+		"/tmp/patroni.yaml",
+		config.DocumentFormatPatroni,
+		[]string{`Patroni key "bootstrap.initialPrimary" needs manual review`},
+	)
+
+	assertContains(t, logs.String(), `"msg":"configuration translation warning"`)
+	assertContains(t, logs.String(), `"document_format":"patroni"`)
+	assertContains(t, logs.String(), `"warning":"Patroni key \"bootstrap.initialPrimary\" needs manual review"`)
+	assertContains(t, logs.String(), `"path":"/tmp/patroni.yaml"`)
 }
 
 type resolvedTestApp struct {

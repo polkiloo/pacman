@@ -3,6 +3,35 @@
 This document covers migrating from Patroni to PACMAN for clusters that match the upstream
 Patroni reference topology (`postgres0.yml`, `postgres1.yml`, `postgres2.yml`).
 
+## Automatic Import Behavior
+
+`pacmand -config /path/to/patroni.yml` now accepts the supported Patroni subset
+directly. The loader auto-detects Patroni documents, translates the supported
+fields into PACMAN runtime config, and emits warnings for anything it cannot
+safely materialize.
+
+The importer intentionally does **not** invent topology or secrets. It will
+always warn when it falls back to PACMAN defaults for:
+
+- `node.controlAddress`
+- `bootstrap.initialPrimary`
+- `bootstrap.seedAddresses`
+- `bootstrap.expectedMembers`
+
+It also warns and ignores unsupported Patroni keys such as:
+
+- `bootstrap.initdb`
+- `bootstrap.dcs.loop_wait`
+- `bootstrap.dcs.postgresql.pg_hba`
+- `postgresql.authentication`
+- `postgresql.basebackup`
+- `tags`
+- any unknown Patroni key outside the supported subset
+
+That means direct import is useful for validation and for bootstrapping a
+single-node translation quickly, but a real multi-node migration still requires
+explicit review of the warnings before production use.
+
 ---
 
 ## Supported Migration Scope
@@ -92,7 +121,7 @@ explicit migration warning (see [Unsupported Fields](#unsupported-fields)).
 |-------------|-----------|-------|
 | `restapi.listen` | `node.apiAddress` | Same `host:port` format |
 | `restapi.connect_address` | — | Not required. PACMAN does not distinguish listen vs. connect address for its API. Handled at the load-balancer or HAProxy layer. |
-| `restapi.authentication.username` / `.password` | `security.adminBearerTokenFile` or `security.adminBearerToken` | Patroni uses HTTP Basic Auth for its REST API; PACMAN uses a bearer token. Generate a token and either write it to `adminBearerTokenFile` or inject it as `adminBearerToken`. |
+| `restapi.authentication.username` / `.password` | `security.adminBearerTokenFile` or `security.adminBearerToken` | Patroni uses HTTP Basic Auth for its REST API; PACMAN uses a bearer token. Generate a token and either write it to `adminBearerTokenFile` or inject it as `adminBearerToken`. Automatic import warns here; it does not synthesize a PACMAN token. |
 
 ### DCS — etcd backend
 
@@ -122,7 +151,7 @@ explicit migration warning (see [Unsupported Fields](#unsupported-fields)).
 | `postgresql.bin_dir` | `postgres.binDir` | Direct 1:1 |
 | `postgresql.listen` | `postgres.listenAddress` + `postgres.port` | Patroni uses a single `host:port` string; split into two PACMAN fields. Example: `127.0.0.1:5432` → `listenAddress: 127.0.0.1`, `port: 5432`. |
 | `postgresql.connect_address` | — | Not required. Route client traffic through HAProxy or another load balancer using PACMAN's `/primary` and `/replica` health probes. |
-| `postgresql.parameters` | `postgres.parameters` | Direct map copy. All values must be quoted strings in PACMAN YAML. |
+| `postgresql.parameters` | `postgres.parameters` | Safe node-local parameter overrides are copied into `postgres.parameters`. PACMAN-skipped cluster-managed keys are warned and omitted. |
 
 ### Bootstrap and cluster membership
 
@@ -154,6 +183,7 @@ explicitly before migration is complete.
 | `bootstrap.dcs.maximum_lag_on_failover` | Not yet a configurable threshold | Remove. PACMAN enforces a built-in lag check; configurable threshold is on the roadmap. |
 | `bootstrap.dcs.postgresql.use_pg_rewind` | No direct local-config translation | Remove the Patroni key from node config. PACMAN exposes `pg_rewind` as cluster rejoin policy rather than a `bootstrap.dcs` field, so verify the migrated cluster policy matches your rewind expectations. |
 | `bootstrap.dcs.postgresql.pg_hba` | PACMAN does not manage `pg_hba.conf` entries | Manage `pg_hba.conf` externally (Ansible template, config management). |
+| `bootstrap.dcs.postgresql.parameters` | PACMAN imports only node-local `postgresql.parameters` | Move any required node-local settings into `postgresql.parameters`; review cluster-managed parameters manually instead of importing them blindly. |
 | `bootstrap.initdb` | PACMAN manages `initdb` automatically on first boot | Remove the block. Set locale/encoding at the OS level before first start. |
 | `postgresql.pgpass` | PACMAN manages replication credentials internally | Remove. No `.pgpass` file is needed. |
 | `postgresql.authentication.*` | PostgreSQL user management is external to PACMAN | Create the replication and superuser accounts before starting PACMAN. |
@@ -188,6 +218,94 @@ dcs:
 
 For clusters already running Patroni with an etcd backend, prefer migrating to PACMAN with
 the same etcd backend — no DCS re-bootstrap is needed.
+
+---
+
+## Process-Mode Migration
+
+Process mode is the most complete migration path today because it can express
+both the local PostgreSQL settings and the DCS backend in one PACMAN YAML.
+
+Recommended workflow:
+
+1. Point `pacmand` at the Patroni YAML directly:
+
+```bash
+pacmand -config /etc/patroni/postgres0.yml
+```
+
+2. Review every translation warning in the startup logs. In particular, replace
+   the importer defaults for `node.controlAddress`, `bootstrap.initialPrimary`,
+   `bootstrap.seedAddresses`, and `bootstrap.expectedMembers` before treating
+   the config as a real multi-node PACMAN topology.
+3. Render the final process-mode YAML explicitly. The reference outputs for the
+   Patroni sample topology live in:
+   - [`docs/examples/pacman-compat-node0.yaml`](examples/pacman-compat-node0.yaml)
+   - [`docs/examples/pacman-compat-node1.yaml`](examples/pacman-compat-node1.yaml)
+   - [`docs/examples/pacman-compat-node2.yaml`](examples/pacman-compat-node2.yaml)
+4. Replace Patroni REST Basic Auth with a PACMAN bearer token where needed
+   (`postgres2.yml` in the upstream sample topology).
+5. Start `pacmand` with the rendered PACMAN config on each node:
+
+```bash
+pacmand -config /etc/pacman/pacmand.yaml
+```
+
+For the upstream sample topology, the only fields that should remain manual are
+the PACMAN-only topology fields and the unsupported Patroni blocks called out
+in the warning stream.
+
+## PostgreSQL Extension-Mode Migration
+
+The PostgreSQL background-worker mode maps the same node-local and bootstrap
+fields into `pacman.*` GUCs instead of a process-mode YAML:
+
+- `name` → `pacman.node_name`
+- `restapi.listen` → `pacman.api_address`
+- choose a PACMAN-only `pacman.control_address`
+- `postgresql.data_dir` → `pacman.postgres_data_dir`
+- `postgresql.bin_dir` → `pacman.postgres_bin_dir`
+- `postgresql.listen` → `pacman.postgres_listen_address` + `pacman.postgres_port`
+- `scope` → `pacman.cluster_name`
+- manual PACMAN topology choices → `pacman.initial_primary`, `pacman.seed_addresses`, `pacman.expected_members`
+
+Example translation of the upstream `postgres0.yml` sample into extension-mode
+settings:
+
+```conf
+shared_preload_libraries = 'pacman_agent'
+
+pacman.node_name = 'postgresql0'
+pacman.node_role = 'data'
+pacman.api_address = '127.0.0.1:8008'
+pacman.control_address = '127.0.0.1:9008'
+pacman.helper_path = '/usr/local/bin/pacmand'
+
+pacman.postgres_data_dir = 'data/postgresql0'
+pacman.postgres_bin_dir = '/usr/lib/postgresql/17/bin'
+pacman.postgres_listen_address = '127.0.0.1'
+pacman.postgres_port = 5432
+
+pacman.cluster_name = 'batman'
+pacman.initial_primary = 'postgresql0'
+pacman.seed_addresses = '127.0.0.1:9008,127.0.0.1:9009,127.0.0.1:9010'
+pacman.expected_members = 'postgresql0,postgresql1,postgresql2'
+```
+
+Use [`docs/examples/pacman-agent.postgresql.conf`](examples/pacman-agent.postgresql.conf)
+as the canonical extension-mode template.
+
+Current limitation:
+
+- The extension GUC bridge currently covers node-local and bootstrap fields
+  only. It does **not** expose PACMAN DCS backend settings, TLS settings, or
+  PACMAN API-auth settings.
+- Because of that, the upstream Patroni sample topology is fully migratable
+  end-to-end in PACMAN **process mode** today, but only partially representable
+  in PACMAN **extension mode**.
+- If you need the same etcd-backed topology as the Patroni samples right now,
+  use process mode. Use extension mode only when the node-local/PostgreSQL
+  bootstrap mapping is the part you want to preserve first.
 
 ---
 

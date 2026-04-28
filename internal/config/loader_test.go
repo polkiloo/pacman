@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/polkiloo/pacman/internal/cluster"
 	"github.com/polkiloo/pacman/internal/dcs"
@@ -180,6 +181,345 @@ bootstrap:
 	if got.DCS.Raft == nil || got.DCS.Raft.SnapshotInterval != dcs.DefaultRaftSnapshotInterval {
 		t.Fatalf("expected raft defaults to be applied, got %+v", got.DCS.Raft)
 	}
+}
+
+func TestDecodeWithReportTranslatesPatroniEtcdConfig(t *testing.T) {
+	t.Parallel()
+
+	payload := `
+scope: batman
+name: postgresql1
+restapi:
+  listen: 127.0.0.1:8009
+  connect_address: postgresql1.internal:8009
+etcd:
+  host: 127.0.0.1:2379
+  username: etcd-user
+  password: etcd-password
+bootstrap:
+  dcs:
+    ttl: 30
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+    postgresql:
+      use_pg_rewind: true
+postgresql:
+  listen: 127.0.0.1:5433
+  connect_address: postgresql1.internal:5433
+  data_dir: data/postgresql1
+  bin_dir: /usr/lib/postgresql/17/bin
+`
+
+	report, err := DecodeWithReport(strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("decode Patroni config: %v", err)
+	}
+
+	if report.Format != DocumentFormatPatroni {
+		t.Fatalf("unexpected document format: got %q, want %q", report.Format, DocumentFormatPatroni)
+	}
+
+	got := report.Config
+
+	if got.Node.Name != "postgresql1" {
+		t.Fatalf("unexpected translated node name: got %q", got.Node.Name)
+	}
+
+	if got.Node.APIAddress != "127.0.0.1:8009" {
+		t.Fatalf("unexpected translated apiAddress: got %q", got.Node.APIAddress)
+	}
+
+	if got.Node.ControlAddress != DefaultControlAddress {
+		t.Fatalf("unexpected translated controlAddress default: got %q", got.Node.ControlAddress)
+	}
+
+	if got.DCS == nil {
+		t.Fatal("expected translated dcs config")
+	}
+
+	if got.DCS.Backend != dcs.BackendEtcd {
+		t.Fatalf("unexpected translated dcs backend: got %q", got.DCS.Backend)
+	}
+
+	if got.DCS.ClusterName != "batman" {
+		t.Fatalf("unexpected translated dcs cluster name: got %q", got.DCS.ClusterName)
+	}
+
+	if got.DCS.TTL != 30*time.Second {
+		t.Fatalf("unexpected translated dcs ttl: got %s", got.DCS.TTL)
+	}
+
+	if got.DCS.RetryTimeout != 10*time.Second {
+		t.Fatalf("unexpected translated dcs retry timeout: got %s", got.DCS.RetryTimeout)
+	}
+
+	if got.DCS.Etcd == nil {
+		t.Fatal("expected translated etcd config")
+	}
+
+	if !reflect.DeepEqual(got.DCS.Etcd.Endpoints, []string{"http://127.0.0.1:2379"}) {
+		t.Fatalf("unexpected translated etcd endpoints: got %+v", got.DCS.Etcd.Endpoints)
+	}
+
+	if got.DCS.Etcd.Username != "etcd-user" || got.DCS.Etcd.Password != "etcd-password" {
+		t.Fatalf("unexpected translated etcd credentials: %+v", got.DCS.Etcd)
+	}
+
+	if got.Postgres == nil {
+		t.Fatal("expected translated postgres config")
+	}
+
+	if got.Postgres.DataDir != "data/postgresql1" || got.Postgres.BinDir != "/usr/lib/postgresql/17/bin" {
+		t.Fatalf("unexpected translated postgres paths: %+v", got.Postgres)
+	}
+
+	if got.Postgres.ListenAddress != "127.0.0.1" || got.Postgres.Port != 5433 {
+		t.Fatalf("unexpected translated postgres listen config: %+v", got.Postgres)
+	}
+
+	if got.Bootstrap == nil {
+		t.Fatal("expected translated bootstrap config")
+	}
+
+	if got.Bootstrap.ClusterName != "batman" {
+		t.Fatalf("unexpected translated bootstrap clusterName: got %q", got.Bootstrap.ClusterName)
+	}
+
+	if got.Bootstrap.InitialPrimary != "postgresql1" {
+		t.Fatalf("unexpected translated bootstrap initialPrimary default: got %q", got.Bootstrap.InitialPrimary)
+	}
+
+	if !reflect.DeepEqual(got.Bootstrap.SeedAddresses, []string{DefaultControlAddress}) {
+		t.Fatalf("unexpected translated bootstrap seedAddresses: got %+v", got.Bootstrap.SeedAddresses)
+	}
+
+	if !reflect.DeepEqual(got.Bootstrap.ExpectedMembers, []string{"postgresql1"}) {
+		t.Fatalf("unexpected translated bootstrap expectedMembers: got %+v", got.Bootstrap.ExpectedMembers)
+	}
+
+	warnings := strings.Join(report.Warnings, "\n")
+	assertContains(t, warnings, "bootstrap.dcs.maximum_lag_on_failover")
+	assertContains(t, warnings, "bootstrap.dcs.postgresql.use_pg_rewind")
+	assertContains(t, warnings, "node.controlAddress")
+	assertContains(t, warnings, "bootstrap.initialPrimary")
+	assertContains(t, warnings, "restapi.connect_address")
+	assertContains(t, warnings, "postgresql.connect_address")
+}
+
+func TestDecodeWithReportTranslatesPatroniEtcdHosts(t *testing.T) {
+	t.Parallel()
+
+	payload := `
+scope: batman
+name: postgresql2
+restapi:
+  listen: 127.0.0.1:8010
+etcd:
+  hosts:
+    - 127.0.0.1:2379
+    - https://etcd-2.internal:2379
+    - 127.0.0.1:2379
+postgresql:
+  listen: 127.0.0.1:5434
+  data_dir: data/postgresql2
+`
+
+	report, err := DecodeWithReport(strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("decode Patroni etcd.hosts config: %v", err)
+	}
+
+	if report.Config.DCS == nil || report.Config.DCS.Etcd == nil {
+		t.Fatalf("expected translated etcd config, got %+v", report.Config.DCS)
+	}
+
+	want := []string{"http://127.0.0.1:2379", "https://etcd-2.internal:2379"}
+	if !reflect.DeepEqual(report.Config.DCS.Etcd.Endpoints, want) {
+		t.Fatalf("unexpected translated etcd.hosts endpoints: got %+v, want %+v", report.Config.DCS.Etcd.Endpoints, want)
+	}
+}
+
+func TestDecodeWithReportTranslatesPatroniRaftConfig(t *testing.T) {
+	t.Parallel()
+
+	payload := `
+scope: batman
+name: raft-1
+restapi:
+  connect_address: 10.0.0.11:8008
+raft:
+  data_dir: /var/lib/patroni/raft
+  self_addr: 10.0.0.11:2222
+  partner_addrs:
+    - 10.0.0.12:2222
+    - 10.0.0.13:2222
+    - 10.0.0.12:2222
+postgresql:
+  connect_address: 10.0.0.11:5432
+  data_dir: /var/lib/postgresql/data
+`
+
+	report, err := DecodeWithReport(strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("decode Patroni raft config: %v", err)
+	}
+
+	if report.Config.Node.APIAddress != "10.0.0.11:8008" {
+		t.Fatalf("unexpected translated apiAddress fallback: got %q", report.Config.Node.APIAddress)
+	}
+
+	if report.Config.Postgres == nil || report.Config.Postgres.ListenAddress != "10.0.0.11" || report.Config.Postgres.Port != 5432 {
+		t.Fatalf("unexpected translated postgres connect_address fallback: %+v", report.Config.Postgres)
+	}
+
+	if report.Config.DCS == nil || report.Config.DCS.Raft == nil {
+		t.Fatalf("expected translated raft config, got %+v", report.Config.DCS)
+	}
+
+	if report.Config.DCS.Backend != dcs.BackendRaft {
+		t.Fatalf("unexpected translated raft backend: got %q", report.Config.DCS.Backend)
+	}
+
+	if report.Config.DCS.Raft.DataDir != "/var/lib/patroni/raft" {
+		t.Fatalf("unexpected translated raft dataDir: got %q", report.Config.DCS.Raft.DataDir)
+	}
+
+	if report.Config.DCS.Raft.BindAddress != "10.0.0.11:2222" {
+		t.Fatalf("unexpected translated raft bindAddress: got %q", report.Config.DCS.Raft.BindAddress)
+	}
+
+	wantPeers := []string{"10.0.0.11:2222", "10.0.0.12:2222", "10.0.0.13:2222"}
+	if !reflect.DeepEqual(report.Config.DCS.Raft.Peers, wantPeers) {
+		t.Fatalf("unexpected translated raft peers: got %+v, want %+v", report.Config.DCS.Raft.Peers, wantPeers)
+	}
+
+	warnings := strings.Join(report.Warnings, "\n")
+	assertContains(t, warnings, `Patroni "raft" settings`)
+	assertContains(t, warnings, `Patroni key "restapi.listen" is unset`)
+	assertContains(t, warnings, `Patroni key "postgresql.listen" is unset`)
+}
+
+func TestDecodeWithReportRejectsUnsupportedPatroniDCSBackend(t *testing.T) {
+	t.Parallel()
+
+	payload := `
+scope: batman
+name: postgresql0
+restapi:
+  listen: 127.0.0.1:8008
+consul:
+  host: 127.0.0.1:8500
+postgresql:
+  listen: 127.0.0.1:5432
+  data_dir: data/postgresql0
+`
+
+	_, err := DecodeWithReport(strings.NewReader(payload))
+	if err == nil {
+		t.Fatal("expected unsupported Patroni backend error")
+	}
+
+	if !errors.Is(err, ErrPatroniDCSBackendUnsupported) {
+		t.Fatalf("unexpected error: got %v, want %v", err, ErrPatroniDCSBackendUnsupported)
+	}
+
+	assertContains(t, err.Error(), "consul")
+}
+
+func TestDecodeWithReportTranslatesPatroniPostgresParametersAndWarnsOnUnsupportedBlocks(t *testing.T) {
+	t.Parallel()
+
+	payload := `
+scope: batman
+name: postgresql0
+restapi:
+  listen: 127.0.0.1:8008
+etcd:
+  host: 127.0.0.1:2379
+bootstrap:
+  dcs:
+    ttl: 30
+    retry_timeout: 10
+    postgresql:
+      pg_hba:
+        - host all all 0.0.0.0/0 md5
+      parameters:
+        max_connections: 100
+  initdb:
+    - encoding: UTF8
+postgresql:
+  listen: 127.0.0.1:5432
+  data_dir: data/postgresql0
+  pgpass: /tmp/pgpass0
+  authentication:
+    replication:
+      username: replicator
+      password: rep-pass
+  parameters:
+    unix_socket_directories: ".."
+    max_connections: 100
+    hot_standby: "on"
+tags:
+  clonefrom: false
+`
+
+	report, err := DecodeWithReport(strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("decode Patroni parameters config: %v", err)
+	}
+
+	if report.Config.Postgres == nil {
+		t.Fatal("expected translated postgres config")
+	}
+
+	wantParameters := map[string]string{
+		"max_connections":         "100",
+		"unix_socket_directories": "..",
+	}
+	if !reflect.DeepEqual(report.Config.Postgres.Parameters, wantParameters) {
+		t.Fatalf("unexpected translated postgres parameters: got %+v, want %+v", report.Config.Postgres.Parameters, wantParameters)
+	}
+
+	warnings := strings.Join(report.Warnings, "\n")
+	assertContains(t, warnings, `bootstrap.initdb`)
+	assertContains(t, warnings, `bootstrap.dcs.postgresql.pg_hba`)
+	assertContains(t, warnings, `bootstrap.dcs.postgresql.parameters`)
+	assertContains(t, warnings, `postgresql.pgpass`)
+	assertContains(t, warnings, `postgresql.authentication`)
+	assertContains(t, warnings, `postgresql.parameters.hot_standby`)
+	assertContains(t, warnings, `Patroni key "tags"`)
+}
+
+func TestDecodeWithReportWarnsForUnknownPatroniFields(t *testing.T) {
+	t.Parallel()
+
+	payload := `
+scope: batman
+name: postgresql0
+restapi:
+  listen: 127.0.0.1:8008
+bootstrap:
+  dcs:
+    ttl: 30
+    retry_timeout: 10
+  post_init: /usr/local/bin/setup_cluster.sh
+etcd:
+  host: 127.0.0.1:2379
+postgresql:
+  listen: 127.0.0.1:5432
+  data_dir: data/postgresql0
+watchdog:
+  mode: automatic
+`
+
+	report, err := DecodeWithReport(strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("decode Patroni config with unknown fields: %v", err)
+	}
+
+	warnings := strings.Join(report.Warnings, "\n")
+	assertContains(t, warnings, `Patroni key "bootstrap.post_init" is not translated by PACMAN`)
+	assertContains(t, warnings, `Patroni key "watchdog" is not translated by PACMAN`)
 }
 
 func TestDecodeRejectsUnknownFields(t *testing.T) {

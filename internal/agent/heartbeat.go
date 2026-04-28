@@ -31,6 +31,7 @@ func (daemon *Daemon) recordHeartbeat(ctx context.Context) {
 	controlPlane := daemon.publishNodeStatus(ctx, nodeStatus)
 	nodeStatus.ControlPlane = controlPlane
 	daemon.reconcileSwitchover(ctx)
+	daemon.reconcileFailover(ctx)
 	daemon.reconcileRejoin(ctx, postgres)
 
 	daemon.mu.Lock()

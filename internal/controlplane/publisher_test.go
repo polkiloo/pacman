@@ -920,6 +920,184 @@ func TestMemoryStateStorePublishNodeStatusPreservesFormerPrimaryDetailsDuringRej
 	}
 }
 
+func TestMemoryStateStorePublishNodeStatusPreservesFailedPrimaryIdentityForFailover(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.April, 23, 20, 0, 0, 0, time.UTC)
+	store := seededFailoverStore(t, cluster.ClusterSpec{
+		ClusterName: "alpha",
+		Members: []cluster.MemberSpec{
+			{Name: "alpha-1"},
+			{Name: "alpha-2"},
+		},
+	}, []agentmodel.NodeStatus{
+		{
+			NodeName:   "alpha-1",
+			MemberName: "alpha-1",
+			Role:       cluster.MemberRolePrimary,
+			State:      cluster.MemberStateRunning,
+			Postgres: agentmodel.PostgresStatus{
+				Managed: true,
+				Up:      true,
+				Role:    cluster.MemberRolePrimary,
+				Details: agentmodel.PostgresDetails{
+					SystemIdentifier: "sys-alpha",
+					Timeline:         7,
+				},
+				CheckedAt: now,
+			},
+			ObservedAt: now,
+		},
+		{
+			NodeName:   "alpha-2",
+			MemberName: "alpha-2",
+			Role:       cluster.MemberRoleReplica,
+			State:      cluster.MemberStateStreaming,
+			Postgres: agentmodel.PostgresStatus{
+				Managed: true,
+				Up:      true,
+				Role:    cluster.MemberRoleReplica,
+				Details: agentmodel.PostgresDetails{
+					SystemIdentifier: "sys-alpha",
+					Timeline:         7,
+				},
+				CheckedAt: now,
+			},
+			ObservedAt: now,
+		},
+	})
+
+	if _, err := store.PublishNodeStatus(context.Background(), agentmodel.NodeStatus{
+		NodeName:   "alpha-1",
+		MemberName: "alpha-1",
+		Role:       cluster.MemberRoleUnknown,
+		State:      cluster.MemberStateFailed,
+		Postgres: agentmodel.PostgresStatus{
+			Managed:   true,
+			Up:        false,
+			Role:      cluster.MemberRoleUnknown,
+			CheckedAt: now.Add(time.Second),
+		},
+		ObservedAt: now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("publish failed primary heartbeat: %v", err)
+	}
+
+	member, ok := store.Member("alpha-1")
+	if !ok {
+		t.Fatal("expected primary member view after failed heartbeat")
+	}
+
+	if member.Role != cluster.MemberRolePrimary || member.Healthy {
+		t.Fatalf("expected failed member to preserve primary identity while unhealthy, got %+v", member)
+	}
+
+	if member.Timeline != 7 {
+		t.Fatalf("expected failed primary timeline to be preserved, got %+v", member)
+	}
+
+	status, ok := store.ClusterStatus()
+	if !ok {
+		t.Fatal("expected cluster status after failed primary heartbeat")
+	}
+
+	if status.CurrentPrimary != "alpha-1" {
+		t.Fatalf("expected current primary to remain identifiable for failover planning, got %+v", status)
+	}
+}
+
+func TestMemoryStateStorePublishNodeStatusPreservesPrimaryIdentityAcrossStateProbeFailure(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.April, 23, 20, 0, 0, 0, time.UTC)
+	store := seededFailoverStore(t, cluster.ClusterSpec{
+		ClusterName: "alpha",
+		Members: []cluster.MemberSpec{
+			{Name: "alpha-1"},
+			{Name: "alpha-2"},
+		},
+	}, []agentmodel.NodeStatus{
+		{
+			NodeName:   "alpha-1",
+			MemberName: "alpha-1",
+			Role:       cluster.MemberRolePrimary,
+			State:      cluster.MemberStateRunning,
+			Postgres: agentmodel.PostgresStatus{
+				Managed: true,
+				Up:      true,
+				Role:    cluster.MemberRolePrimary,
+				Details: agentmodel.PostgresDetails{
+					SystemIdentifier: "sys-alpha",
+					Timeline:         7,
+				},
+				WAL: agentmodel.WALProgress{
+					WriteLSN: "0/B000148",
+				},
+				CheckedAt: now,
+			},
+			ObservedAt: now,
+		},
+		{
+			NodeName:   "alpha-2",
+			MemberName: "alpha-2",
+			Role:       cluster.MemberRoleReplica,
+			State:      cluster.MemberStateStreaming,
+			Postgres: agentmodel.PostgresStatus{
+				Managed: true,
+				Up:      true,
+				Role:    cluster.MemberRoleReplica,
+				Details: agentmodel.PostgresDetails{
+					SystemIdentifier: "sys-alpha",
+					Timeline:         7,
+				},
+				CheckedAt: now,
+			},
+			ObservedAt: now,
+		},
+	})
+
+	if _, err := store.PublishNodeStatus(context.Background(), agentmodel.NodeStatus{
+		NodeName:   "alpha-1",
+		MemberName: "alpha-1",
+		Role:       cluster.MemberRoleUnknown,
+		State:      cluster.MemberStateUnknown,
+		Postgres: agentmodel.PostgresStatus{
+			Managed:   true,
+			Up:        true,
+			Role:      cluster.MemberRoleUnknown,
+			CheckedAt: now.Add(time.Second),
+			Errors: agentmodel.PostgresErrors{
+				State: "pq: the database system is shutting down",
+			},
+		},
+		ObservedAt: now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("publish primary probe-loss heartbeat: %v", err)
+	}
+
+	member, ok := store.Member("alpha-1")
+	if !ok {
+		t.Fatal("expected primary member view after probe-loss heartbeat")
+	}
+
+	if member.Role != cluster.MemberRolePrimary || member.State != cluster.MemberStateUnknown || member.Healthy {
+		t.Fatalf("expected probe-loss member to preserve primary identity while remaining unhealthy, got %+v", member)
+	}
+
+	if member.Timeline != 7 {
+		t.Fatalf("expected primary timeline to be preserved across probe loss, got %+v", member)
+	}
+
+	status, ok := store.ClusterStatus()
+	if !ok {
+		t.Fatal("expected cluster status after primary probe-loss heartbeat")
+	}
+
+	if status.CurrentPrimary != "alpha-1" {
+		t.Fatalf("expected current primary to remain identifiable across probe loss, got %+v", status)
+	}
+}
+
 func TestMemoryStateStoreStoresDesiredStateAndSourceOfTruth(t *testing.T) {
 	t.Parallel()
 

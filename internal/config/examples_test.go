@@ -12,6 +12,9 @@ func TestExampleConfigsLoad(t *testing.T) {
 		"pacmand-raft-data.yaml",
 		"pacmand-raft-witness.yaml",
 		"pacmand-etcd-data.yaml",
+		"pacman-compat-node0.yaml",
+		"pacman-compat-node1.yaml",
+		"pacman-compat-node2.yaml",
 	}
 
 	for _, example := range examples {
