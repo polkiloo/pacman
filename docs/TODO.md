@@ -450,7 +450,7 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 
 
 ### Patroni-Inspired Coverage Groups
-- [ ] add REST API and HTTP server coverage inspired by Patroni `tests/test_api.py`
+- [x] add REST API and HTTP server coverage inspired by Patroni `tests/test_api.py`
 - [ ] add daemon entrypoint and process lifecycle coverage inspired by Patroni `tests/test_patroni.py`
 - [ ] add CLI command and presentation coverage inspired by Patroni `tests/test_ctl.py`
 - [ ] add config parsing, generation, validator, and file-permission coverage inspired by Patroni `tests/test_config.py`, `tests/test_config_generator.py`, `tests/test_validator.py`, and `tests/test_file_perm.py`
