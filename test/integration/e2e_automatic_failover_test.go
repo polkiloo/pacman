@@ -30,9 +30,10 @@ const (
 )
 
 type e2eAutomaticFailoverScenario struct {
-	Primary *e2eSwitchoverNode
-	Standby *e2eSwitchoverNode
-	Etcd    *testenv.Service
+	Primary     *e2eSwitchoverNode
+	Standby     *e2eSwitchoverNode
+	Etcd        *testenv.Service
+	NetworkName string
 }
 
 func TestEndToEndAutomaticFailover(t *testing.T) {
@@ -271,9 +272,10 @@ func startEndToEndAutomaticFailoverScenario(t *testing.T, etcdAlias string) e2eA
 	waitForServicePostgresRecovery(t, standby.Service, true)
 
 	return e2eAutomaticFailoverScenario{
-		Primary: primary,
-		Standby: standby,
-		Etcd:    etcd,
+		Primary:     primary,
+		Standby:     standby,
+		Etcd:        etcd,
+		NetworkName: env.NetworkName(),
 	}
 }
 

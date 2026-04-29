@@ -445,7 +445,7 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] add planned switchover end-to-end test
 - [x] add automatic failover end-to-end test
 - [x] add former primary rejoin end-to-end test
-- [ ] add network partition end-to-end test
+- [x] add network partition end-to-end test
 - [ ] add witness-assisted quorum end-to-end test
 
 
