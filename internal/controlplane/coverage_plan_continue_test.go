@@ -234,13 +234,14 @@ func TestVerifyRejoinReplicationRejectsExpiredMemberNode(t *testing.T) {
 		Members:     []cluster.MemberSpec{{Name: "alpha-1"}, {Name: "alpha-2"}},
 	}, now, now.Add(10*time.Second), now.Add(20*time.Second))
 
-	// Remove the former-primary node status so hasMemberNode is false when
-	// prepareVerifiedRejoinExecutionLocked runs.
+	// Remove the former-primary node status and call the locked method directly
+	// to avoid the ensureCacheFresh path, which can reload alpha-1 from the
+	// in-memory DCS before the missing-member check runs.
 	store.mu.Lock()
 	delete(store.nodeStatuses, "alpha-1")
+	_, err := store.prepareVerifiedRejoinExecutionLocked(now.Add(20 * time.Second))
 	store.mu.Unlock()
 
-	_, err := store.VerifyRejoinReplication(context.Background())
 	if !errors.Is(err, ErrRejoinTargetUnknown) {
 		t.Fatalf("expected ErrRejoinTargetUnknown when member node missing at verification, got %v", err)
 	}
@@ -255,12 +256,14 @@ func TestCompleteRejoinRejectsExpiredMemberNode(t *testing.T) {
 		Members:     []cluster.MemberSpec{{Name: "alpha-1"}, {Name: "alpha-2"}},
 	}, now, now.Add(10*time.Second), now.Add(20*time.Second), now.Add(30*time.Second))
 
-	// Remove the former-primary node status before CompleteRejoin.
+	// Remove the former-primary node status and call the locked method directly
+	// to avoid the ensureCacheFresh path, which can reload alpha-1 from the
+	// in-memory DCS before the missing-member check runs.
 	store.mu.Lock()
 	delete(store.nodeStatuses, "alpha-1")
+	_, err := store.prepareVerifiedRejoinExecutionLocked(now.Add(30 * time.Second))
 	store.mu.Unlock()
 
-	_, err := store.CompleteRejoin(context.Background())
 	if !errors.Is(err, ErrRejoinTargetUnknown) {
 		t.Fatalf("expected ErrRejoinTargetUnknown when member node missing at completion, got %v", err)
 	}

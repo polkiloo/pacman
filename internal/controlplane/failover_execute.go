@@ -234,7 +234,7 @@ func promotedNodeStatus(status agentmodel.NodeStatus, observedAt time.Time) agen
 	updated.Postgres.Up = true
 	updated.Postgres.CheckedAt = observedAt
 	updated.Postgres.Role = cluster.MemberRolePrimary
-	updated.Postgres.RecoveryKnown = true
+	updated.Postgres.RecoveryKnown = false
 	updated.Postgres.InRecovery = false
 
 	return updated

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -175,6 +176,66 @@ func TestBackendLeaderVerifyAndApplyPaths(t *testing.T) {
 	result, ok := response.(campaignResult)
 	if !ok || !result.Held || result.Lease.Leader != "alpha-1" {
 		t.Fatalf("unexpected apply campaign result: %#v", response)
+	}
+}
+
+func TestBackendCampaignReturnsFirstHeldLease(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, time.April, 15, 16, 20, 0, 0, time.UTC)
+	nowValues := []time.Time{
+		base,
+		base.Add(90 * time.Millisecond),
+		base.Add(150 * time.Millisecond),
+		base.Add(151 * time.Millisecond),
+	}
+	var nowMu sync.Mutex
+	now := func() time.Time {
+		nowMu.Lock()
+		defer nowMu.Unlock()
+
+		if len(nowValues) == 0 {
+			return base.Add(151 * time.Millisecond)
+		}
+
+		current := nowValues[0]
+		nowValues = nowValues[1:]
+		return current
+	}
+
+	self := reserveTCPAddress(t)
+	backend, err := New(Config{
+		ClusterName:        "alpha",
+		TTL:                100 * time.Millisecond,
+		RetryTimeout:       time.Second,
+		DataDir:            t.TempDir(),
+		BindAddress:        self,
+		Peers:              []string{self},
+		Bootstrap:          true,
+		ExpiryInterval:     250 * time.Millisecond,
+		HeartbeatTimeout:   75 * time.Millisecond,
+		ElectionTimeout:    75 * time.Millisecond,
+		LeaderLeaseTimeout: 75 * time.Millisecond,
+		Now:                now,
+	})
+	if err != nil {
+		t.Fatalf("create raft backend: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = backend.Close()
+	})
+
+	if err := backend.Initialize(context.Background()); err != nil {
+		t.Fatalf("initialize raft backend: %v", err)
+	}
+
+	lease, held, err := backend.Campaign(context.Background(), "alpha-1")
+	if err != nil {
+		t.Fatalf("campaign leader: %v", err)
+	}
+
+	if !held || lease.Leader != "alpha-1" || lease.Term != 1 {
+		t.Fatalf("unexpected campaign result: held=%t lease=%+v", held, lease)
 	}
 }
 

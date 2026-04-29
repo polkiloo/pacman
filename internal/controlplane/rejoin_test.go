@@ -165,6 +165,28 @@ func TestMemoryStateStoreAssessRejoinMemberReportsBlockedReasons(t *testing.T) {
 			target:  "alpha-2",
 			reasons: []string{reasonCurrentPrimary, reasonMemberDoesNotRequireRejoin},
 		},
+		{
+			name: "current primary promotion is not yet observed",
+			prepare: func(t *testing.T) *MemoryStateStore {
+				t.Helper()
+
+				promoted := rejoinPrimaryStatus("alpha-2", now.Add(time.Second), 13, "sys-alpha")
+				promoted.Postgres.RecoveryKnown = false
+
+				return seededFailoverStore(t, cluster.ClusterSpec{
+					ClusterName: "alpha",
+					Members: []cluster.MemberSpec{
+						{Name: "alpha-1"},
+						{Name: "alpha-2"},
+					},
+				}, []agentmodel.NodeStatus{
+					rejoinFormerPrimaryStatus("alpha-1", now, 12, "sys-alpha"),
+					promoted,
+				})
+			},
+			target:  "alpha-1",
+			reasons: []string{reasonCurrentPrimaryNotReadyForRejoin},
+		},
 	}
 
 	for _, testCase := range testCases {
@@ -235,6 +257,23 @@ func TestMemoryStateStoreDetectRejoinDivergenceRequirements(t *testing.T) {
 			wantDiverged:        true,
 			wantRequiresReclone: true,
 			wantReasons:         []string{reasonTimelineAheadOfCurrentPrimary},
+		},
+		{
+			name: "matching timeline with member WAL ahead requires rewind",
+			member: func() agentmodel.NodeStatus {
+				status := rejoinFormerPrimaryStatus("alpha-1", now, 11, "sys-alpha")
+				status.Postgres.WAL.FlushLSN = "0/300"
+				return status
+			}(),
+			currentPrimary: func() agentmodel.NodeStatus {
+				status := rejoinPrimaryStatus("alpha-2", now.Add(time.Second), 11, "sys-alpha")
+				status.Postgres.WAL.FlushLSN = "0/200"
+				return status
+			}(),
+			wantCompared:       true,
+			wantDiverged:       true,
+			wantRequiresRewind: true,
+			wantReasons:        []string{reasonMemberWALAheadOfCurrentPrimary},
 		},
 		{
 			name:           "missing member system identifier blocks comparison",
@@ -322,6 +361,22 @@ func TestMemoryStateStoreDecideRejoinStrategyChoosesRepairPath(t *testing.T) {
 			member:           rejoinFormerPrimaryStatus("alpha-1", now, 11, "sys-alpha"),
 			currentPrimary:   rejoinPrimaryStatus("alpha-2", now.Add(time.Second), 11, "sys-alpha"),
 			wantDirectRejoin: true,
+		},
+		{
+			name: "rewind selected when matching timeline member WAL is ahead",
+			member: func() agentmodel.NodeStatus {
+				status := rejoinFormerPrimaryStatus("alpha-1", now, 11, "sys-alpha")
+				status.Postgres.WAL.FlushLSN = "0/300"
+				return status
+			}(),
+			currentPrimary: func() agentmodel.NodeStatus {
+				status := rejoinPrimaryStatus("alpha-2", now.Add(time.Second), 11, "sys-alpha")
+				status.Postgres.WAL.FlushLSN = "0/200"
+				return status
+			}(),
+			wantDecided:  true,
+			wantStrategy: cluster.RejoinStrategyRewind,
+			wantReasons:  []string{reasonMemberWALAheadOfCurrentPrimary},
 		},
 		{
 			name:           "blocked decision preserves divergence reasons",

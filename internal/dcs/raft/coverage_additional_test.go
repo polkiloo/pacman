@@ -334,39 +334,6 @@ func TestFSMApplyAdditionalBranches(t *testing.T) {
 		}
 	})
 
-	t.Run("campaign lease usability helper", func(t *testing.T) {
-		t.Parallel()
-
-		now := time.Date(2026, time.April, 14, 12, 0, 0, 0, time.UTC)
-		backend := &Backend{
-			config: Config{
-				TTL:            120 * time.Millisecond,
-				ExpiryInterval: 40 * time.Millisecond,
-			},
-		}
-
-		if got := backend.minimumLeaseRemaining(); got != 30*time.Millisecond {
-			t.Fatalf("unexpected minimum lease remaining: got %s want %s", got, 30*time.Millisecond)
-		}
-
-		if campaignLeaseUsable(dcs.LeaderLease{}, now, backend.minimumLeaseRemaining()) {
-			t.Fatal("expected empty lease to be unusable")
-		}
-
-		if campaignLeaseUsable(dcs.LeaderLease{
-			Leader:    "alpha-1",
-			ExpiresAt: now.Add(20 * time.Millisecond),
-		}, now, backend.minimumLeaseRemaining()) {
-			t.Fatal("expected near-expiry lease to be unusable")
-		}
-
-		if !campaignLeaseUsable(dcs.LeaderLease{
-			Leader:    "alpha-1",
-			ExpiresAt: now.Add(50 * time.Millisecond),
-		}, now, backend.minimumLeaseRemaining()) {
-			t.Fatal("expected lease with sufficient remaining time to be usable")
-		}
-	})
 }
 
 func TestSnapshotReleaseAndWatchBrokerLifecycle(t *testing.T) {

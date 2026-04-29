@@ -17,6 +17,8 @@ const (
 	reasonLagExceedsSwitchoverMaximum           = "member replication lag exceeds configured maximum"
 	reasonNodeStateNotObserved                  = "member node state has not been observed"
 	reasonCurrentPrimaryStateNotObserved        = "current primary node state has not been observed"
+	reasonCurrentPrimaryNotReadyForRejoin       = "current primary is not yet ready for rejoin"
+	reasonMemberWALAheadOfCurrentPrimary        = "member WAL position is ahead of current primary"
 	reasonPostgresNotManaged                    = "member postgres is not managed"
 	reasonPostgresNotUp                         = "member postgres is not up"
 	reasonRecoveryStateUnknown                  = "member recovery state is unknown"

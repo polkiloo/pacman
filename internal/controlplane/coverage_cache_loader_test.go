@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -41,13 +42,13 @@ func TestNewControlPlaneDefaultsClusterNameAndInitializesBackend(t *testing.T) {
 
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
-		if backend.watchCalls >= 2 {
+		if backend.watchCount() >= 2 {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	t.Fatalf("expected cache watch startup to attempt watch and retry, got %d calls", backend.watchCalls)
+	t.Fatalf("expected cache watch startup to attempt watch and retry, got %d calls", backend.watchCount())
 }
 
 func TestControlPlaneConstructorAndContextErrorBranches(t *testing.T) {
@@ -824,6 +825,7 @@ func TestControlPlaneDeleteAndErrorHelperBranches(t *testing.T) {
 }
 
 type fixtureControlPlaneDCS struct {
+	mu              sync.Mutex
 	lists           map[string][]dcs.KeyValue
 	listErr         map[string]error
 	gets            map[string]dcs.KeyValue
@@ -928,8 +930,16 @@ func (backend *fixtureControlPlaneDCS) Alive(context.Context, string) (bool, err
 }
 
 func (backend *fixtureControlPlaneDCS) Watch(context.Context, string) (<-chan dcs.WatchEvent, error) {
+	backend.mu.Lock()
 	backend.watchCalls++
+	backend.mu.Unlock()
 	return nil, backend.watchErr
+}
+
+func (backend *fixtureControlPlaneDCS) watchCount() int {
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	return backend.watchCalls
 }
 
 func (backend *fixtureControlPlaneDCS) Initialize(context.Context) error {

@@ -643,6 +643,10 @@ func TestMemoryStateStoreExecuteSwitchoverPromotesTargetAndRecordsHistory(t *tes
 		t.Fatalf("expected promoted standby postgres status, got %+v", candidate.Postgres)
 	}
 
+	if candidate.Postgres.RecoveryKnown {
+		t.Fatalf("expected promoted standby recovery state to remain unknown until the next heartbeat, got %+v", candidate.Postgres)
+	}
+
 	history := store.History()
 	if len(history) != 1 {
 		t.Fatalf("expected terminal switchover history, got %+v", history)

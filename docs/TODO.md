@@ -444,9 +444,9 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] add 3-node cluster bootstrap end-to-end test
 - [x] add planned switchover end-to-end test
 - [x] add automatic failover end-to-end test
-- [ ] add former primary rejoin end-to-end test
-- [ ] add network partition end-to-end test
-- [ ] add witness-assisted quorum end-to-end test
+- [x] add former primary rejoin end-to-end test
+- [x] add network partition end-to-end test
+- [x] add witness-assisted quorum end-to-end test
 
 
 ### Patroni-Inspired Coverage Groups

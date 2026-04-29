@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -210,6 +211,44 @@ func (s *Service) Stop(t *testing.T) {
 	timeout := dockerOperationTimeout
 	if err := s.container.Stop(stopCtx, &timeout); err != nil {
 		t.Fatalf("stop service %q: %v", s.name, err)
+	}
+}
+
+// DisconnectNetwork detaches the service container from a Docker network.
+func (s *Service) DisconnectNetwork(t *testing.T, networkName string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), dockerOperationTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "docker", "network", "disconnect", networkName, s.container.GetContainerID())
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("disconnect service %q from network %q: %v (%s)", s.name, networkName, err, strings.TrimSpace(string(output)))
+	}
+}
+
+// ConnectNetwork attaches the service container to a Docker network with the
+// supplied aliases.
+func (s *Service) ConnectNetwork(t *testing.T, networkName string, aliases ...string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), dockerOperationTimeout)
+	defer cancel()
+
+	args := []string{"network", "connect"}
+	for _, alias := range aliases {
+		if strings.TrimSpace(alias) == "" {
+			continue
+		}
+		args = append(args, "--alias", alias)
+	}
+	args = append(args, networkName, s.container.GetContainerID())
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("connect service %q to network %q: %v (%s)", s.name, networkName, err, strings.TrimSpace(string(output)))
 	}
 }
 

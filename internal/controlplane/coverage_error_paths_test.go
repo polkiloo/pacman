@@ -736,12 +736,8 @@ func TestAssessRejoinReplicationVerificationReasonsCoversRemainingPaths(t *testi
 				Healthy:  true,
 				Timeline: 11,
 			},
-			hasCurrentPrimary: true,
-			currentPrimaryNode: agentmodel.NodeStatus{
-				Postgres: agentmodel.PostgresStatus{
-					Details: agentmodel.PostgresDetails{SystemIdentifier: testSysAlpha},
-				},
-			},
+			hasCurrentPrimary:     true,
+			currentPrimaryNode:    rejoinPrimaryStatus("alpha-2", time.Time{}, 11, testSysAlpha),
 			hasCurrentPrimaryNode: true,
 		})
 
@@ -780,12 +776,8 @@ func TestAssessRejoinReplicationVerificationReasonsCoversRemainingPaths(t *testi
 				Healthy:  true,
 				Timeline: 11,
 			},
-			hasCurrentPrimary: true,
-			currentPrimaryNode: agentmodel.NodeStatus{
-				Postgres: agentmodel.PostgresStatus{
-					Details: agentmodel.PostgresDetails{SystemIdentifier: ""}, // empty
-				},
-			},
+			hasCurrentPrimary:     true,
+			currentPrimaryNode:    rejoinPrimaryStatus("alpha-2", time.Time{}, 11, ""),
 			hasCurrentPrimaryNode: true,
 		})
 
@@ -824,12 +816,8 @@ func TestAssessRejoinReplicationVerificationReasonsCoversRemainingPaths(t *testi
 				Healthy:  true,
 				Timeline: 11,
 			},
-			hasCurrentPrimary: true,
-			currentPrimaryNode: agentmodel.NodeStatus{
-				Postgres: agentmodel.PostgresStatus{
-					Details: agentmodel.PostgresDetails{SystemIdentifier: testSysAlpha},
-				},
-			},
+			hasCurrentPrimary:     true,
+			currentPrimaryNode:    rejoinPrimaryStatus("alpha-2", time.Time{}, 11, testSysAlpha),
 			hasCurrentPrimaryNode: true,
 		})
 
@@ -868,12 +856,8 @@ func TestAssessRejoinReplicationVerificationReasonsCoversRemainingPaths(t *testi
 				Healthy:  true,
 				Timeline: 0, // unknown
 			},
-			hasCurrentPrimary: true,
-			currentPrimaryNode: agentmodel.NodeStatus{
-				Postgres: agentmodel.PostgresStatus{
-					Details: agentmodel.PostgresDetails{SystemIdentifier: testSysAlpha},
-				},
-			},
+			hasCurrentPrimary:     true,
+			currentPrimaryNode:    rejoinPrimaryStatus("alpha-2", time.Time{}, 11, testSysAlpha),
 			hasCurrentPrimaryNode: true,
 		})
 
@@ -913,13 +897,8 @@ func TestBuildRejoinDivergenceAssessmentCoversRemainingPaths(t *testing.T) {
 				Healthy:  true,
 				Timeline: 11,
 			},
-			hasCurrentPrimary: true,
-			currentPrimaryNode: agentmodel.NodeStatus{
-				NodeName: "alpha-2",
-				Postgres: agentmodel.PostgresStatus{
-					Details: agentmodel.PostgresDetails{SystemIdentifier: ""}, // empty
-				},
-			},
+			hasCurrentPrimary:     true,
+			currentPrimaryNode:    rejoinPrimaryStatus("alpha-2", time.Time{}, 11, ""),
 			hasCurrentPrimaryNode: true,
 		})
 
@@ -955,13 +934,8 @@ func TestBuildRejoinDivergenceAssessmentCoversRemainingPaths(t *testing.T) {
 				Healthy:  true,
 				Timeline: 11,
 			},
-			hasCurrentPrimary: true,
-			currentPrimaryNode: agentmodel.NodeStatus{
-				NodeName: "alpha-2",
-				Postgres: agentmodel.PostgresStatus{
-					Details: agentmodel.PostgresDetails{SystemIdentifier: testSysAlpha},
-				},
-			},
+			hasCurrentPrimary:     true,
+			currentPrimaryNode:    rejoinPrimaryStatus("alpha-2", time.Time{}, 11, testSysAlpha),
 			hasCurrentPrimaryNode: true,
 		})
 
@@ -993,13 +967,8 @@ func TestBuildRejoinDivergenceAssessmentCoversRemainingPaths(t *testing.T) {
 				Healthy:  true,
 				Timeline: 0, // unknown
 			},
-			hasCurrentPrimary: true,
-			currentPrimaryNode: agentmodel.NodeStatus{
-				NodeName: "alpha-2",
-				Postgres: agentmodel.PostgresStatus{
-					Details: agentmodel.PostgresDetails{SystemIdentifier: testSysAlpha},
-				},
-			},
+			hasCurrentPrimary:     true,
+			currentPrimaryNode:    rejoinPrimaryStatus("alpha-2", time.Time{}, 11, testSysAlpha),
 			hasCurrentPrimaryNode: true,
 		})
 
