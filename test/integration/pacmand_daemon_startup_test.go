@@ -25,7 +25,7 @@ func TestPacmandDaemonStartupMatrix(t *testing.T) {
 
 	testCases := []struct {
 		name         string
-		configBody   string
+		configFile   string
 		runAsDaemon  bool
 		withPostgres bool
 		wantExitCode int
@@ -34,16 +34,8 @@ func TestPacmandDaemonStartupMatrix(t *testing.T) {
 		wantContains []string
 	}{
 		{
-			name: "positive data node starts heartbeat with unavailable postgres",
-			configBody: `
-apiVersion: pacman.io/v1alpha1
-kind: NodeConfig
-node:
-  name: alpha-1
-  role: data
-postgres:
-  dataDir: /var/lib/postgresql/data
-`,
+			name:         "positive data node starts heartbeat with unavailable postgres",
+			configFile:   "positive-data-node-unavailable-postgres.yaml",
 			runAsDaemon:  true,
 			wantExitCode: 0,
 			wantContains: []string{
@@ -57,36 +49,8 @@ postgres:
 			},
 		},
 		{
-			name: "positive data node reports reachable postgres",
-			configBody: `
-apiVersion: pacman.io/v1alpha1
-kind: NodeConfig
-node:
-  name: alpha-2
-  role: data
-  apiAddress: 0.0.0.0:8081
-  controlAddress: 0.0.0.0:9091
-tls:
-  enabled: true
-  certFile: /etc/pacman/tls/server.crt
-  keyFile: /etc/pacman/tls/server.key
-  serverName: pacmand.internal
-postgres:
-  dataDir: /srv/postgres
-  binDir: /usr/lib/postgresql/17/bin
-  listenAddress: {{postgres_host}}
-  port: 5432
-  parameters:
-    max_connections: "200"
-bootstrap:
-  clusterName: alpha
-  initialPrimary: alpha-2
-  seedAddresses:
-    - 10.0.0.12:9091
-  expectedMembers:
-    - alpha-2
-    - alpha-3
-`,
+			name:         "positive data node reports reachable postgres",
+			configFile:   "positive-data-node-reachable-postgres.yaml",
 			runAsDaemon:  true,
 			withPostgres: true,
 			prepareFiles: func(t *testing.T) []testcontainers.ContainerFile {
@@ -115,14 +79,8 @@ bootstrap:
 			},
 		},
 		{
-			name: "positive witness node without postgres starts",
-			configBody: `
-apiVersion: pacman.io/v1alpha1
-kind: NodeConfig
-node:
-  name: witness-1
-  role: witness
-`,
+			name:         "positive witness node without postgres starts",
+			configFile:   "positive-witness-without-postgres.yaml",
 			runAsDaemon:  true,
 			wantExitCode: 0,
 			wantContains: []string{
@@ -136,20 +94,8 @@ node:
 			},
 		},
 		{
-			name: "positive witness node with tls starts",
-			configBody: `
-apiVersion: pacman.io/v1alpha1
-kind: NodeConfig
-node:
-  name: witness-2
-  role: witness
-  apiAddress: 0.0.0.0:8181
-  controlAddress: 0.0.0.0:9191
-tls:
-  enabled: true
-  certFile: /etc/pacman/tls/witness.crt
-  keyFile: /etc/pacman/tls/witness.key
-`,
+			name:        "positive witness node with tls starts",
+			configFile:  "positive-witness-with-tls.yaml",
 			runAsDaemon: true,
 			prepareFiles: func(t *testing.T) []testcontainers.ContainerFile {
 				return writeIntegrationTLSFixture(t).containerFiles("/etc/pacman/tls/witness.crt", "/etc/pacman/tls/witness.key")
@@ -165,19 +111,8 @@ tls:
 			},
 		},
 		{
-			name: "positive data node with defaults and safe params starts",
-			configBody: `
-apiVersion: pacman.io/v1alpha1
-kind: NodeConfig
-node:
-  name: alpha-3
-  role: data
-postgres:
-  dataDir: /data/postgres
-  parameters:
-    max_connections: "150"
-    shared_buffers: 256MB
-`,
+			name:         "positive data node with defaults and safe params starts",
+			configFile:   "positive-data-node-defaults-safe-params.yaml",
 			runAsDaemon:  true,
 			wantExitCode: 0,
 			wantContains: []string{
@@ -197,7 +132,6 @@ postgres:
 		},
 		{
 			name:         "negative missing config file fails",
-			configBody:   "",
 			wantExitCode: 1,
 			wantContains: []string{
 				`"msg":"app run failed"`,
@@ -205,14 +139,8 @@ postgres:
 			},
 		},
 		{
-			name: "negative data node without postgres section fails",
-			configBody: `
-apiVersion: pacman.io/v1alpha1
-kind: NodeConfig
-node:
-  name: broken-data
-  role: data
-`,
+			name:         "negative data node without postgres section fails",
+			configFile:   "negative-data-node-without-postgres.yaml",
 			wantExitCode: 1,
 			wantContains: []string{
 				`"msg":"app run failed"`,
@@ -221,17 +149,8 @@ node:
 			},
 		},
 		{
-			name: "negative tls config missing key fails",
-			configBody: `
-apiVersion: pacman.io/v1alpha1
-kind: NodeConfig
-node:
-  name: broken-tls
-  role: witness
-tls:
-  enabled: true
-  certFile: /etc/pacman/tls/server.crt
-`,
+			name:         "negative tls config missing key fails",
+			configFile:   "negative-tls-missing-key.yaml",
 			wantExitCode: 1,
 			wantContains: []string{
 				`"msg":"app run failed"`,
@@ -240,18 +159,8 @@ tls:
 			},
 		},
 		{
-			name: "negative unsafe postgres override fails",
-			configBody: `
-apiVersion: pacman.io/v1alpha1
-kind: NodeConfig
-node:
-  name: broken-override
-  role: data
-postgres:
-  dataDir: /var/lib/postgresql/data
-  parameters:
-    primary_conninfo: host=alpha-1
-`,
+			name:         "negative unsafe postgres override fails",
+			configFile:   "negative-unsafe-postgres-override.yaml",
 			wantExitCode: 1,
 			wantContains: []string{
 				`"msg":"app run failed"`,
@@ -259,11 +168,81 @@ postgres:
 				`config postgres parameters contain unsafe local override`,
 			},
 		},
+		{
+			name:         "negative unsupported api version fails",
+			configFile:   "negative-unsupported-api-version.yaml",
+			wantExitCode: 1,
+			wantContains: []string{
+				`"msg":"app run failed"`,
+				`validate config document`,
+				`config apiVersion is unsupported`,
+			},
+		},
+		{
+			name:         "negative unexpected kind fails",
+			configFile:   "negative-unexpected-kind.yaml",
+			wantExitCode: 1,
+			wantContains: []string{
+				`"msg":"app run failed"`,
+				`validate config document`,
+				`config kind is invalid`,
+			},
+		},
+		{
+			name:         "negative missing node name fails",
+			configFile:   "negative-missing-node-name.yaml",
+			wantExitCode: 1,
+			wantContains: []string{
+				`"msg":"app run failed"`,
+				`validate config document`,
+				`config node name is required`,
+			},
+		},
+		{
+			name:         "negative invalid node role fails",
+			configFile:   "negative-invalid-node-role.yaml",
+			wantExitCode: 1,
+			wantContains: []string{
+				`"msg":"app run failed"`,
+				`validate config document`,
+				`config node role is invalid`,
+			},
+		},
+		{
+			name:         "negative invalid api address fails",
+			configFile:   "negative-invalid-api-address.yaml",
+			wantExitCode: 1,
+			wantContains: []string{
+				`"msg":"app run failed"`,
+				`validate config document`,
+				`config node apiAddress is invalid`,
+			},
+		},
+		{
+			name:         "negative postgres port out of range fails",
+			configFile:   "negative-postgres-port-out-of-range.yaml",
+			wantExitCode: 1,
+			wantContains: []string{
+				`"msg":"app run failed"`,
+				`validate config document`,
+				`config postgres port must be between 1 and 65535`,
+			},
+		},
+		{
+			name:         "negative security section without token fails",
+			configFile:   "negative-security-without-token.yaml",
+			wantExitCode: 1,
+			wantContains: []string{
+				`"msg":"app run failed"`,
+				`validate config document`,
+				`config security adminBearerToken or adminBearerTokenFile is required`,
+			},
+		},
 	}
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			configBody := testCase.configBody
+			configBody := readDaemonStartupConfig(t, testCase.configFile)
 			if testCase.withPostgres {
 				postgresAlias := sanitizeIntegrationName(testCase.name) + "-postgres"
 				postgresFixture := env.StartPostgres(t, testCase.name, postgresAlias)
@@ -309,7 +288,26 @@ postgres:
 	}
 }
 
-const daemonConfigPath = "/tmp/pacmand.yaml"
+const (
+	daemonConfigPath             = "/tmp/pacmand.yaml"
+	daemonStartupConfigDirectory = "testdata/pacmand_daemon_startup"
+)
+
+func readDaemonStartupConfig(t *testing.T, name string) string {
+	t.Helper()
+
+	if strings.TrimSpace(name) == "" {
+		return ""
+	}
+
+	path := filepath.Join(daemonStartupConfigDirectory, name)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read daemon startup config fixture %q: %v", path, err)
+	}
+
+	return string(body)
+}
 
 func startDaemonRunner(t *testing.T, env *testenv.Environment, name, configBody string, extraFiles []testcontainers.ContainerFile, extraEnv map[string]string) *testenv.Runner {
 	t.Helper()

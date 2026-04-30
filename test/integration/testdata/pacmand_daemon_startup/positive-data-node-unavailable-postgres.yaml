@@ -1,0 +1,7 @@
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: alpha-1
+  role: data
+postgres:
+  dataDir: /var/lib/postgresql/data

@@ -1,0 +1,8 @@
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: broken-tls
+  role: witness
+tls:
+  enabled: true
+  certFile: /etc/pacman/tls/server.crt

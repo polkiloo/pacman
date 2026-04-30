@@ -1,0 +1,27 @@
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: alpha-2
+  role: data
+  apiAddress: 0.0.0.0:8081
+  controlAddress: 0.0.0.0:9091
+tls:
+  enabled: true
+  certFile: /etc/pacman/tls/server.crt
+  keyFile: /etc/pacman/tls/server.key
+  serverName: pacmand.internal
+postgres:
+  dataDir: /srv/postgres
+  binDir: /usr/lib/postgresql/17/bin
+  listenAddress: {{postgres_host}}
+  port: 5432
+  parameters:
+    max_connections: "200"
+bootstrap:
+  clusterName: alpha
+  initialPrimary: alpha-2
+  seedAddresses:
+    - 10.0.0.12:9091
+  expectedMembers:
+    - alpha-2
+    - alpha-3
