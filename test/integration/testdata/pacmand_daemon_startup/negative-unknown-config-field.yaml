@@ -1,0 +1,9 @@
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: alpha-1
+  unknownField: value
+postgres:
+  dataDir: /var/lib/postgresql/data
+bootstrap:
+  clusterName: alpha

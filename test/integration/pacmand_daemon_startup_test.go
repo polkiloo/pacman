@@ -26,6 +26,7 @@ func TestPacmandDaemonStartupMatrix(t *testing.T) {
 	testCases := []struct {
 		name         string
 		configFile   string
+		configMode   os.FileMode
 		runAsDaemon  bool
 		withPostgres bool
 		wantExitCode int
@@ -238,6 +239,74 @@ func TestPacmandDaemonStartupMatrix(t *testing.T) {
 				`config security adminBearerToken or adminBearerTokenFile is required`,
 			},
 		},
+		{
+			name:         "negative malformed yaml fails",
+			configFile:   "negative-malformed-yaml.yaml",
+			wantExitCode: 1,
+			wantContains: []string{
+				`"msg":"app run failed"`,
+				`decode config document`,
+			},
+		},
+		{
+			name:         "negative unknown config field fails",
+			configFile:   "negative-unknown-config-field.yaml",
+			wantExitCode: 1,
+			wantContains: []string{
+				`"msg":"app run failed"`,
+				`field unknownField not found`,
+			},
+		},
+		{
+			name:         "negative dcs bootstrap cluster mismatch fails",
+			configFile:   "negative-dcs-bootstrap-cluster-mismatch.yaml",
+			wantExitCode: 1,
+			wantContains: []string{
+				`"msg":"app run failed"`,
+				`validate config document`,
+				`config dcs clusterName must match bootstrap clusterName`,
+			},
+		},
+		{
+			name:         "negative bootstrap seed address invalid fails",
+			configFile:   "negative-bootstrap-seed-address-invalid.yaml",
+			wantExitCode: 1,
+			wantContains: []string{
+				`"msg":"app run failed"`,
+				`validate config document`,
+				`config bootstrap seedAddresses contain an invalid address`,
+			},
+		},
+		{
+			name:         "negative permissive inline admin token fails",
+			configFile:   "negative-permissive-inline-admin-token.yaml",
+			configMode:   0o644,
+			wantExitCode: 1,
+			wantContains: []string{
+				`"msg":"app run failed"`,
+				`validate sensitive config file`,
+				`config file containing inline secrets must not be readable by group or others`,
+			},
+		},
+		{
+			name:         "negative patroni multiple dcs backends fails",
+			configFile:   "negative-patroni-multiple-dcs-backends.yaml",
+			wantExitCode: 1,
+			wantContains: []string{
+				`"msg":"app run failed"`,
+				`Patroni config declares multiple DCS backends`,
+			},
+		},
+		{
+			name:         "negative patroni invalid etcd hosts type fails",
+			configFile:   "negative-patroni-invalid-etcd-hosts-type.yaml",
+			wantExitCode: 1,
+			wantContains: []string{
+				`"msg":"app run failed"`,
+				`decode Patroni hosts`,
+				`expected string or list`,
+			},
+		},
 	}
 
 	for _, testCase := range testCases {
@@ -259,7 +328,15 @@ func TestPacmandDaemonStartupMatrix(t *testing.T) {
 				extraFiles = testCase.prepareFiles(t)
 			}
 
-			runner := startDaemonRunner(t, env, testCase.name, configBody, extraFiles, testCase.extraEnv)
+			runner := startDaemonRunnerWithConfigMode(
+				t,
+				env,
+				testCase.name,
+				configBody,
+				testCase.configMode,
+				extraFiles,
+				testCase.extraEnv,
+			)
 
 			var result testenv.ExecResult
 			switch {
@@ -312,6 +389,12 @@ func readDaemonStartupConfig(t *testing.T, name string) string {
 func startDaemonRunner(t *testing.T, env *testenv.Environment, name, configBody string, extraFiles []testcontainers.ContainerFile, extraEnv map[string]string) *testenv.Runner {
 	t.Helper()
 
+	return startDaemonRunnerWithConfigMode(t, env, name, configBody, 0o600, extraFiles, extraEnv)
+}
+
+func startDaemonRunnerWithConfigMode(t *testing.T, env *testenv.Environment, name, configBody string, configMode os.FileMode, extraFiles []testcontainers.ContainerFile, extraEnv map[string]string) *testenv.Runner {
+	t.Helper()
+
 	runnerEnv := map[string]string{
 		"PACMAN_TEST_ROLE": "pacmand",
 	}
@@ -327,7 +410,7 @@ func startDaemonRunner(t *testing.T, env *testenv.Environment, name, configBody 
 	}
 
 	if strings.TrimSpace(configBody) != "" {
-		cfg.Files = append(cfg.Files, writeDaemonConfigFile(t, configBody))
+		cfg.Files = append(cfg.Files, writeDaemonConfigFileWithMode(t, configBody, configMode))
 	}
 	cfg.Files = append(cfg.Files, extraFiles...)
 
@@ -348,16 +431,26 @@ func runPacmandUntilTerminated(t *testing.T, runner *testenv.Runner) testenv.Exe
 func writeDaemonConfigFile(t *testing.T, body string) testcontainers.ContainerFile {
 	t.Helper()
 
+	return writeDaemonConfigFileWithMode(t, body, 0o600)
+}
+
+func writeDaemonConfigFileWithMode(t *testing.T, body string, mode os.FileMode) testcontainers.ContainerFile {
+	t.Helper()
+
+	if mode == 0 {
+		mode = 0o600
+	}
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "pacmand.yaml")
-	if err := os.WriteFile(path, []byte(strings.TrimSpace(body)+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(strings.TrimSpace(body)+"\n"), mode); err != nil {
 		t.Fatalf("write daemon config: %v", err)
 	}
 
 	return testcontainers.ContainerFile{
 		HostFilePath:      path,
 		ContainerFilePath: daemonConfigPath,
-		FileMode:          0o600,
+		FileMode:          int64(mode),
 	}
 }
 

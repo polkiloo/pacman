@@ -1,0 +1,10 @@
+scope: alpha
+name: alpha-1
+restapi:
+  listen: 127.0.0.1:8008
+etcd:
+  hosts:
+    primary: 127.0.0.1:2379
+postgresql:
+  listen: 127.0.0.1:5432
+  data_dir: data/postgresql0
