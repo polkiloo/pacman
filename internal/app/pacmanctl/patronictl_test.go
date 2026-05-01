@@ -2164,6 +2164,288 @@ func TestRunPatronictlShowConfigWithScope(t *testing.T) {
 	}
 }
 
+func TestRunPatronictlListExtendedTimestampTSVWithScope(t *testing.T) {
+	t.Parallel()
+
+	lastSeen := time.Date(2026, time.May, 1, 8, 30, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet || request.URL.Path != "/api/v1/cluster" {
+			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(clusterStatusResponse{
+			ClusterName: "alpha",
+			Members: []memberStatusJSON{
+				{
+					Name:        "alpha-1",
+					Host:        "db1.internal",
+					Port:        5432,
+					Role:        "primary",
+					State:       "running",
+					Timeline:    7,
+					LagBytes:    1572864,
+					LastSeenAt:  lastSeen,
+					APIURL:      "http://alpha-1:8080",
+					NeedsRejoin: true,
+					Tags:        map[string]any{"zone": "a"},
+				},
+			},
+		}); err != nil {
+			t.Fatalf("encode cluster: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	err := app.Run(context.Background(), []string{
+		"-api-url", server.URL,
+		"list", "alpha",
+		"--extended",
+		"--timestamp",
+		"--format", "tsv",
+	})
+	if err != nil {
+		t.Fatalf("run patronictl-compatible list: %v", err)
+	}
+
+	output := stdout.String()
+	assertContains(t, output, "Cluster\tMember\tHost\tRole\tState\tTL\tLag in MB\tLast Seen\tAPI URL\tNeeds Rejoin\tTags")
+	assertContains(t, output, "alpha\talpha-1\tdb1.internal:5432\tprimary\trunning\t7\t1.5\t2026-05-01T08:30:00Z\thttp://alpha-1:8080\ttrue\t{\"zone\":\"a\"}")
+}
+
+func TestRunPatronictlSwitchoverSendsForceScheduledAndRendersYAML(t *testing.T) {
+	t.Parallel()
+
+	scheduledAt := time.Date(2026, time.May, 1, 9, 15, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == "/api/v1/cluster":
+			if err := json.NewEncoder(writer).Encode(clusterStatusResponse{
+				ClusterName:    "alpha",
+				CurrentPrimary: "alpha-1",
+			}); err != nil {
+				t.Fatalf("encode cluster: %v", err)
+			}
+		case request.Method == http.MethodPost && request.URL.Path == "/api/v1/operations/switchover":
+			var body switchoverRequestJSON
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatalf("decode switchover request: %v", err)
+			}
+			if body.Candidate != "alpha-2" {
+				t.Fatalf("candidate: got %q, want alpha-2", body.Candidate)
+			}
+			if body.ScheduledAt == nil || !body.ScheduledAt.Equal(scheduledAt) {
+				t.Fatalf("scheduledAt: got %v, want %v", body.ScheduledAt, scheduledAt)
+			}
+			if body.Reason != "planned maintenance" {
+				t.Fatalf("reason: got %q, want planned maintenance", body.Reason)
+			}
+			if body.RequestedBy != "dba" {
+				t.Fatalf("requestedBy: got %q, want dba", body.RequestedBy)
+			}
+			if !body.Force {
+				t.Fatal("expected force=true")
+			}
+
+			writer.WriteHeader(http.StatusAccepted)
+			if err := json.NewEncoder(writer).Encode(operationAcceptedResponse{
+				Message:   "switchover accepted",
+				Operation: operationJSON{ID: "sw-force", Kind: "switchover", State: "pending", ToMember: "alpha-2"},
+			}); err != nil {
+				t.Fatalf("encode switchover response: %v", err)
+			}
+		default:
+			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	err := app.Run(context.Background(), []string{
+		"-api-url", server.URL,
+		"switchover",
+		"--leader", "alpha-1",
+		"--candidate", "alpha-2",
+		"--scheduled", scheduledAt.Format(time.RFC3339),
+		"--reason", "planned maintenance",
+		"--requested-by", "dba",
+		"--force",
+		"--format", "yaml",
+		"alpha",
+	})
+	if err != nil {
+		t.Fatalf("run patronictl-compatible switchover: %v", err)
+	}
+
+	assertContains(t, stdout.String(), "sw-force")
+}
+
+func TestRunPatronictlFailoverWithLeaderSendsForceAsSwitchover(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == "/api/v1/cluster":
+			if err := json.NewEncoder(writer).Encode(clusterStatusResponse{
+				ClusterName:    "alpha",
+				CurrentPrimary: "alpha-1",
+			}); err != nil {
+				t.Fatalf("encode cluster: %v", err)
+			}
+		case request.Method == http.MethodPost && request.URL.Path == "/api/v1/operations/switchover":
+			var body switchoverRequestJSON
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatalf("decode switchover request: %v", err)
+			}
+			if body.Candidate != "alpha-2" {
+				t.Fatalf("candidate: got %q, want alpha-2", body.Candidate)
+			}
+			if body.Reason != "primary restart" {
+				t.Fatalf("reason: got %q, want primary restart", body.Reason)
+			}
+			if body.RequestedBy != "ops" {
+				t.Fatalf("requestedBy: got %q, want ops", body.RequestedBy)
+			}
+			if !body.Force {
+				t.Fatal("expected force=true")
+			}
+
+			writer.WriteHeader(http.StatusAccepted)
+			if err := json.NewEncoder(writer).Encode(operationAcceptedResponse{
+				Operation: operationJSON{ID: "sw-from-failover", Kind: "switchover"},
+			}); err != nil {
+				t.Fatalf("encode response: %v", err)
+			}
+		default:
+			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	err := app.Run(context.Background(), []string{
+		"-api-url", server.URL,
+		"failover",
+		"--leader", "alpha-1",
+		"--candidate", "alpha-2",
+		"--reason", "primary restart",
+		"--requested-by", "ops",
+		"--force",
+		"--format", "json",
+	})
+	if err != nil {
+		t.Fatalf("run patronictl-compatible failover with leader: %v", err)
+	}
+
+	var payload operationAcceptedResponse
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode failover output: %v", err)
+	}
+	if payload.Operation.ID != "sw-from-failover" {
+		t.Fatalf("operation id: got %q, want sw-from-failover", payload.Operation.ID)
+	}
+}
+
+func TestRunPatronictlPauseJSONSendsRequestedByAndWaits(t *testing.T) {
+	t.Parallel()
+
+	var maintenanceGets int
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == "/api/v1/cluster":
+			if err := json.NewEncoder(writer).Encode(clusterStatusResponse{ClusterName: "alpha"}); err != nil {
+				t.Fatalf("encode cluster: %v", err)
+			}
+		case request.Method == http.MethodPut && request.URL.Path == "/api/v1/maintenance":
+			var body maintenanceModeUpdateRequestJSON
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatalf("decode maintenance request: %v", err)
+			}
+			if !body.Enabled {
+				t.Fatal("expected enabled=true")
+			}
+			if body.Reason != "operator pause" {
+				t.Fatalf("reason: got %q, want operator pause", body.Reason)
+			}
+			if body.RequestedBy != "ops" {
+				t.Fatalf("requestedBy: got %q, want ops", body.RequestedBy)
+			}
+			if err := json.NewEncoder(writer).Encode(maintenanceModeStatusJSON{Enabled: true, Reason: body.Reason, RequestedBy: body.RequestedBy}); err != nil {
+				t.Fatalf("encode maintenance PUT: %v", err)
+			}
+		case request.Method == http.MethodGet && request.URL.Path == "/api/v1/maintenance":
+			maintenanceGets++
+			if err := json.NewEncoder(writer).Encode(maintenanceModeStatusJSON{Enabled: true, Reason: "operator pause", RequestedBy: "ops"}); err != nil {
+				t.Fatalf("encode maintenance GET: %v", err)
+			}
+		default:
+			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	err := app.Run(context.Background(), []string{
+		"-api-url", server.URL,
+		"pause",
+		"alpha",
+		"--reason", "operator pause",
+		"--requested-by", "ops",
+		"--wait",
+		"--format", "json",
+	})
+	if err != nil {
+		t.Fatalf("run patronictl-compatible pause: %v", err)
+	}
+	if maintenanceGets != 1 {
+		t.Fatalf("maintenance GET count: got %d, want 1", maintenanceGets)
+	}
+
+	var payload maintenanceModeStatusJSON
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode pause output: %v", err)
+	}
+	if !payload.Enabled || payload.Reason != "operator pause" || payload.RequestedBy != "ops" {
+		t.Fatalf("unexpected pause payload: %+v", payload)
+	}
+}
+
+func TestRunPatronictlShowConfigScopeMismatchDoesNotRenderOutput(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(clusterSpecResponse{ClusterName: "beta"}); err != nil {
+			t.Fatalf("encode spec: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(Params{Stdout: &stdout, Stderr: &bytes.Buffer{}})
+
+	err := app.Run(context.Background(), []string{"-api-url", server.URL, "show-config", "alpha"})
+	if err == nil {
+		t.Fatal("expected scope mismatch error")
+	}
+	assertContains(t, err.Error(), "cluster name mismatch")
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout on scope mismatch, got %q", stdout.String())
+	}
+}
+
 func TestRunPatronictlShowConfigScopeMismatch(t *testing.T) {
 	t.Parallel()
 
