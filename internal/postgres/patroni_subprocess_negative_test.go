@@ -151,7 +151,26 @@ func writeExecutable(t *testing.T, dir, name, body string) {
 	t.Helper()
 
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-		t.Fatalf("write executable %q: %v", path, err)
+	temp, err := os.CreateTemp(dir, "."+name+".tmp-*")
+	if err != nil {
+		t.Fatalf("create temporary executable for %q: %v", path, err)
+	}
+	tempPath := temp.Name()
+	defer func() {
+		_ = os.Remove(tempPath)
+	}()
+
+	if _, err := temp.WriteString(body); err != nil {
+		_ = temp.Close()
+		t.Fatalf("write temporary executable %q: %v", tempPath, err)
+	}
+	if err := temp.Close(); err != nil {
+		t.Fatalf("close temporary executable %q: %v", tempPath, err)
+	}
+	if err := os.Chmod(tempPath, 0o755); err != nil {
+		t.Fatalf("chmod temporary executable %q: %v", tempPath, err)
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		t.Fatalf("publish executable %q: %v", path, err)
 	}
 }
