@@ -38,6 +38,7 @@ func TestPostgresReplicationFixtureBootstrapsStreamingTopology(t *testing.T) {
 	primary := env.StartReplicationPrimary(t, fixtureNode1, fixtureNode1Alias)
 	standbyTwo := env.StartStreamingStandby(t, fixtureNode2, fixtureNode2Alias, primary, fixtureSlot2)
 	standbyThree := env.StartStreamingStandby(t, fixtureNode3, fixtureNode3Alias, primary, fixtureSlot3)
+	setPostgresObservationEnv(t, primary)
 
 	waitForPostgresRole(t, primary, cluster.MemberRolePrimary)
 	waitForPostgresRole(t, standbyTwo, cluster.MemberRoleReplica)
@@ -76,6 +77,7 @@ func TestReplicationFixtureSingleStandbyBootstraps(t *testing.T) {
 	env := testenv.New(t)
 	primary := env.StartReplicationPrimary(t, "alpha-1", "alpha-1-postgres")
 	standby := env.StartStreamingStandby(t, "alpha-2", "alpha-2-postgres", primary, "alpha_2")
+	setPostgresObservationEnv(t, primary)
 
 	waitForPostgresRole(t, primary, cluster.MemberRolePrimary)
 	waitForPostgresRole(t, standby, cluster.MemberRoleReplica)
@@ -112,6 +114,7 @@ func TestReplicationFixtureSubsequentWritesReplicateToAllStandbys(t *testing.T) 
 	primary := env.StartReplicationPrimary(t, fixtureNode1, fixtureNode1Alias)
 	standbyTwo := env.StartStreamingStandby(t, fixtureNode2, fixtureNode2Alias, primary, fixtureSlot2)
 	standbyThree := env.StartStreamingStandby(t, fixtureNode3, fixtureNode3Alias, primary, fixtureSlot3)
+	setPostgresObservationEnv(t, primary)
 
 	waitForPostgresRole(t, primary, cluster.MemberRolePrimary)
 	waitForPostgresRole(t, standbyTwo, cluster.MemberRoleReplica)
@@ -151,6 +154,7 @@ func TestReplicationFixturePrimaryShowsActiveSendersForAllStandbys(t *testing.T)
 	primary := env.StartReplicationPrimary(t, fixtureNode1, fixtureNode1Alias)
 	standbyTwo := env.StartStreamingStandby(t, fixtureNode2, fixtureNode2Alias, primary, fixtureSlot2)
 	standbyThree := env.StartStreamingStandby(t, fixtureNode3, fixtureNode3Alias, primary, fixtureSlot3)
+	setPostgresObservationEnv(t, primary)
 
 	waitForPostgresRole(t, primary, cluster.MemberRolePrimary)
 	waitForPostgresRole(t, standbyTwo, cluster.MemberRoleReplica)
@@ -181,6 +185,7 @@ func TestReplicationFixtureStandbyRejectsDirectWrite(t *testing.T) {
 	env := testenv.New(t)
 	primary := env.StartReplicationPrimary(t, fixtureNode1, fixtureNode1Alias)
 	standby := env.StartStreamingStandby(t, fixtureNode2, fixtureNode2Alias, primary, fixtureSlot2)
+	setPostgresObservationEnv(t, primary)
 
 	waitForPostgresRole(t, primary, cluster.MemberRolePrimary)
 	waitForPostgresRole(t, standby, cluster.MemberRoleReplica)
@@ -202,6 +207,7 @@ func TestReplicationFixtureStandbyHasNoOwnReplicationSlots(t *testing.T) {
 	env := testenv.New(t)
 	primary := env.StartReplicationPrimary(t, fixtureNode1, fixtureNode1Alias)
 	standby := env.StartStreamingStandby(t, fixtureNode2, fixtureNode2Alias, primary, fixtureSlot2)
+	setPostgresObservationEnv(t, primary)
 
 	waitForPostgresRole(t, primary, cluster.MemberRolePrimary)
 	waitForPostgresRole(t, standby, cluster.MemberRoleReplica)
@@ -224,6 +230,7 @@ func TestReplicationFixturePrimaryHasNoInactiveSlots(t *testing.T) {
 	primary := env.StartReplicationPrimary(t, fixtureNode1, fixtureNode1Alias)
 	standbyTwo := env.StartStreamingStandby(t, fixtureNode2, fixtureNode2Alias, primary, fixtureSlot2)
 	standbyThree := env.StartStreamingStandby(t, fixtureNode3, fixtureNode3Alias, primary, fixtureSlot3)
+	setPostgresObservationEnv(t, primary)
 
 	waitForPostgresRole(t, primary, cluster.MemberRolePrimary)
 	waitForPostgresRole(t, standbyTwo, cluster.MemberRoleReplica)
@@ -238,9 +245,119 @@ func TestReplicationFixturePrimaryHasNoInactiveSlots(t *testing.T) {
 	)
 }
 
+// TestReplicationFixturePatroniInspiredNegativeSafetyCases verifies negative
+// HA/replication invariants against a real primary+standby topology. These
+// cases mirror the Patroni-style emphasis on not treating a replica as writable,
+// not allowing duplicate slots, and not hiding unhealthy slot state.
+func TestReplicationFixturePatroniInspiredNegativeSafetyCases(t *testing.T) {
+	if testing.Short() {
+		t.Skip(skipShortMode)
+	}
+
+	env := testenv.New(t)
+	primary := env.StartReplicationPrimary(t, "patroni-negative-1", "patroni-negative-1-postgres")
+	standby := env.StartStreamingStandby(t, "patroni-negative-2", "patroni-negative-2-postgres", primary, "patroni_negative_2")
+	setPostgresObservationEnv(t, primary)
+
+	waitForPostgresRole(t, primary, cluster.MemberRolePrimary)
+	waitForPostgresRole(t, standby, cluster.MemberRoleReplica)
+	waitForQueryValue(t, standby, `SELECT status FROM pg_stat_wal_receiver`, "streaming")
+	waitForQueryValue(t, standby, `SHOW primary_slot_name`, "patroni_negative_2")
+
+	execSQL(t, primary, `
+CREATE TABLE IF NOT EXISTS patroni_negative_guard (
+	id integer PRIMARY KEY,
+	payload text NOT NULL
+)`)
+	execSQL(t, primary, `
+INSERT INTO patroni_negative_guard (id, payload)
+VALUES (1, 'replicated-negative-fixture')
+ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload`)
+	waitForQueryValue(t, standby, `SELECT payload FROM patroni_negative_guard WHERE id = 1`, "replicated-negative-fixture")
+
+	negativeCases := []struct {
+		name string
+		run  func(t *testing.T)
+	}{
+		{
+			name: "negative standby rejects create table",
+			run: func(t *testing.T) {
+				assertSQLFails(t, standby,
+					`CREATE TABLE patroni_negative_create_rejected (id integer PRIMARY KEY)`,
+					"read-only transaction", "recovery mode", "standby",
+				)
+			},
+		},
+		{
+			name: "negative standby rejects insert",
+			run: func(t *testing.T) {
+				assertSQLFails(t, standby,
+					`INSERT INTO patroni_negative_guard (id, payload) VALUES (2, 'must-fail')`,
+					"read-only transaction", "recovery mode", "standby",
+				)
+			},
+		},
+		{
+			name: "negative standby rejects update",
+			run: func(t *testing.T) {
+				assertSQLFails(t, standby,
+					`UPDATE patroni_negative_guard SET payload = 'must-fail' WHERE id = 1`,
+					"read-only transaction", "recovery mode", "standby",
+				)
+			},
+		},
+		{
+			name: "negative standby rejects truncate",
+			run: func(t *testing.T) {
+				assertSQLFails(t, standby,
+					`TRUNCATE patroni_negative_guard`,
+					"read-only transaction", "recovery mode", "standby",
+				)
+			},
+		},
+		{
+			name: "negative primary rejects duplicate standby slot",
+			run: func(t *testing.T) {
+				assertSQLFails(t, primary,
+					`SELECT pg_create_physical_replication_slot('patroni_negative_2')`,
+					"already exists", "replication slot",
+				)
+			},
+		},
+		{
+			name: "negative standby has no local replication slots",
+			run: func(t *testing.T) {
+				waitForQueryValue(t, standby, `SELECT COUNT(*)::text FROM pg_replication_slots`, "0")
+			},
+		},
+		{
+			name: "negative active standby slot is not inactive on primary",
+			run: func(t *testing.T) {
+				waitForQueryValue(t, primary,
+					`SELECT COUNT(*)::text FROM pg_replication_slots WHERE slot_name = 'patroni_negative_2' AND NOT active`,
+					"0",
+				)
+			},
+		},
+	}
+
+	for _, testCase := range negativeCases {
+		t.Run(testCase.name, testCase.run)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+func setPostgresObservationEnv(t *testing.T, fixture *testenv.Postgres) {
+	t.Helper()
+
+	t.Setenv("PGDATABASE", fixture.Database())
+	t.Setenv("PGUSER", fixture.Username())
+	t.Setenv("PGPASSWORD", fixture.Password())
+	t.Setenv("PGSSLMODE", "disable")
+}
 
 func assertActiveReplicationSlots(t *testing.T, fixture *testenv.Postgres, wantSlots ...string) {
 	t.Helper()
@@ -286,17 +403,23 @@ func assertActiveReplicationSlots(t *testing.T, fixture *testenv.Postgres, wantS
 func assertStandbyRejectsWrite(t *testing.T, fixture *testenv.Postgres, statement string) {
 	t.Helper()
 
+	assertSQLFails(t, fixture, statement, "read-only transaction", "cannot execute", "recovery mode", "standby")
+}
+
+func assertSQLFails(t *testing.T, fixture *testenv.Postgres, statement string, wantSubstrings ...string) {
+	t.Helper()
+
 	db := openFixtureDB(t, fixture)
 	defer db.Close()
 
 	_, err := db.Exec(statement)
 	if err == nil {
-		t.Fatalf("expected write to standby %q to fail, but it succeeded", fixture.Name())
+		t.Fatalf("expected SQL on %q to fail, but it succeeded: %s", fixture.Name(), statement)
 	}
 
 	errMsg := err.Error()
-	if !containsAny(errMsg, "read-only transaction", "cannot execute", "recovery mode", "standby") {
-		t.Fatalf("expected read-only error from standby %q, got: %v", fixture.Name(), err)
+	if !containsAny(errMsg, wantSubstrings...) {
+		t.Fatalf("expected SQL error from %q to contain one of %v, got: %v", fixture.Name(), wantSubstrings, err)
 	}
 }
 
