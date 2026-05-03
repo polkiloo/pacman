@@ -153,6 +153,9 @@ var patroniFieldRules = map[string]patroniFieldRule{
 			"parameters": {
 				openMap: true,
 			},
+			"create_replica_methods": {
+				warning: `Patroni key "postgresql.create_replica_methods" is not translated; PACMAN replica imaging is handled by deployment or rejoin workflows`,
+			},
 			"pgpass": {
 				warning: `Patroni key "postgresql.pgpass" is not translated; PACMAN does not require a .pgpass file`,
 			},
@@ -162,7 +165,22 @@ var patroniFieldRules = map[string]patroniFieldRule{
 			"basebackup": {
 				warning: `Patroni key "postgresql.basebackup" is not translated; PACMAN does not import Patroni basebackup flags into node config`,
 			},
+			"barman": {
+				warning: `Patroni key "postgresql.barman" is not translated; configure Barman recovery tooling outside PACMAN and pass restored PostgreSQL settings through cluster policy`,
+			},
+			"wale": {
+				warning: `Patroni key "postgresql.wale" is not translated; configure WAL-E/WAL-G tooling outside PACMAN and pass restored PostgreSQL settings through cluster policy`,
+			},
+			"wal_e": {
+				warning: `Patroni key "postgresql.wal_e" is not translated; configure WAL-E/WAL-G tooling outside PACMAN and pass restored PostgreSQL settings through cluster policy`,
+			},
+			"recovery_conf": {
+				warning: `Patroni key "postgresql.recovery_conf" is not translated; PACMAN renders standby recovery settings from cluster policy during rejoin`,
+			},
 		},
+	},
+	"callbacks": {
+		warning: `Patroni key "callbacks" is not translated; configure cloud role-change callbacks outside PACMAN`,
 	},
 	"tags": {
 		warning: `Patroni key "tags" is not translated; configure load-balancer and placement hints outside PACMAN`,
