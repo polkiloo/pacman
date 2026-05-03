@@ -1,0 +1,12 @@
+scope: alpha
+name: alpha-1
+restapi:
+  listen: 127.0.0.1:8008
+etcd:
+  host: 127.0.0.1:2379
+raft:
+  data_dir: /var/lib/patroni/raft
+  self_addr: 127.0.0.1:2222
+postgresql:
+  listen: 127.0.0.1:5432
+  data_dir: data/postgresql0

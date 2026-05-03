@@ -450,15 +450,15 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 
 
 ### Patroni-Inspired Coverage Groups
-- [ ] add REST API and HTTP server coverage inspired by Patroni `tests/test_api.py`
-- [ ] add daemon entrypoint and process lifecycle coverage inspired by Patroni `tests/test_patroni.py`
-- [ ] add CLI command and presentation coverage inspired by Patroni `tests/test_ctl.py`
-- [ ] add config parsing, generation, validator, and file-permission coverage inspired by Patroni `tests/test_config.py`, `tests/test_config_generator.py`, `tests/test_validator.py`, and `tests/test_file_perm.py`
-- [ ] add async executor, callback executor, and cancellable subprocess coverage inspired by Patroni `tests/test_async_executor.py`, `tests/test_callback_executor.py`, and `tests/test_cancellable.py`
-- [ ] add HA loop, quorum, synchronous replication, and slot-management coverage inspired by Patroni `tests/test_ha.py`, `tests/test_quorum.py`, `tests/test_sync.py`, and `tests/test_slots.py`
-- [ ] add PostgreSQL bootstrap, local lifecycle, and postmaster coverage inspired by Patroni `tests/test_bootstrap.py`, `tests/test_postgresql.py`, and `tests/test_postmaster.py`
-- [ ] add rewind and replica rejoin coverage inspired by Patroni `tests/test_rewind.py`
-- [ ] add backup, restore, and cloud-integration coverage inspired by Patroni `tests/test_aws.py`, `tests/test_barman.py`, and `tests/test_wale_restore.py`
+- [x] add REST API and HTTP server coverage inspired by Patroni `tests/test_api.py`
+- [x] add daemon entrypoint and process lifecycle coverage inspired by Patroni `tests/test_patroni.py`
+- [x] add CLI command and presentation coverage inspired by Patroni `tests/test_ctl.py`
+- [x] add config parsing, generation, validator, and file-permission coverage inspired by Patroni `tests/test_config.py`, `tests/test_config_generator.py`, `tests/test_validator.py`, and `tests/test_file_perm.py`
+- [x] add async executor, callback executor, and cancellable subprocess coverage inspired by Patroni `tests/test_async_executor.py`, `tests/test_callback_executor.py`, and `tests/test_cancellable.py`
+- [x] add HA loop, quorum, synchronous replication, and slot-management coverage inspired by Patroni `tests/test_ha.py`, `tests/test_quorum.py`, `tests/test_sync.py`, and `tests/test_slots.py`
+- [x] add PostgreSQL bootstrap, local lifecycle, and postmaster coverage inspired by Patroni `tests/test_bootstrap.py`, `tests/test_postgresql.py`, and `tests/test_postmaster.py`
+- [x] add rewind and replica rejoin coverage inspired by Patroni `tests/test_rewind.py`
+- [x] add backup, restore, and cloud-integration coverage inspired by Patroni `tests/test_aws.py`, `tests/test_barman.py`, and `tests/test_wale_restore.py`
 - [ ] add DCS backend contract coverage for Consul, etcd, etcd3, Exhibitor, Kubernetes, Raft, and ZooKeeper inspired by Patroni `tests/test_consul.py`, `tests/test_etcd.py`, `tests/test_etcd3.py`, `tests/test_exhibitor.py`, `tests/test_kubernetes.py`, `tests/test_raft.py`, `tests/test_raft_controller.py`, and `tests/test_zookeeper.py`
 - [ ] add watchdog and fencing coverage inspired by Patroni `tests/test_watchdog.py`
 - [ ] add distributed-topology and MPP coverage inspired by Patroni `tests/test_citus.py` and `tests/test_mpp.py`

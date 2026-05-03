@@ -913,7 +913,6 @@ func writeTracingBinary(t *testing.T, binaryName, scriptTemplate string) (string
 	binDir := t.TempDir()
 	tracePath := filepath.Join(binDir, binaryName+".trace")
 	scriptPath := filepath.Join(binDir, binaryName)
-	tempPath := scriptPath + ".tmp"
 	script := []byte(strings.TrimSpace(
 		strings.ReplaceAll(
 			strings.ReplaceAll(scriptTemplate, "%q", `"`+tracePath+`"`),
@@ -921,10 +920,14 @@ func writeTracingBinary(t *testing.T, binaryName, scriptTemplate string) (string
 		),
 	) + "\n")
 
-	file, err := os.OpenFile(tempPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
+	file, err := os.CreateTemp(binDir, "."+binaryName+".tmp-*")
 	if err != nil {
-		t.Fatalf("open temp %s script: %v", binaryName, err)
+		t.Fatalf("create temp %s script: %v", binaryName, err)
 	}
+	tempPath := file.Name()
+	defer func() {
+		_ = os.Remove(tempPath)
+	}()
 
 	if _, err := file.Write(script); err != nil {
 		_ = file.Close()
@@ -933,6 +936,10 @@ func writeTracingBinary(t *testing.T, binaryName, scriptTemplate string) (string
 
 	if err := file.Close(); err != nil {
 		t.Fatalf("close temp %s script: %v", binaryName, err)
+	}
+
+	if err := os.Chmod(tempPath, 0o755); err != nil {
+		t.Fatalf("chmod temp %s script: %v", binaryName, err)
 	}
 
 	if err := os.Rename(tempPath, scriptPath); err != nil {

@@ -1,0 +1,11 @@
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: alpha-1
+postgres:
+  dataDir: /var/lib/postgresql/data
+bootstrap:
+  clusterName: alpha
+  expectedMembers:
+    - alpha-1
+  broken: [

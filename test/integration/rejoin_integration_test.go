@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -149,6 +150,168 @@ func TestExecuteRejoinRewindKeepsClusterRecoveringWithRealTopology(t *testing.T)
 	}
 }
 
+func TestRejoinNegativeCasesWithRealTopology(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Docker-backed integration test in short mode")
+	}
+
+	scenario := prepareRealRejoinScenario(t)
+	rewinder := noOpRewindExecutor{}
+
+	testCases := []struct {
+		name    string
+		call    func() error
+		wantErr error
+	}{
+		{
+			name: "negative assess rejects blank target",
+			call: func() error {
+				_, err := scenario.store.AssessRejoinMember(" ")
+				return err
+			},
+			wantErr: controlplane.ErrRejoinTargetRequired,
+		},
+		{
+			name: "negative divergence rejects blank target",
+			call: func() error {
+				_, err := scenario.store.DetectRejoinDivergence(" ")
+				return err
+			},
+			wantErr: controlplane.ErrRejoinTargetRequired,
+		},
+		{
+			name: "negative strategy rejects unknown target",
+			call: func() error {
+				_, err := scenario.store.DecideRejoinStrategy("alpha-missing")
+				return err
+			},
+			wantErr: controlplane.ErrRejoinTargetUnknown,
+		},
+		{
+			name: "negative rewind rejects blank target",
+			call: func() error {
+				_, err := scenario.store.ExecuteRejoinRewind(context.Background(), controlplane.RejoinRequest{Member: " "}, rewinder)
+				return err
+			},
+			wantErr: controlplane.ErrRejoinTargetRequired,
+		},
+		{
+			name: "negative rewind requires executor",
+			call: func() error {
+				_, err := scenario.store.ExecuteRejoinRewind(context.Background(), controlplane.RejoinRequest{Member: "alpha-1"}, nil)
+				return err
+			},
+			wantErr: controlplane.ErrRejoinRewindExecutorRequired,
+		},
+		{
+			name: "negative direct rejoin rejects rewind-required former primary",
+			call: func() error {
+				_, err := scenario.store.ExecuteRejoinDirect(context.Background(), controlplane.RejoinRequest{Member: "alpha-1"})
+				return err
+			},
+			wantErr: controlplane.ErrRejoinStrategyUndetermined,
+		},
+		{
+			name: "negative verification requires active rejoin operation",
+			call: func() error {
+				_, err := scenario.store.VerifyRejoinReplication(context.Background())
+				return err
+			},
+			wantErr: controlplane.ErrRejoinExecutionRequired,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := testCase.call()
+			if !errors.Is(err, testCase.wantErr) {
+				t.Fatalf("unexpected rejoin error: got %v want %v", err, testCase.wantErr)
+			}
+		})
+	}
+}
+
+func TestRejoinAdditionalNegativeCasesWithRealTopology(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Docker-backed integration test in short mode")
+	}
+
+	scenario := prepareRealRejoinScenario(t)
+	rewinder := noOpRewindExecutor{}
+
+	testCases := []struct {
+		name    string
+		call    func() error
+		wantErr error
+	}{
+		{
+			name: "negative assess rejects unknown target",
+			call: func() error {
+				_, err := scenario.store.AssessRejoinMember("alpha-missing")
+				return err
+			},
+			wantErr: controlplane.ErrRejoinTargetUnknown,
+		},
+		{
+			name: "negative divergence rejects unknown target",
+			call: func() error {
+				_, err := scenario.store.DetectRejoinDivergence("alpha-missing")
+				return err
+			},
+			wantErr: controlplane.ErrRejoinTargetUnknown,
+		},
+		{
+			name: "negative strategy rejects blank target",
+			call: func() error {
+				_, err := scenario.store.DecideRejoinStrategy(" ")
+				return err
+			},
+			wantErr: controlplane.ErrRejoinTargetRequired,
+		},
+		{
+			name: "negative rewind rejects unknown target",
+			call: func() error {
+				_, err := scenario.store.ExecuteRejoinRewind(context.Background(), controlplane.RejoinRequest{Member: "alpha-missing"}, rewinder)
+				return err
+			},
+			wantErr: controlplane.ErrRejoinTargetUnknown,
+		},
+		{
+			name: "negative direct rejoin rejects blank target",
+			call: func() error {
+				_, err := scenario.store.ExecuteRejoinDirect(context.Background(), controlplane.RejoinRequest{Member: " "})
+				return err
+			},
+			wantErr: controlplane.ErrRejoinTargetRequired,
+		},
+		{
+			name: "negative direct rejoin rejects unknown target",
+			call: func() error {
+				_, err := scenario.store.ExecuteRejoinDirect(context.Background(), controlplane.RejoinRequest{Member: "alpha-missing"})
+				return err
+			},
+			wantErr: controlplane.ErrRejoinTargetUnknown,
+		},
+		{
+			name: "negative completion requires active rejoin operation",
+			call: func() error {
+				_, err := scenario.store.CompleteRejoin(context.Background())
+				return err
+			},
+			wantErr: controlplane.ErrRejoinExecutionRequired,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := testCase.call()
+			if !errors.Is(err, testCase.wantErr) {
+				t.Fatalf("unexpected rejoin error: got %v want %v", err, testCase.wantErr)
+			}
+		})
+	}
+}
+
 func prepareRealRejoinScenario(t *testing.T) realRejoinScenario {
 	t.Helper()
 
@@ -235,4 +398,10 @@ ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload`)
 		currentPrimary: standby,
 		currentEpoch:   execution.CurrentEpoch,
 	}
+}
+
+type noOpRewindExecutor struct{}
+
+func (noOpRewindExecutor) Rewind(context.Context, controlplane.RewindRequest) error {
+	return nil
 }
