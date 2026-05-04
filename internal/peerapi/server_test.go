@@ -173,8 +173,36 @@ func TestServerWaitReturnsNilWhenNotStarted(t *testing.T) {
 	t.Parallel()
 
 	server := New("alpha-1", slog.New(slog.NewTextHandler(io.Discard, nil)), Config{})
+	if address := server.Address(); address != "" {
+		t.Fatalf("expected not-started server address to be empty, got %q", address)
+	}
 	if err := server.Wait(); err != nil {
 		t.Fatalf("wait on not-started server: %v", err)
+	}
+}
+
+func TestServerAddressReportsBoundListenerWhileRunning(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	server := New("alpha-1", slog.New(slog.NewTextHandler(io.Discard, nil)), Config{})
+	if err := server.Start(ctx, "127.0.0.1:0"); err != nil {
+		t.Fatalf("start peer server: %v", err)
+	}
+
+	address := server.Address()
+	if address == "" {
+		t.Fatal("expected running server to report bound address")
+	}
+
+	cancel()
+	if err := server.Wait(); err != nil {
+		t.Fatalf("wait for peer server shutdown: %v", err)
+	}
+	if address := server.Address(); address != "" {
+		t.Fatalf("expected stopped server address to be empty, got %q", address)
 	}
 }
 
