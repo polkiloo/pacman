@@ -3,12 +3,8 @@ package postgres
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestPatroniInspiredExecuteCommandMissingBinary(t *testing.T) {
@@ -71,15 +67,15 @@ func TestPatroniInspiredExecutePassthroughCommandPreCanceledContext(t *testing.T
 
 func TestPatroniInspiredPGCtlStartCancelsLongRunningPgCtl(t *testing.T) {
 	t.Parallel()
-	skipWindowsShell(t)
 
-	binDir := t.TempDir()
-	writeExecutable(t, binDir, "pg_ctl", "#!/bin/sh\nsleep 5\n")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err := (PGCtl{BinDir: binDir, DataDir: "/tmp/pgdata"}).Start(ctx)
+	err := (PGCtl{
+		BinDir:  "/tmp/bin",
+		DataDir: "/tmp/pgdata",
+		runner:  cancelingCommandRunner(cancel),
+	}).Start(ctx)
 	if err == nil {
 		t.Fatal("expected canceled pg_ctl start to fail")
 	}
@@ -93,15 +89,15 @@ func TestPatroniInspiredPGCtlStartCancelsLongRunningPgCtl(t *testing.T) {
 
 func TestPatroniInspiredPGCtlStopCancelsLongRunningPgCtl(t *testing.T) {
 	t.Parallel()
-	skipWindowsShell(t)
 
-	binDir := t.TempDir()
-	writeExecutable(t, binDir, "pg_ctl", "#!/bin/sh\nsleep 5\n")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err := (PGCtl{BinDir: binDir, DataDir: "/tmp/pgdata"}).Stop(ctx, ShutdownModeFast)
+	err := (PGCtl{
+		BinDir:  "/tmp/bin",
+		DataDir: "/tmp/pgdata",
+		runner:  cancelingCommandRunner(cancel),
+	}).Stop(ctx, ShutdownModeFast)
 	if err == nil {
 		t.Fatal("expected canceled pg_ctl stop to fail")
 	}
@@ -115,18 +111,15 @@ func TestPatroniInspiredPGCtlStopCancelsLongRunningPgCtl(t *testing.T) {
 
 func TestPatroniInspiredPGRewindCancelsLongRunningRewind(t *testing.T) {
 	t.Parallel()
-	skipWindowsShell(t)
 
-	binDir := t.TempDir()
-	writeExecutable(t, binDir, "pg_rewind", "#!/bin/sh\nsleep 5\n")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	err := (PGRewind{
-		BinDir:       binDir,
+		BinDir:       "/tmp/bin",
 		DataDir:      "/tmp/pgdata",
 		SourceServer: "host=primary",
+		runner:       cancelingCommandRunner(cancel),
 	}).Run(ctx)
 	if err == nil {
 		t.Fatal("expected canceled pg_rewind to fail")
@@ -139,38 +132,10 @@ func TestPatroniInspiredPGRewindCancelsLongRunningRewind(t *testing.T) {
 	}
 }
 
-func skipWindowsShell(t *testing.T) {
-	t.Helper()
-
-	if runtime.GOOS == "windows" {
-		t.Skip("shell script execution differs on windows")
-	}
-}
-
-func writeExecutable(t *testing.T, dir, name, body string) {
-	t.Helper()
-
-	path := filepath.Join(dir, name)
-	temp, err := os.CreateTemp(dir, "."+name+".tmp-*")
-	if err != nil {
-		t.Fatalf("create temporary executable for %q: %v", path, err)
-	}
-	tempPath := temp.Name()
-	defer func() {
-		_ = os.Remove(tempPath)
-	}()
-
-	if _, err := temp.WriteString(body); err != nil {
-		_ = temp.Close()
-		t.Fatalf("write temporary executable %q: %v", tempPath, err)
-	}
-	if err := temp.Close(); err != nil {
-		t.Fatalf("close temporary executable %q: %v", tempPath, err)
-	}
-	if err := os.Chmod(tempPath, 0o755); err != nil {
-		t.Fatalf("chmod temporary executable %q: %v", tempPath, err)
-	}
-	if err := os.Rename(tempPath, path); err != nil {
-		t.Fatalf("publish executable %q: %v", path, err)
+func cancelingCommandRunner(cancel context.CancelFunc) commandRunner {
+	return func(ctx context.Context, _ string, _ ...string) (commandResult, error) {
+		cancel()
+		<-ctx.Done()
+		return commandResult{exitCode: -1}, ctx.Err()
 	}
 }
