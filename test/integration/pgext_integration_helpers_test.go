@@ -182,6 +182,13 @@ func waitForHelperPID(t *testing.T, service *testenv.Service, timeout time.Durat
 func helperPIDLookupScript() string {
 	return `
 for entry in /proc/[0-9]*; do
+	pid="${entry##*/}"
+	if [ "$pid" = "$$" ]; then
+		continue
+	fi
+	if [ ! -r "$entry/comm" ] || [ "$(cat "$entry/comm")" != "pacmand" ]; then
+		continue
+	fi
 	if [ ! -r "$entry/cmdline" ]; then
 		continue
 	fi
@@ -189,7 +196,7 @@ for entry in /proc/[0-9]*; do
 	cmd=$(tr '\000' ' ' <"$entry/cmdline")
 	case "$cmd" in
 		*"pacmand -pgext-env"*)
-			echo "${entry##*/}"
+			echo "$pid"
 			exit 0
 			;;
 	esac
