@@ -131,6 +131,18 @@ func (srv *Server) Start(ctx context.Context, addr string) error {
 	return nil
 }
 
+// Address returns the server's bound network address while it is running.
+func (srv *Server) Address() string {
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	if srv.listener == nil {
+		return ""
+	}
+
+	return srv.listener.Addr().String()
+}
+
 // Wait blocks until the server stops and returns the terminal serve error, if
 // any.
 func (srv *Server) Wait() error {

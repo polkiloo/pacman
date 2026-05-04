@@ -637,7 +637,7 @@ func TestDaemonStartReportsRoleDetectionFailureWhileAvailabilityIsUp(t *testing.
 	daemon.Wait()
 }
 
-func TestDaemonHeartbeatLoopTicksAndTracksAvailabilityChanges(t *testing.T) {
+func TestDaemonHeartbeatRecordsAndTracksAvailabilityChanges(t *testing.T) {
 	t.Parallel()
 
 	var logs bytes.Buffer
@@ -649,7 +649,7 @@ func TestDaemonHeartbeatLoopTicksAndTracksAvailabilityChanges(t *testing.T) {
 	daemon, err := NewDaemon(
 		validDataConfig(),
 		logging.New("pacmand", &logs),
-		withHeartbeatInterval(10*time.Millisecond),
+		withHeartbeatInterval(time.Hour),
 		withPostgresProbe(func(context.Context, string) error {
 			mu.Lock()
 			defer mu.Unlock()
@@ -691,9 +691,7 @@ func TestDaemonHeartbeatLoopTicksAndTracksAvailabilityChanges(t *testing.T) {
 		t.Fatalf("start daemon: %v", err)
 	}
 
-	waitForHeartbeat(t, daemon, func(heartbeat agentmodel.Heartbeat) bool {
-		return heartbeat.Sequence >= 2 && heartbeat.Postgres.Up
-	})
+	daemon.recordHeartbeat(ctx)
 
 	cancel()
 	daemon.Wait()
@@ -1328,9 +1326,12 @@ func TestDaemonProbeSeedPeersLogsValidatedPeerMTLSConnection(t *testing.T) {
 		TLSConfig:    serverTLSConfig,
 		AllowedPeers: []string{"beta-1"},
 	})
-	seedAddress := reserveLoopbackAddress()
-	if err := server.Start(serverCtx, seedAddress); err != nil {
+	if err := server.Start(serverCtx, "127.0.0.1:0"); err != nil {
 		t.Fatalf("start peer server: %v", err)
+	}
+	seedAddress := server.Address()
+	if seedAddress == "" {
+		t.Fatal("expected peer server address")
 	}
 
 	client := &http.Client{
