@@ -104,7 +104,7 @@ test-integration: test-integration-control-plane test-integration-patroni test-i
 test-integration-control-plane: docker-build-test-image docker-build-pgext-image
 	$(INTEGRATION_TEST_ENV) $(GO) test $(GO_TEST_INTEGRATION_FLAGS) -tags=integration -run '$(INTEGRATION_GROUP_CONTROL_PLANE)' $(GO_TEST_INTEGRATION_PACKAGE)
 
-test-integration-patroni: docker-build-test-image
+test-integration-patroni: docker-build-test-image docker-build-pgext-image
 	$(INTEGRATION_TEST_ENV) $(GO) test $(GO_TEST_INTEGRATION_FLAGS) -tags=integration -run '$(INTEGRATION_GROUP_PATRONI)' $(GO_TEST_INTEGRATION_PACKAGE)
 
 test-integration-postgres: docker-build-test-image docker-build-pgext-image
