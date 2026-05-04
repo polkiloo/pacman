@@ -155,10 +155,12 @@ func TestSwitchoverApiRejectsRequestWhenNoEligibleStandbyExists(t *testing.T) {
 	etcd := startTopologyEtcd(t, env, "etcd-switchover-reject")
 
 	const nodeName = "epsilon-1"
+	serviceName := nodeName + "-svc"
 	cfg := fmt.Sprintf(daemonEtcdSingleNodeConfig,
-		nodeName, nodeName+topologyPGPostgresSuffix, etcd.Alias, nodeName, nodeName,
+		nodeName, serviceName+topologyPGPostgresSuffix, etcd.Alias, nodeName, nodeName,
 	)
-	node := startEtcdBackedDaemonNode(t, env, nodeName+"-svc", cfg)
+	node := startEtcdBackedDaemonNode(t, env, serviceName, cfg)
+	waitForTopologyCurrentPrimary(t, node.Client, node.Base, nodeName)
 
 	body := []byte(`{"candidate":"epsilon-2","reason":"topology-validation-test","requestedBy":"integration"}`)
 	resp := performHTTPRequest(t, http.MethodPost, node.Base+"/api/v1/operations/switchover",
@@ -172,7 +174,9 @@ func TestSwitchoverApiRejectsRequestWhenNoEligibleStandbyExists(t *testing.T) {
 			resp.StatusCode, respBody)
 	}
 
-	var errPayload struct{ Error string `json:"error"` }
+	var errPayload struct {
+		Error string `json:"error"`
+	}
 	if err := json.Unmarshal(respBody, &errPayload); err != nil {
 		t.Fatalf("decode switchover error payload: %v\nbody: %s", err, respBody)
 	}
@@ -194,10 +198,12 @@ func TestFailoverApiRejectsRequestWhenPrimaryIsHealthy(t *testing.T) {
 	etcd := startTopologyEtcd(t, env, "etcd-failover-reject")
 
 	const nodeName = "zeta-1"
+	serviceName := nodeName + "-svc"
 	cfg := fmt.Sprintf(daemonEtcdSingleNodeConfig,
-		nodeName, nodeName+topologyPGPostgresSuffix, etcd.Alias, nodeName, nodeName,
+		nodeName, serviceName+topologyPGPostgresSuffix, etcd.Alias, nodeName, nodeName,
 	)
-	node := startEtcdBackedDaemonNode(t, env, nodeName+"-svc", cfg)
+	node := startEtcdBackedDaemonNode(t, env, serviceName, cfg)
+	waitForTopologyCurrentPrimary(t, node.Client, node.Base, nodeName)
 
 	body := []byte(`{"reason":"topology-validation-test","requestedBy":"integration"}`)
 	resp := performHTTPRequest(t, http.MethodPost, node.Base+"/api/v1/operations/failover",
@@ -211,7 +217,9 @@ func TestFailoverApiRejectsRequestWhenPrimaryIsHealthy(t *testing.T) {
 			resp.StatusCode, respBody)
 	}
 
-	var errPayload struct{ Error string `json:"error"` }
+	var errPayload struct {
+		Error string `json:"error"`
+	}
 	if err := json.Unmarshal(respBody, &errPayload); err != nil {
 		t.Fatalf("decode failover error payload: %v\nbody: %s", err, respBody)
 	}
@@ -233,10 +241,12 @@ func TestSwitchoverApiRejectsRequestDuringActiveMaintenance(t *testing.T) {
 	etcd := startTopologyEtcd(t, env, "etcd-maintenance-blocks-switchover")
 
 	const nodeName = "eta-1"
+	serviceName := nodeName + "-svc"
 	cfg := fmt.Sprintf(daemonEtcdSingleNodeConfig,
-		nodeName, nodeName+topologyPGPostgresSuffix, etcd.Alias, nodeName, nodeName,
+		nodeName, serviceName+topologyPGPostgresSuffix, etcd.Alias, nodeName, nodeName,
 	)
-	node := startEtcdBackedDaemonNode(t, env, nodeName+"-svc", cfg)
+	node := startEtcdBackedDaemonNode(t, env, serviceName, cfg)
+	waitForTopologyCurrentPrimary(t, node.Client, node.Base, nodeName)
 
 	enableResp := performHTTPRequest(t, http.MethodPut, node.Base+"/api/v1/maintenance",
 		[]byte(`{"enabled":true,"reason":"maintenance-blocks-test"}`),

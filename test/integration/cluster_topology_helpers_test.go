@@ -13,6 +13,7 @@ import (
 	testcontainers "github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	nativeapi "github.com/polkiloo/pacman/internal/api/native"
 	"github.com/polkiloo/pacman/test/testenv"
 )
 
@@ -247,6 +248,84 @@ func waitForTopologyMemberCount(t *testing.T, client *http.Client, base string, 
 	}
 
 	t.Fatalf("did not observe %d member(s) in /api/v1/members before deadline", wantCount)
+}
+
+// waitForTopologyCurrentPrimary polls /api/v1/cluster until the expected
+// member is published as a healthy primary.
+func waitForTopologyCurrentPrimary(t *testing.T, client *http.Client, base, wantPrimary string) {
+	t.Helper()
+
+	waitForTopologyClusterStatus(t, client, base, "current primary "+wantPrimary, func(status nativeapi.ClusterStatusResponse) bool {
+		if status.CurrentPrimary != wantPrimary {
+			return false
+		}
+		for _, member := range status.Members {
+			if member.Name == wantPrimary && member.Role == "primary" && member.Healthy {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func waitForTopologyClusterStatus(
+	t *testing.T,
+	client *http.Client,
+	base string,
+	description string,
+	ready func(nativeapi.ClusterStatusResponse) bool,
+) nativeapi.ClusterStatusResponse {
+	t.Helper()
+
+	deadline := time.Now().Add(topologyStartupTimeout)
+	var (
+		lastStatus int
+		lastBody   string
+		lastErr    error
+	)
+
+	for time.Now().Before(deadline) {
+		status, code, body, err := fetchTopologyClusterStatus(t, client, base)
+		lastStatus = code
+		lastBody = body
+		lastErr = err
+		if err == nil && code == http.StatusOK && ready(status) {
+			return status
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	t.Fatalf("/api/v1/cluster did not converge on %s; lastStatus=%d lastErr=%v body=%s",
+		description, lastStatus, lastErr, lastBody)
+	return nativeapi.ClusterStatusResponse{}
+}
+
+func fetchTopologyClusterStatus(
+	t *testing.T,
+	client *http.Client,
+	base string,
+) (nativeapi.ClusterStatusResponse, int, string, error) {
+	t.Helper()
+
+	resp, err := client.Get(base + topologyClusterAPI)
+	if err != nil {
+		return nativeapi.ClusterStatusResponse{}, 0, "", err
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nativeapi.ClusterStatusResponse{}, resp.StatusCode, "", err
+	}
+
+	var status nativeapi.ClusterStatusResponse
+	if resp.StatusCode == http.StatusOK {
+		if err := json.Unmarshal(bodyBytes, &status); err != nil {
+			return nativeapi.ClusterStatusResponse{}, resp.StatusCode, string(bodyBytes), err
+		}
+	}
+
+	return status, resp.StatusCode, string(bodyBytes), nil
 }
 
 // waitForTopologyMaintenanceState polls /api/v1/maintenance until the enabled
