@@ -101,7 +101,7 @@ docker-build-ansible-install-image:
 
 test-integration: test-integration-control-plane test-integration-patroni test-integration-postgres test-integration-ha test-integration-install
 
-test-integration-control-plane: docker-build-test-image
+test-integration-control-plane: docker-build-test-image docker-build-pgext-image
 	$(INTEGRATION_TEST_ENV) $(GO) test $(GO_TEST_INTEGRATION_FLAGS) -tags=integration -run '$(INTEGRATION_GROUP_CONTROL_PLANE)' $(GO_TEST_INTEGRATION_PACKAGE)
 
 test-integration-patroni: docker-build-test-image
@@ -110,7 +110,7 @@ test-integration-patroni: docker-build-test-image
 test-integration-postgres: docker-build-test-image docker-build-pgext-image
 	$(INTEGRATION_TEST_ENV) $(GO) test $(GO_TEST_INTEGRATION_FLAGS) -tags=integration -run '$(INTEGRATION_GROUP_POSTGRES)' $(GO_TEST_INTEGRATION_PACKAGE)
 
-test-integration-ha: docker-build-test-image
+test-integration-ha: docker-build-test-image docker-build-pgext-image
 	$(INTEGRATION_TEST_ENV) $(GO) test $(GO_TEST_INTEGRATION_FLAGS) -tags=integration -run '$(INTEGRATION_GROUP_HA)' $(GO_TEST_INTEGRATION_PACKAGE)
 
 test-integration-install: docker-build-ansible-install-image
