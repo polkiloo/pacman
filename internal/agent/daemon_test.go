@@ -1690,21 +1690,6 @@ func mustGET(t *testing.T, client *http.Client, rawURL, authorization string) *h
 	return response
 }
 
-func waitForHeartbeat(t *testing.T, daemon *Daemon, predicate func(agentmodel.Heartbeat) bool) {
-	t.Helper()
-
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if predicate(daemon.Heartbeat()) {
-			return
-		}
-
-		time.Sleep(5 * time.Millisecond)
-	}
-
-	t.Fatalf("heartbeat condition was not met, last heartbeat: %+v", daemon.Heartbeat())
-}
-
 func assertContains(t *testing.T, got, want string) {
 	t.Helper()
 
