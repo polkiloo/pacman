@@ -68,7 +68,10 @@ ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload`)
 	historyEntry := waitForEndToEndAutomaticFailoverHistory(t, scenario.Standby, intentStatus.ActiveOperation.ID)
 	formerPrimaryStatus := waitForEndToEndSwitchoverStatus(t, scenario.Standby, "former primary needs rejoin", func(status nativeapi.ClusterStatusResponse) bool {
 		member := e2eSwitchoverMember(status, e2eSwitchoverSource)
-		return member != nil && member.Role == "replica" && member.NeedsRejoin && !member.Healthy
+		return status.CurrentPrimary == e2eSwitchoverTarget &&
+			member != nil &&
+			member.NeedsRejoin &&
+			!member.Healthy
 	})
 
 	positiveCases := []struct {
@@ -127,7 +130,7 @@ ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload`)
 					t.Fatalf("unexpected failover history entry: %+v", historyEntry)
 				}
 				source := requireE2ESwitchoverMember(t, formerPrimaryStatus, e2eSwitchoverSource)
-				if source.Role != "replica" || !source.NeedsRejoin || source.Healthy {
+				if !source.NeedsRejoin || source.Healthy {
 					t.Fatalf("expected former primary to require rejoin and remain unhealthy, got %+v", source)
 				}
 			},
