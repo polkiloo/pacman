@@ -465,7 +465,6 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [ ] add explicit unsupported-backend regression assertions for Patroni `exhibitor` and `kubernetes` configs so config translation keeps failing clearly until real backend support is implemented
 - [ ] document the current DCS contract split: real service containers for supported/partially supported backends, and compatibility fixtures only for backends rejected before client startup
 - [x] add watchdog and fencing coverage inspired by Patroni `tests/test_watchdog.py`
-- [ ] add distributed-topology and MPP coverage inspired by Patroni `tests/test_citus.py` and `tests/test_mpp.py`
 
 ### Jepsen Fault-Injection Campaigns
 Inspired by [Wolfsrudel/database-postgres-ha-patroni-testing-jepsen](https://github.com/Wolfsrudel/database-postgres-ha-patroni-testing-jepsen), which uses Jepsen + Clojure/Leiningen with a Vagrant / k3s lab and a Patroni cluster target.
@@ -584,6 +583,7 @@ This track captures the Kubernetes-native operator model described in [ARCHITECT
 - [ ] add standby-cluster / DR support
 - [ ] automate endpoint management
 - [ ] add web UI
+- [ ] add distributed-topology and MPP coverage inspired by Patroni `tests/test_citus.py` and `tests/test_mpp.py`
 
 ### Cascading Replication
 - [ ] define post-MVP product scope and safety rules for cascading replication, including when PACMAN may prefer direct vs cascaded upstreams
