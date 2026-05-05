@@ -64,8 +64,9 @@ jobs:
         with:
           name: jepsen-smoke-${{ github.run_id }}
           path: |
+            bin/jepsen-ci/smoke/
             jepsen/store/
-          if-no-files-found: ignore
+          if-no-files-found: warn
           retention-days: 14
 
   jepsen-nightly:
@@ -110,6 +111,7 @@ jobs:
         with:
           name: jepsen-nightly-${{ github.run_id }}
           path: |
+            bin/jepsen-ci/nightly/
             jepsen/store/
-          if-no-files-found: ignore
+          if-no-files-found: warn
           retention-days: 30

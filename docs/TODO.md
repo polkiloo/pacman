@@ -477,7 +477,7 @@ Inspired by [Wolfsrudel/database-postgres-ha-patroni-testing-jepsen](https://git
 - [x] document local Jepsen lab prerequisites and bootstrap flow, including `JDK`, `Leiningen`, VM/Kubernetes substrate, node inventory generation, and artifact review; local lab flow recorded in [JEPSEN.md](JEPSEN.md)
 - [x] decide where Jepsen runs execute in automation, preferring separate long-running CI/CD stages or scheduled jobs instead of the fast default PR pipeline; automation placement recorded in [JEPSEN.md](JEPSEN.md)
 - [x] add separate CI/CD jobs for Jepsen smoke validation on demand and extended nightly / scheduled Jepsen campaigns; workflow entry points added in `.github/workflows/jepsen.yml`
-- [ ] publish Jepsen HTML/history artifacts and concise failure summaries from CI/CD for operator review and regression tracking
+- [x] publish Jepsen HTML/history artifacts and concise failure summaries from CI/CD for operator review and regression tracking; summary and artifact upload contract recorded in [JEPSEN.md](JEPSEN.md)
 ---
 
 ## 18. Kubernetes-Native MVP

@@ -328,6 +328,15 @@ the scheduled workflow red. Once the harness exists, it must provide executable
 campaign runners at `jepsen/bin/ci-smoke` and `jepsen/bin/ci-nightly`; missing
 runners fail the Jepsen workflow clearly.
 
+Each campaign writes a concise CI summary to `bin/jepsen-ci/<campaign>/summary.md`
+and appends the same content to the GitHub Actions step summary. The summary
+records the campaign, status, harness path, store path, commit, review checklist,
+and an artifact index for HTML reports, histories, checker results, nemesis
+schedules, logs, and JSON snapshots. GitHub Actions uploads both
+`bin/jepsen-ci/<campaign>/` and the full `jepsen/store/` tree so operators can
+review the short failure summary first, then open the detailed Jepsen artifacts
+needed for regression tracking.
+
 ## Consequences
 
 This choice keeps the valuable Jepsen parts: workload generators, nemesis schedule, history checking, and repeat-run campaigns. It avoids coupling PACMAN's first Jepsen campaign to k3s or Patroni-specific assumptions. The tradeoff is that PACMAN needs its own small Clojure target layer for install/start/stop, primary discovery, client connection routing, and artifact collection.
