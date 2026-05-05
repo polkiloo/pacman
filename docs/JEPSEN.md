@@ -113,6 +113,37 @@ Witness-specific expectations:
 - Jepsen clients never connect to the witness as a database endpoint.
 - Witness assertions are PACMAN-specific and are not compared directly with the Patroni baseline.
 
+## Workload Coverage
+
+Workloads should be shared between the `patroni` baseline and `pacman` targets.
+Target-specific code may differ for primary discovery and observation, but the SQL
+operations, history shape, checker, concurrency, nemesis schedule, and run duration
+must stay comparable.
+
+| Profile | Purpose | Operation model | PostgreSQL isolation | Checker |
+|---|---|---|---|---|
+| `append-smoke` | First end-to-end Jepsen validation and no-fault calibration | Many clients append unique values to a small set of list keys, then read full lists | `read committed` | Elle list-append / set-style history check plus no acknowledged write loss |
+| `append-failover` | Core HA safety check under primary changes | Same as `append-smoke`, with longer duration and failover nemeses | `read committed` | Same as smoke, plus exactly one writable primary observed at any successful write point |
+| `single-key-register` | Stress linearization around one hot key | Clients repeatedly write monotonic values to one row and read it back | `read committed` for baseline; optional `serializable` variant | Register checker with stale-read and lost-acknowledged-write detection |
+| `read-committed-txn` | Verify ordinary transactional behavior during HA events | Multi-row transactions insert an operation id, update a counter, and read back committed state | `read committed` | Transaction history checker that rejects fractured reads, missing committed operation ids, and duplicate operation ids |
+| `serializable-txn` | Strongest PostgreSQL transaction profile PACMAN should preserve across routing/failover | Contending transactions update the same logical account/register set and retry serialization failures | `serializable` | Elle/serializable checker; serialization failures are allowed only when reported as aborted/failed operations |
+
+Common workload rules:
+
+- Every successful write records a globally unique operation id, client id, logical key, value, target node, observed primary, transaction isolation, and PACMAN cluster epoch when available.
+- Clients must reconnect and rediscover the current primary after connection loss, failover, or SQL read-only errors.
+- Read-only replica responses are failed operations, not successful reads, unless a future workload explicitly targets replica reads.
+- Unknown commit outcomes are recorded as indeterminate Jepsen operations, then reconciled by final reads where the checker supports it.
+- Finalization must read all workload tables from the final primary and include PACMAN `/api/v1/history` and `/api/v1/cluster` snapshots in the Jepsen artifact bundle.
+
+Implementation order:
+
+1. `append-smoke` with `none` nemesis on Patroni and PACMAN.
+2. `append-failover` with primary process kill.
+3. `single-key-register` with network partition and process kill profiles.
+4. `read-committed-txn` after basic primary rediscovery is stable.
+5. `serializable-txn` after retry/error classification is explicit enough to avoid false positives.
+
 ## Consequences
 
 This choice keeps the valuable Jepsen parts: workload generators, nemesis schedule, history checking, and repeat-run campaigns. It avoids coupling PACMAN's first Jepsen campaign to k3s or Patroni-specific assumptions. The tradeoff is that PACMAN needs its own small Clojure target layer for install/start/stop, primary discovery, client connection routing, and artifact collection.
