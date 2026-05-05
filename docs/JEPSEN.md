@@ -318,6 +318,8 @@ Execution rules:
 
 The GitHub Actions entry point is `.github/workflows/jepsen.yml`. It exposes:
 
+- `pull_request` and `push` with a lightweight `Jepsen CI gate` job that validates
+  the workflow runner contract without starting a long Jepsen campaign;
 - `workflow_dispatch` with `campaign=smoke`, which runs `make jepsen-smoke`;
 - `workflow_dispatch` with `campaign=nightly`, which runs `make jepsen-nightly`;
 - a scheduled nightly trigger that also runs `make jepsen-nightly`.

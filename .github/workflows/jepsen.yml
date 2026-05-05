@@ -1,6 +1,11 @@
 name: jepsen
 
 on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
   workflow_dispatch:
     inputs:
       campaign:
@@ -22,6 +27,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  jepsen-ci-gate:
+    name: Jepsen CI gate
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Jepsen CI wiring
+        run: make jepsen-ci-check
+
   jepsen-smoke:
     name: Jepsen smoke
     if: github.event_name == 'workflow_dispatch' && inputs.campaign == 'smoke'
