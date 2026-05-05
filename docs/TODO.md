@@ -464,7 +464,7 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [ ] replace the Kubernetes compatibility fixture with a real API-server-backed testcontainer topology, preferably `kind` or envtest, once PACMAN can translate or intentionally probe Patroni `kubernetes` settings
 - [ ] add explicit unsupported-backend regression assertions for Patroni `exhibitor` and `kubernetes` configs so config translation keeps failing clearly until real backend support is implemented
 - [ ] document the current DCS contract split: real service containers for supported/partially supported backends, and compatibility fixtures only for backends rejected before client startup
-- [ ] add watchdog and fencing coverage inspired by Patroni `tests/test_watchdog.py`
+- [x] add watchdog and fencing coverage inspired by Patroni `tests/test_watchdog.py`
 - [ ] add distributed-topology and MPP coverage inspired by Patroni `tests/test_citus.py` and `tests/test_mpp.py`
 
 ### Jepsen Fault-Injection Campaigns
