@@ -1,0 +1,115 @@
+name: jepsen
+
+on:
+  workflow_dispatch:
+    inputs:
+      campaign:
+        description: Jepsen campaign to run
+        required: true
+        default: smoke
+        type: choice
+        options:
+          - smoke
+          - nightly
+  schedule:
+    - cron: '17 2 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jepsen-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-${{ inputs.campaign || 'scheduled' }}
+  cancel-in-progress: false
+
+jobs:
+  jepsen-smoke:
+    name: Jepsen smoke
+    if: github.event_name == 'workflow_dispatch' && inputs.campaign == 'smoke'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect Jepsen harness
+        id: harness
+        run: |
+          if [ -d jepsen ]; then
+            echo "present=true" >>"${GITHUB_OUTPUT}"
+          else
+            echo "present=false" >>"${GITHUB_OUTPUT}"
+          fi
+
+      - name: Setup JDK
+        if: steps.harness.outputs.present == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install Leiningen
+        if: steps.harness.outputs.present == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y leiningen
+          lein version
+
+      - name: Run Jepsen smoke campaign
+        run: make jepsen-smoke
+
+      - name: Upload Jepsen smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jepsen-smoke-${{ github.run_id }}
+          path: |
+            jepsen/store/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  jepsen-nightly:
+    name: Jepsen nightly
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.campaign == 'nightly')
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect Jepsen harness
+        id: harness
+        run: |
+          if [ -d jepsen ]; then
+            echo "present=true" >>"${GITHUB_OUTPUT}"
+          else
+            echo "present=false" >>"${GITHUB_OUTPUT}"
+          fi
+
+      - name: Setup JDK
+        if: steps.harness.outputs.present == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install Leiningen
+        if: steps.harness.outputs.present == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y leiningen
+          lein version
+
+      - name: Run Jepsen nightly campaign
+        run: make jepsen-nightly
+
+      - name: Upload Jepsen nightly artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jepsen-nightly-${{ github.run_id }}
+          path: |
+            jepsen/store/
+          if-no-files-found: ignore
+          retention-days: 30

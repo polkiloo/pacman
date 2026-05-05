@@ -316,6 +316,18 @@ Execution rules:
 - Treat lab provisioning failures separately from Jepsen checker failures so
   infrastructure noise does not hide database correctness regressions.
 
+The GitHub Actions entry point is `.github/workflows/jepsen.yml`. It exposes:
+
+- `workflow_dispatch` with `campaign=smoke`, which runs `make jepsen-smoke`;
+- `workflow_dispatch` with `campaign=nightly`, which runs `make jepsen-nightly`;
+- a scheduled nightly trigger that also runs `make jepsen-nightly`.
+
+The workflow installs JDK and Leiningen only when a `jepsen/` harness directory is
+present. Until the harness lands, the jobs skip with a notice instead of turning
+the scheduled workflow red. Once the harness exists, it must provide executable
+campaign runners at `jepsen/bin/ci-smoke` and `jepsen/bin/ci-nightly`; missing
+runners fail the Jepsen workflow clearly.
+
 ## Consequences
 
 This choice keeps the valuable Jepsen parts: workload generators, nemesis schedule, history checking, and repeat-run campaigns. It avoids coupling PACMAN's first Jepsen campaign to k3s or Patroni-specific assumptions. The tradeoff is that PACMAN needs its own small Clojure target layer for install/start/stop, primary discovery, client connection routing, and artifact collection.
