@@ -460,6 +460,10 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] add rewind and replica rejoin coverage inspired by Patroni `tests/test_rewind.py`
 - [x] add backup, restore, and cloud-integration coverage inspired by Patroni `tests/test_aws.py`, `tests/test_barman.py`, and `tests/test_wale_restore.py`
 - [x] add DCS backend contract coverage for Consul, etcd, etcd3, Exhibitor, Kubernetes, Raft, and ZooKeeper inspired by Patroni `tests/test_consul.py`, `tests/test_etcd.py`, `tests/test_etcd3.py`, `tests/test_exhibitor.py`, `tests/test_kubernetes.py`, `tests/test_raft.py`, `tests/test_raft_controller.py`, and `tests/test_zookeeper.py`
+- [ ] replace the Exhibitor compatibility fixture with a real ZooKeeper + Exhibitor testcontainer topology once PACMAN can translate or intentionally probe Patroni `exhibitor` settings
+- [ ] replace the Kubernetes compatibility fixture with a real API-server-backed testcontainer topology, preferably `kind` or envtest, once PACMAN can translate or intentionally probe Patroni `kubernetes` settings
+- [ ] add explicit unsupported-backend regression assertions for Patroni `exhibitor` and `kubernetes` configs so config translation keeps failing clearly until real backend support is implemented
+- [ ] document the current DCS contract split: real service containers for supported/partially supported backends, and compatibility fixtures only for backends rejected before client startup
 - [ ] add watchdog and fencing coverage inspired by Patroni `tests/test_watchdog.py`
 - [ ] add distributed-topology and MPP coverage inspired by Patroni `tests/test_citus.py` and `tests/test_mpp.py`
 
