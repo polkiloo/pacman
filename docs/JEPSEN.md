@@ -285,6 +285,37 @@ Artifact review checklist:
 - Confirm PostgreSQL logs from former primaries do not show accepted writes after demotion or isolation.
 - Preserve the full store path and seed in any issue filed from the run.
 
+## Automation Placement Decision
+
+Jepsen runs must execute outside the fast default PR pipeline. The default PR
+checks should keep validating unit tests, regular integration suites, lint,
+coverage, Docker image buildability, and short contract tests. They should not
+provision multi-node Jepsen labs, run long nemesis campaigns, or block normal
+review on nondeterministic fault-injection timing.
+
+Automation should be split into separate stages:
+
+| Stage | Trigger | Profiles | Required before merge |
+|---|---|---|---|
+| `jepsen-smoke` | Manual workflow dispatch, release-candidate branches, or explicit maintainer label | `patroni` and `pacman-3-data` with `append-smoke` and `none` | No, except when a change directly edits Jepsen harness, lab bootstrap, failover, fencing, DCS, or PostgreSQL control-plane behavior. |
+| `jepsen-nightly` | Scheduled nightly job on the main development branch | `soak-nightly` with Patroni baseline followed by PACMAN | No, but failures open or update a tracked regression issue with artifacts. |
+| `jepsen-release` | Manual pre-release or release branch gate | `soak-extended`, including witness coverage when enabled | Yes for release promotion, not for ordinary PR merge. |
+
+Execution rules:
+
+- Keep Jepsen jobs in a separate CI/CD workflow or stage from the default PR
+  workflow so normal code review is not delayed by 30-minute campaigns.
+- Allow maintainers to run `jepsen-smoke` on demand for PRs that touch HA-critical
+  code paths.
+- Run nightly campaigns only on trusted branches with access to the required VM,
+  container-host, or Kubernetes lab substrate.
+- Calibrate PACMAN failures against the matching Patroni baseline before
+  classifying the result as a PACMAN regression.
+- Publish a concise status back to the PR or scheduled-run summary, but keep the
+  full Jepsen store artifacts in the long-running workflow.
+- Treat lab provisioning failures separately from Jepsen checker failures so
+  infrastructure noise does not hide database correctness regressions.
+
 ## Consequences
 
 This choice keeps the valuable Jepsen parts: workload generators, nemesis schedule, history checking, and repeat-run campaigns. It avoids coupling PACMAN's first Jepsen campaign to k3s or Patroni-specific assumptions. The tradeoff is that PACMAN needs its own small Clojure target layer for install/start/stop, primary discovery, client connection routing, and artifact collection.
