@@ -103,6 +103,68 @@ bootstrap:
 	}
 }
 
+func TestPatroniMigrationRejectsUnsupportedExhibitorAndKubernetesConfigs(t *testing.T) {
+	if testing.Short() {
+		t.Skip(skipShortMode)
+	}
+
+	env := testenv.New(t)
+	testenv.RequireLocalImage(t, pacmanTestImage())
+
+	testCases := []struct {
+		name     string
+		backend  string
+		dcsBlock string
+	}{
+		{
+			name:    "exhibitor",
+			backend: "exhibitor",
+			dcsBlock: `
+exhibitor:
+  hosts:
+    - patroni-exhibitor.example
+  port: 8181
+`,
+		},
+		{
+			name:    "kubernetes",
+			backend: "kubernetes",
+			dcsBlock: `
+kubernetes:
+  namespace: patroni
+  labels:
+    app: patroni
+`,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			runner := startDaemonRunner(
+				t,
+				env,
+				"compat-"+testCase.backend+"-unsupported-runner",
+				patroniUnsupportedTranslationConfig(testCase.dcsBlock),
+				nil,
+				nil,
+			)
+			result := runPacmandUntilTerminated(t, runner)
+
+			if result.ExitCode == 0 {
+				t.Fatalf("expected non-zero exit for unsupported Patroni backend %s, got 0", testCase.backend)
+			}
+			if !strings.Contains(result.Output, "Patroni config DCS backend is unsupported") ||
+				!strings.Contains(result.Output, testCase.backend) {
+				t.Fatalf("expected explicit unsupported %s backend error in output, got:\n%s", testCase.backend, result.Output)
+			}
+			if strings.Contains(result.Output, "could not translate host name") ||
+				strings.Contains(result.Output, "connection refused") {
+				t.Fatalf("expected config translation to fail before backend connection, got:\n%s", result.Output)
+			}
+		})
+	}
+}
+
 // TestPatroniMigrationRejectsMissingClusterName verifies that a config where
 // the Patroni "scope" field was not migrated to dcs.clusterName and
 // bootstrap.clusterName is rejected at startup — guarding against the silent
@@ -144,4 +206,17 @@ bootstrap:
 	if !strings.Contains(result.Output, topologyValidateConfig) {
 		t.Fatalf("expected validate config error in output, got:\n%s", result.Output)
 	}
+}
+
+func patroniUnsupportedTranslationConfig(dcsBlock string) string {
+	return `
+scope: batman
+name: postgresql0
+restapi:
+  listen: 127.0.0.1:8008
+` + strings.TrimSpace(dcsBlock) + `
+postgresql:
+  listen: 127.0.0.1:5432
+  data_dir: data/postgresql0
+`
 }
