@@ -183,6 +183,48 @@ Nemesis rollout order:
 5. `slow-network` with `read-committed-txn`.
 6. `repeated-failure` with archived seeds and the longer soak profile.
 
+## Repeat-Run Soak Profile
+
+The soak profile is for nondeterministic HA failures that usually do not appear in
+single smoke runs. It is not part of the fast PR path.
+
+| Profile | Target | Workload | Nemesis | Runs | Duration per run | Purpose |
+|---|---|---|---|---:|---:|---|
+| `soak-local` | `pacman-3-data` | `append-failover` or `single-key-register` | `packet,kill` | 3 | 30 minutes | Developer reproduction of timing-sensitive failover defects. |
+| `soak-nightly` | `patroni`, then `pacman-3-data` | `read-committed-txn` | `slow-network` plus `kill` | 5 | 30 minutes | Scheduled baseline comparison and PACMAN regression detection. |
+| `soak-extended` | `pacman-3-data`, optional `pacman-3-data-1-witness` | `serializable-txn` | `repeated-failure` | 10 | 30 minutes | Pre-release or manual campaign for rare split-brain, stale-read, and rejoin bugs. |
+
+Seed and schedule rules:
+
+- Every run must persist the random seed, nemesis schedule, workload profile, target profile, PACMAN commit, PostgreSQL version, DCS version, and node inventory.
+- Re-running with the same seed must reproduce the same planned nemesis sequence, even if timings drift slightly because of process startup or network conditions.
+- Seeds from failing runs are promoted to a regression seed list and rerun before closing the bug.
+- Passing nightly seeds are retained for trend analysis but can be rotated after artifact retention expires.
+
+Artifact layout:
+
+```text
+store/
+  patroni/<profile>/<timestamp>-seed-<seed>/
+  pacman/<profile>/<timestamp>-seed-<seed>/
+    jepsen-history.edn
+    results.edn
+    nemesis-schedule.edn
+    pacman-cluster-before.json
+    pacman-cluster-after.json
+    pacman-history.json
+    node-logs/
+    postgres-logs/
+    dcs-logs/
+```
+
+Pass/fail interpretation:
+
+- A single checker failure fails the campaign and preserves all artifacts.
+- Infrastructure failures are retried once with the same seed; if the retry fails before workload start, classify it as lab failure rather than PACMAN regression.
+- PACMAN regressions require the matching Patroni baseline profile to be either passing or documented as a known Patroni limitation.
+- Intermittent failures must include the failing seed and artifact path in the issue or CI summary.
+
 ## Consequences
 
 This choice keeps the valuable Jepsen parts: workload generators, nemesis schedule, history checking, and repeat-run campaigns. It avoids coupling PACMAN's first Jepsen campaign to k3s or Patroni-specific assumptions. The tradeoff is that PACMAN needs its own small Clojure target layer for install/start/stop, primary discovery, client connection routing, and artifact collection.

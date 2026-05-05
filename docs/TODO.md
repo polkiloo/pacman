@@ -473,7 +473,7 @@ Inspired by [Wolfsrudel/database-postgres-ha-patroni-testing-jepsen](https://git
 - [x] define a PACMAN Jepsen target topology, including 3 data nodes and optional witness coverage where PACMAN semantics differ from Patroni; topology contract recorded in [JEPSEN.md](JEPSEN.md)
 - [x] define Jepsen workload coverage for append/register-style histories, single-key stress, read committed checks, and serializable checks; workload matrix recorded in [JEPSEN.md](JEPSEN.md)
 - [x] define Jepsen nemesis coverage for `none`, `packet`, `kill`, combined `packet,kill`, and slow-network / repeated-failure campaigns inspired by the Patroni repo; nemesis matrix recorded in [JEPSEN.md](JEPSEN.md)
-- [ ] add a repeat-run soak profile for non-deterministic failures, including multi-run 30-minute campaigns and archived failure seeds / histories
+- [x] add a repeat-run soak profile for non-deterministic failures, including multi-run 30-minute campaigns and archived failure seeds / histories; soak profile recorded in [JEPSEN.md](JEPSEN.md)
 - [ ] document local Jepsen lab prerequisites and bootstrap flow, including `JDK`, `Leiningen`, VM/Kubernetes substrate, node inventory generation, and artifact review
 - [ ] decide where Jepsen runs execute in automation, preferring separate long-running CI/CD stages or scheduled jobs instead of the fast default PR pipeline
 - [ ] add separate CI/CD jobs for Jepsen smoke validation on demand and extended nightly / scheduled Jepsen campaigns
