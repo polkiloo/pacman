@@ -468,16 +468,16 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 
 ### Jepsen Fault-Injection Campaigns
 Inspired by [Wolfsrudel/database-postgres-ha-patroni-testing-jepsen](https://github.com/Wolfsrudel/database-postgres-ha-patroni-testing-jepsen), which uses Jepsen + Clojure/Leiningen with a Vagrant / k3s lab and a Patroni cluster target.
-- [ ] evaluate whether to adapt the Jepsen harness shape directly or build a PACMAN-specific harness with the same workload / nemesis model
-- [ ] add a Patroni baseline target so PACMAN Jepsen runs can be calibrated against a known HA implementation before PACMAN-specific assertions are trusted
-- [ ] define a PACMAN Jepsen target topology, including 3 data nodes and optional witness coverage where PACMAN semantics differ from Patroni
-- [ ] define Jepsen workload coverage for append/register-style histories, single-key stress, read committed checks, and serializable checks
-- [ ] define Jepsen nemesis coverage for `none`, `packet`, `kill`, combined `packet,kill`, and slow-network / repeated-failure campaigns inspired by the Patroni repo
-- [ ] add a repeat-run soak profile for non-deterministic failures, including multi-run 30-minute campaigns and archived failure seeds / histories
-- [ ] document local Jepsen lab prerequisites and bootstrap flow, including `JDK`, `Leiningen`, VM/Kubernetes substrate, node inventory generation, and artifact review
-- [ ] decide where Jepsen runs execute in automation, preferring separate long-running CI/CD stages or scheduled jobs instead of the fast default PR pipeline
-- [ ] add separate CI/CD jobs for Jepsen smoke validation on demand and extended nightly / scheduled Jepsen campaigns
-- [ ] publish Jepsen HTML/history artifacts and concise failure summaries from CI/CD for operator review and regression tracking
+- [x] evaluate whether to adapt the Jepsen harness shape directly or build a PACMAN-specific harness with the same workload / nemesis model; decision recorded in [JEPSEN.md](JEPSEN.md)
+- [x] add a Patroni baseline target so PACMAN Jepsen runs can be calibrated against a known HA implementation before PACMAN-specific assertions are trusted; target contract recorded in [JEPSEN.md](JEPSEN.md)
+- [x] define a PACMAN Jepsen target topology, including 3 data nodes and optional witness coverage where PACMAN semantics differ from Patroni; topology contract recorded in [JEPSEN.md](JEPSEN.md)
+- [x] define Jepsen workload coverage for append/register-style histories, single-key stress, read committed checks, and serializable checks; workload matrix recorded in [JEPSEN.md](JEPSEN.md)
+- [x] define Jepsen nemesis coverage for `none`, `packet`, `kill`, combined `packet,kill`, and slow-network / repeated-failure campaigns inspired by the Patroni repo; nemesis matrix recorded in [JEPSEN.md](JEPSEN.md)
+- [x] add a repeat-run soak profile for non-deterministic failures, including multi-run 30-minute campaigns and archived failure seeds / histories; soak profile recorded in [JEPSEN.md](JEPSEN.md)
+- [x] document local Jepsen lab prerequisites and bootstrap flow, including `JDK`, `Leiningen`, VM/Kubernetes substrate, node inventory generation, and artifact review; local lab flow recorded in [JEPSEN.md](JEPSEN.md)
+- [x] decide where Jepsen runs execute in automation, preferring separate long-running CI/CD stages or scheduled jobs instead of the fast default PR pipeline; automation placement recorded in [JEPSEN.md](JEPSEN.md)
+- [x] add separate CI/CD jobs for Jepsen smoke validation on demand and extended nightly / scheduled Jepsen campaigns; workflow entry points added in `.github/workflows/jepsen.yml`
+- [x] publish Jepsen HTML/history artifacts and concise failure summaries from CI/CD for operator review and regression tracking; summary and artifact upload contract recorded in [JEPSEN.md](JEPSEN.md)
 ---
 
 ## 18. Kubernetes-Native MVP
