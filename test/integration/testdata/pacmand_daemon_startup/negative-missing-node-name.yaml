@@ -1,0 +1,4 @@
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  role: witness

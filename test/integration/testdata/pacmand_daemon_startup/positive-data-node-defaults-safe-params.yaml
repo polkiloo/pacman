@@ -1,0 +1,10 @@
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: alpha-3
+  role: data
+postgres:
+  dataDir: /data/postgres
+  parameters:
+    max_connections: "150"
+    shared_buffers: 256MB

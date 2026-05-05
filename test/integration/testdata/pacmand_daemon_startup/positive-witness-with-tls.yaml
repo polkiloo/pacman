@@ -1,0 +1,11 @@
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: witness-2
+  role: witness
+  apiAddress: 0.0.0.0:8181
+  controlAddress: 0.0.0.0:9191
+tls:
+  enabled: true
+  certFile: /etc/pacman/tls/witness.crt
+  keyFile: /etc/pacman/tls/witness.key

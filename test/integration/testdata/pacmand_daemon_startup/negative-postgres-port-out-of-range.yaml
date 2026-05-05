@@ -1,0 +1,8 @@
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: broken-postgres-port
+  role: data
+postgres:
+  dataDir: /var/lib/postgresql/data
+  port: 70000

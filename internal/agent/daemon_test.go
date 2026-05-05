@@ -637,7 +637,7 @@ func TestDaemonStartReportsRoleDetectionFailureWhileAvailabilityIsUp(t *testing.
 	daemon.Wait()
 }
 
-func TestDaemonHeartbeatLoopTicksAndTracksAvailabilityChanges(t *testing.T) {
+func TestDaemonHeartbeatRecordsAndTracksAvailabilityChanges(t *testing.T) {
 	t.Parallel()
 
 	var logs bytes.Buffer
@@ -649,7 +649,7 @@ func TestDaemonHeartbeatLoopTicksAndTracksAvailabilityChanges(t *testing.T) {
 	daemon, err := NewDaemon(
 		validDataConfig(),
 		logging.New("pacmand", &logs),
-		withHeartbeatInterval(10*time.Millisecond),
+		withHeartbeatInterval(time.Hour),
 		withPostgresProbe(func(context.Context, string) error {
 			mu.Lock()
 			defer mu.Unlock()
@@ -691,9 +691,7 @@ func TestDaemonHeartbeatLoopTicksAndTracksAvailabilityChanges(t *testing.T) {
 		t.Fatalf("start daemon: %v", err)
 	}
 
-	waitForHeartbeat(t, daemon, func(heartbeat agentmodel.Heartbeat) bool {
-		return heartbeat.Sequence >= 2 && heartbeat.Postgres.Up
-	})
+	daemon.recordHeartbeat(ctx)
 
 	cancel()
 	daemon.Wait()
@@ -1071,6 +1069,143 @@ func TestDaemonStartReturnsContextError(t *testing.T) {
 	}
 }
 
+func TestDaemonStartRollsBackAfterAPIServerFailureAndCanRestart(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	daemon, err := NewDaemon(
+		validWitnessConfig(),
+		logging.New("pacmand", &logs),
+		withHeartbeatInterval(time.Hour),
+	)
+	if err != nil {
+		t.Fatalf("new daemon: %v", err)
+	}
+
+	daemon.apiServer = startErrorServer{startErr: errors.New("bind failed")}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err = daemon.Start(ctx)
+	if err == nil {
+		t.Fatal("expected api server start error")
+	}
+
+	assertContains(t, err.Error(), "start http api server")
+	assertContains(t, err.Error(), "bind failed")
+	assertDaemonStartRolledBack(t, daemon)
+	if strings.Contains(logs.String(), `"msg":"started local agent daemon"`) {
+		t.Fatalf("expected failed startup not to emit start log, got %q", logs.String())
+	}
+
+	daemon.apiServer = stubHTTPServer{}
+	if err := daemon.Start(ctx); err != nil {
+		t.Fatalf("restart daemon after api failure rollback: %v", err)
+	}
+
+	assertContains(t, logs.String(), `"msg":"started local agent daemon"`)
+	cancel()
+	daemon.Wait()
+}
+
+func TestDaemonStartRollsBackAfterPeerServerFailureAndCanRestart(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	daemon, err := NewDaemon(
+		validWitnessConfig(),
+		logging.New("pacmand", &logs),
+		withHeartbeatInterval(time.Hour),
+		WithNoAPIServer(),
+	)
+	if err != nil {
+		t.Fatalf("new daemon: %v", err)
+	}
+
+	daemon.peerServer = startErrorServer{startErr: errors.New("peer bind failed")}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err = daemon.Start(ctx)
+	if err == nil {
+		t.Fatal("expected peer server start error")
+	}
+
+	assertContains(t, err.Error(), "start peer api server")
+	assertContains(t, err.Error(), "peer bind failed")
+	assertDaemonStartRolledBack(t, daemon)
+	if strings.Contains(logs.String(), `"msg":"started local agent daemon"`) {
+		t.Fatalf("expected failed startup not to emit start log, got %q", logs.String())
+	}
+
+	daemon.peerServer = stubHTTPServer{}
+	if err := daemon.Start(ctx); err != nil {
+		t.Fatalf("restart daemon after peer failure rollback: %v", err)
+	}
+
+	assertContains(t, logs.String(), `"msg":"started local agent daemon"`)
+	cancel()
+	daemon.Wait()
+}
+
+func TestDaemonStartRollsBackAfterBootstrapFailureAndCanRestart(t *testing.T) {
+	t.Parallel()
+
+	cfg := validWitnessConfig()
+	cfg.Bootstrap = &config.ClusterBootstrapConfig{
+		ClusterName:     "alpha",
+		InitialPrimary:  "alpha-1",
+		ExpectedMembers: []string{"alpha-1", "alpha-2"},
+	}
+
+	var logs bytes.Buffer
+	daemon, err := NewDaemon(
+		cfg,
+		logging.New("pacmand", &logs),
+		withHeartbeatInterval(time.Hour),
+		WithControlPlanePublisher(&failingBootstrapStore{
+			MemoryStateStore: controlplane.NewMemoryStateStore(),
+			storeErr:         errors.New("dcs unavailable"),
+		}),
+		WithNoAPIServer(),
+	)
+	if err != nil {
+		t.Fatalf("new daemon: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err = daemon.Start(ctx)
+	if err == nil {
+		t.Fatal("expected bootstrap store error")
+	}
+
+	assertContains(t, err.Error(), "store bootstrap cluster spec")
+	assertContains(t, err.Error(), "dcs unavailable")
+	assertDaemonStartRolledBack(t, daemon)
+	if strings.Contains(logs.String(), `"msg":"started local agent daemon"`) {
+		t.Fatalf("expected failed startup not to emit start log, got %q", logs.String())
+	}
+
+	store := controlplane.NewMemoryStateStore()
+	daemon.statePublisher = store
+	if err := daemon.Start(ctx); err != nil {
+		t.Fatalf("restart daemon after bootstrap failure rollback: %v", err)
+	}
+
+	if _, ok := store.ClusterSpec(); !ok {
+		t.Fatal("expected retry to store bootstrap cluster spec")
+	}
+
+	assertContains(t, logs.String(), `"msg":"stored bootstrap cluster spec"`)
+	assertContains(t, logs.String(), `"msg":"started local agent daemon"`)
+	cancel()
+	daemon.Wait()
+}
+
 func TestDaemonStartServesPeerIdentityOverMTLS(t *testing.T) {
 	t.Parallel()
 
@@ -1191,9 +1326,12 @@ func TestDaemonProbeSeedPeersLogsValidatedPeerMTLSConnection(t *testing.T) {
 		TLSConfig:    serverTLSConfig,
 		AllowedPeers: []string{"beta-1"},
 	})
-	seedAddress := reserveLoopbackAddress()
-	if err := server.Start(serverCtx, seedAddress); err != nil {
+	if err := server.Start(serverCtx, "127.0.0.1:0"); err != nil {
 		t.Fatalf("start peer server: %v", err)
+	}
+	seedAddress := server.Address()
+	if seedAddress == "" {
+		t.Fatal("expected peer server address")
 	}
 
 	client := &http.Client{
@@ -1416,6 +1554,18 @@ func validDataConfig() config.Config {
 	}
 }
 
+func validWitnessConfig() config.Config {
+	return config.Config{
+		APIVersion: config.APIVersionV1Alpha1,
+		Kind:       config.KindNodeConfig,
+		Node: config.NodeConfig{
+			Name:       "alpha-witness",
+			Role:       cluster.NodeRoleWitness,
+			APIAddress: reserveLoopbackAddress(),
+		},
+	}
+}
+
 type waitErrorServer struct {
 	waitErr error
 }
@@ -1426,6 +1576,39 @@ func (server waitErrorServer) Start(context.Context, string) error {
 
 func (server waitErrorServer) Wait() error {
 	return server.waitErr
+}
+
+type startErrorServer struct {
+	startErr error
+}
+
+func (server startErrorServer) Start(context.Context, string) error {
+	return server.startErr
+}
+
+func (server startErrorServer) Wait() error {
+	return nil
+}
+
+type failingBootstrapStore struct {
+	*controlplane.MemoryStateStore
+	storeErr error
+}
+
+func (store *failingBootstrapStore) StoreClusterSpec(context.Context, cluster.ClusterSpec) (cluster.ClusterSpec, error) {
+	return cluster.ClusterSpec{}, store.storeErr
+}
+
+func assertDaemonStartRolledBack(t *testing.T, daemon *Daemon) {
+	t.Helper()
+
+	if !daemon.Startup().StartedAt.IsZero() {
+		t.Fatalf("expected startup state to be cleared after failed start, got %+v", daemon.Startup())
+	}
+
+	if daemon.startedFlag.Load() {
+		t.Fatal("expected started flag to be cleared after failed start")
+	}
 }
 
 func validWitnessMemberMTLSConfig() config.Config {
@@ -1505,21 +1688,6 @@ func mustGET(t *testing.T, client *http.Client, rawURL, authorization string) *h
 	}
 
 	return response
-}
-
-func waitForHeartbeat(t *testing.T, daemon *Daemon, predicate func(agentmodel.Heartbeat) bool) {
-	t.Helper()
-
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if predicate(daemon.Heartbeat()) {
-			return
-		}
-
-		time.Sleep(5 * time.Millisecond)
-	}
-
-	t.Fatalf("heartbeat condition was not met, last heartbeat: %+v", daemon.Heartbeat())
 }
 
 func assertContains(t *testing.T, got, want string) {

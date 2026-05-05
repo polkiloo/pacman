@@ -41,8 +41,23 @@ jobs:
         run: make coverage-check
 
   test-integration:
+    name: integration / ${{ matrix.suite }}
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: control-plane
+            target: test-integration-control-plane
+          - suite: patroni
+            target: test-integration-patroni
+          - suite: postgres
+            target: test-integration-postgres
+          - suite: ha
+            target: test-integration-ha
+          - suite: install
+            target: test-integration-install
 
     steps:
       - name: Checkout
@@ -54,26 +69,8 @@ jobs:
           go-version: '1.26.1'
           cache: true
 
-      - name: Build integration images
-        run: make docker-build-test-image docker-build-pgext-image docker-build-ansible-install-image
-
-      - name: Run integration smoke suite
-        run: make test-integration-smoke
-
-      - name: Run integration security suite
-        run: make test-integration-security
-
-      - name: Run integration Patroni suite
-        run: make test-integration-patroni
-
-      - name: Run integration PostgreSQL extension suite
-        run: make test-integration-pgext
-
-      - name: Run integration HA suite
-        run: make test-integration-ha
-
-      - name: Run integration install suite
-        run: make test-integration-install
+      - name: Run integration suite
+        run: make ${{ matrix.target }}
 
   test-rpm-packaging:
     runs-on: ubuntu-latest

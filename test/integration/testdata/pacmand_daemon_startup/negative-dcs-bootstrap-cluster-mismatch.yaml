@@ -1,0 +1,18 @@
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: alpha-1
+  role: data
+postgres:
+  dataDir: /var/lib/postgresql/data
+dcs:
+  backend: etcd
+  clusterName: beta
+  etcd:
+    endpoints:
+      - http://127.0.0.1:2379
+bootstrap:
+  clusterName: alpha
+  initialPrimary: alpha-1
+  expectedMembers:
+    - alpha-1

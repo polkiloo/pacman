@@ -253,6 +253,8 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - ZooKeeper — znode versions for CAS, ephemeral znodes for TTL
 - Consul — `ModifyIndex` for CAS, sessions for TTL, blocking queries for watch
 - Kubernetes — ConfigMap + `resourceVersion` for CAS, Lease for leader election
+- [ ] replace the Exhibitor compatibility fixture with a real ZooKeeper + Exhibitor testcontainer topology once PACMAN can translate or intentionally probe Patroni `exhibitor` settings
+- [ ] replace the Kubernetes compatibility fixture with a real API-server-backed testcontainer topology, preferably `kind` or envtest, once PACMAN can translate or intentionally probe Patroni `kubernetes` settings
 
 ---
 
@@ -450,18 +452,19 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 
 
 ### Patroni-Inspired Coverage Groups
-- [ ] add REST API and HTTP server coverage inspired by Patroni `tests/test_api.py`
-- [ ] add daemon entrypoint and process lifecycle coverage inspired by Patroni `tests/test_patroni.py`
-- [ ] add CLI command and presentation coverage inspired by Patroni `tests/test_ctl.py`
-- [ ] add config parsing, generation, validator, and file-permission coverage inspired by Patroni `tests/test_config.py`, `tests/test_config_generator.py`, `tests/test_validator.py`, and `tests/test_file_perm.py`
-- [ ] add async executor, callback executor, and cancellable subprocess coverage inspired by Patroni `tests/test_async_executor.py`, `tests/test_callback_executor.py`, and `tests/test_cancellable.py`
-- [ ] add HA loop, quorum, synchronous replication, and slot-management coverage inspired by Patroni `tests/test_ha.py`, `tests/test_quorum.py`, `tests/test_sync.py`, and `tests/test_slots.py`
-- [ ] add PostgreSQL bootstrap, local lifecycle, and postmaster coverage inspired by Patroni `tests/test_bootstrap.py`, `tests/test_postgresql.py`, and `tests/test_postmaster.py`
-- [ ] add rewind and replica rejoin coverage inspired by Patroni `tests/test_rewind.py`
-- [ ] add backup, restore, and cloud-integration coverage inspired by Patroni `tests/test_aws.py`, `tests/test_barman.py`, and `tests/test_wale_restore.py`
-- [ ] add DCS backend contract coverage for Consul, etcd, etcd3, Exhibitor, Kubernetes, Raft, and ZooKeeper inspired by Patroni `tests/test_consul.py`, `tests/test_etcd.py`, `tests/test_etcd3.py`, `tests/test_exhibitor.py`, `tests/test_kubernetes.py`, `tests/test_raft.py`, `tests/test_raft_controller.py`, and `tests/test_zookeeper.py`
-- [ ] add watchdog and fencing coverage inspired by Patroni `tests/test_watchdog.py`
-- [ ] add distributed-topology and MPP coverage inspired by Patroni `tests/test_citus.py` and `tests/test_mpp.py`
+- [x] add REST API and HTTP server coverage inspired by Patroni `tests/test_api.py`
+- [x] add daemon entrypoint and process lifecycle coverage inspired by Patroni `tests/test_patroni.py`
+- [x] add CLI command and presentation coverage inspired by Patroni `tests/test_ctl.py`
+- [x] add config parsing, generation, validator, and file-permission coverage inspired by Patroni `tests/test_config.py`, `tests/test_config_generator.py`, `tests/test_validator.py`, and `tests/test_file_perm.py`
+- [x] add async executor, callback executor, and cancellable subprocess coverage inspired by Patroni `tests/test_async_executor.py`, `tests/test_callback_executor.py`, and `tests/test_cancellable.py`
+- [x] add HA loop, quorum, synchronous replication, and slot-management coverage inspired by Patroni `tests/test_ha.py`, `tests/test_quorum.py`, `tests/test_sync.py`, and `tests/test_slots.py`
+- [x] add PostgreSQL bootstrap, local lifecycle, and postmaster coverage inspired by Patroni `tests/test_bootstrap.py`, `tests/test_postgresql.py`, and `tests/test_postmaster.py`
+- [x] add rewind and replica rejoin coverage inspired by Patroni `tests/test_rewind.py`
+- [x] add backup, restore, and cloud-integration coverage inspired by Patroni `tests/test_aws.py`, `tests/test_barman.py`, and `tests/test_wale_restore.py`
+- [x] add DCS backend contract coverage for Consul, etcd, etcd3, Exhibitor, Kubernetes, Raft, and ZooKeeper inspired by Patroni `tests/test_consul.py`, `tests/test_etcd.py`, `tests/test_etcd3.py`, `tests/test_exhibitor.py`, `tests/test_kubernetes.py`, `tests/test_raft.py`, `tests/test_raft_controller.py`, and `tests/test_zookeeper.py`
+- [x] add explicit unsupported-backend regression assertions for Patroni `exhibitor` and `kubernetes` configs so config translation keeps failing clearly until real backend support is implemented
+- [x] document the current DCS contract split: real service containers for supported/partially supported backends, and compatibility fixtures only for backends rejected before client startup
+- [x] add watchdog and fencing coverage inspired by Patroni `tests/test_watchdog.py`
 
 ### Jepsen Fault-Injection Campaigns
 Inspired by [Wolfsrudel/database-postgres-ha-patroni-testing-jepsen](https://github.com/Wolfsrudel/database-postgres-ha-patroni-testing-jepsen), which uses Jepsen + Clojure/Leiningen with a Vagrant / k3s lab and a Patroni cluster target.
@@ -580,6 +583,7 @@ This track captures the Kubernetes-native operator model described in [ARCHITECT
 - [ ] add standby-cluster / DR support
 - [ ] automate endpoint management
 - [ ] add web UI
+- [ ] add distributed-topology and MPP coverage inspired by Patroni `tests/test_citus.py` and `tests/test_mpp.py`
 
 ### Cascading Replication
 - [ ] define post-MVP product scope and safety rules for cascading replication, including when PACMAN may prefer direct vs cascaded upstreams

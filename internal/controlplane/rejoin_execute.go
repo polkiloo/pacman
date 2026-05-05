@@ -111,6 +111,8 @@ func (store *MemoryStateStore) prepareRejoinRewindExecution(request RejoinReques
 
 func validateRejoinRewindDecision(decision RejoinStrategyDecision) error {
 	switch {
+	case decision.DirectRejoinPossible:
+		return ErrRejoinRewindNotRequired
 	case decision.Strategy == cluster.RejoinStrategyReclone:
 		return ErrRejoinRecloneRequired
 	case !decision.Decided && !decision.DirectRejoinPossible && len(decision.Reasons) > 0:

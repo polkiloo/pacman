@@ -176,6 +176,145 @@ func TestPACMANClusterEnvironment(t *testing.T) {
 		t.Fatalf("unexpected patronictl-compatible show-config output: %q", showConfigOutput)
 	}
 
+	positiveCases := []struct {
+		name         string
+		command      string
+		wantContains []string
+	}{
+		{
+			name:    "positive cluster status json presentation",
+			command: "pacmanctl cluster status -o json 2>/dev/null",
+			wantContains: []string{
+				`"clusterName": "alpha"`,
+				daemonNodeName,
+			},
+		},
+		{
+			name:    "positive cluster spec json presentation",
+			command: "pacmanctl cluster spec show -o json 2>/dev/null",
+			wantContains: []string{
+				`"clusterName": "alpha"`,
+				daemonNodeName,
+			},
+		},
+		{
+			name:    "positive members yaml presentation",
+			command: "pacmanctl members list -o yaml 2>/dev/null",
+			wantContains: []string{
+				daemonNodeName,
+				"primary",
+			},
+		},
+		{
+			name:    "positive node status json presentation",
+			command: "pacmanctl node status -node " + daemonNodeName + " -o json 2>/dev/null",
+			wantContains: []string{
+				`"nodeName": "` + daemonNodeName + `"`,
+				`"role": "primary"`,
+			},
+		},
+		{
+			name:    "positive diagnostics json presentation",
+			command: "pacmanctl diagnostics show -o json 2>/dev/null",
+			wantContains: []string{
+				`"clusterName": "alpha"`,
+				daemonNodeName,
+			},
+		},
+		{
+			name:    "positive patronictl list extended timestamp tsv",
+			command: "pacmanctl list alpha --extended --timestamp -f tsv 2>/dev/null",
+			wantContains: []string{
+				"Last Seen",
+				"Needs Rejoin",
+				daemonNodeName,
+			},
+		},
+		{
+			name:    "positive patronictl show-config scoped json",
+			command: "pacmanctl show-config alpha -f json 2>/dev/null",
+			wantContains: []string{
+				`"pause": false`,
+				`"cluster_name": "alpha"`,
+			},
+		},
+	}
+	for _, testCase := range positiveCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			assertPacmanctlPositive(t, cli, daemonAlias, testCase.command, testCase.wantContains...)
+		})
+	}
+
+	negativeCases := []struct {
+		name         string
+		command      string
+		wantContains []string
+	}{
+		{
+			name:    "negative unsupported members output format",
+			command: "pacmanctl members list -o xml",
+			wantContains: []string{
+				"unsupported output format",
+				"xml",
+			},
+		},
+		{
+			name:    "negative node status requires node name",
+			command: "pacmanctl node status",
+			wantContains: []string{
+				"node name is required",
+			},
+		},
+		{
+			name:    "negative patronictl list rejects wrong scope",
+			command: "pacmanctl list wrong-scope",
+			wantContains: []string{
+				"cluster name mismatch",
+				"wrong-scope",
+				"alpha",
+			},
+		},
+		{
+			name:    "negative patronictl show-config rejects wrong scope",
+			command: "pacmanctl show-config wrong-scope",
+			wantContains: []string{
+				"cluster name mismatch",
+				"wrong-scope",
+				"alpha",
+			},
+		},
+		{
+			name:    "negative patronictl pause rejects wrong scope",
+			command: "pacmanctl pause wrong-scope",
+			wantContains: []string{
+				"cluster name mismatch",
+				"wrong-scope",
+				"alpha",
+			},
+		},
+		{
+			name:    "negative patronictl switchover requires candidate",
+			command: "pacmanctl switchover",
+			wantContains: []string{
+				"--candidate is required",
+			},
+		},
+		{
+			name:    "negative patronictl switchover rejects wrong leader",
+			command: "pacmanctl switchover --leader wrong-leader --candidate alpha-2",
+			wantContains: []string{
+				"leader mismatch",
+				"wrong-leader",
+				daemonNodeName,
+			},
+		},
+	}
+	for _, testCase := range negativeCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			assertPacmanctlNegative(t, cli, daemonAlias, testCase.command, testCase.wantContains...)
+		})
+	}
+
 	// Ensure maintenance is always disabled on exit, even if assertions below fail.
 	t.Cleanup(func() {
 		cli.Exec(t, "/bin/sh", "-lc",
@@ -235,4 +374,44 @@ func contains(items []string, want string) bool {
 	}
 
 	return false
+}
+
+func assertPacmanctlNegative(t *testing.T, cli *testenv.Runner, daemonAlias, command string, wantContains ...string) {
+	t.Helper()
+
+	result := cli.Exec(
+		t,
+		"/bin/sh",
+		"-lc",
+		fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 %s", daemonAlias, command),
+	)
+	if result.ExitCode == 0 {
+		t.Fatalf("expected %q to fail, output=%q", command, result.Output)
+	}
+
+	for _, want := range wantContains {
+		if !strings.Contains(result.Output, want) {
+			t.Fatalf("expected failed command %q output %q to contain %q", command, result.Output, want)
+		}
+	}
+}
+
+func assertPacmanctlPositive(t *testing.T, cli *testenv.Runner, daemonAlias, command string, wantContains ...string) {
+	t.Helper()
+
+	result := cli.Exec(
+		t,
+		"/bin/sh",
+		"-lc",
+		fmt.Sprintf("PACMANCTL_API_URL=http://%s:8080 %s", daemonAlias, command),
+	)
+	if result.ExitCode != 0 {
+		t.Fatalf("expected %q to succeed, exit=%d output=%q", command, result.ExitCode, result.Output)
+	}
+
+	for _, want := range wantContains {
+		if !strings.Contains(result.Output, want) {
+			t.Fatalf("expected command %q output %q to contain %q", command, result.Output, want)
+		}
+	}
 }

@@ -169,6 +169,32 @@ var patroniFieldRules = map[string]patroniFieldRule{
 	},
 }
 
+func init() {
+	addPatroniCloudRestoreFieldRules(patroniFieldRules)
+}
+
+func addPatroniCloudRestoreFieldRules(rules map[string]patroniFieldRule) {
+	postgresRule := rules["postgresql"]
+	postgresRule.children["create_replica_methods"] = patroniFieldRule{
+		warning: `Patroni key "postgresql.create_replica_methods" is not translated; PACMAN replica imaging is handled by deployment or rejoin workflows`,
+	}
+	postgresRule.children["barman"] = patroniFieldRule{
+		warning: `Patroni key "postgresql.barman" is not translated; configure Barman recovery tooling outside PACMAN and pass restored PostgreSQL settings through cluster policy`,
+	}
+	postgresRule.children["wale"] = patroniFieldRule{
+		warning: `Patroni key "postgresql.wale" is not translated; configure WAL-E/WAL-G tooling outside PACMAN and pass restored PostgreSQL settings through cluster policy`,
+	}
+	postgresRule.children["wal_e"] = patroniFieldRule{
+		warning: `Patroni key "postgresql.wal_e" is not translated; configure WAL-E/WAL-G tooling outside PACMAN and pass restored PostgreSQL settings through cluster policy`,
+	}
+	postgresRule.children["recovery_conf"] = patroniFieldRule{
+		warning: `Patroni key "postgresql.recovery_conf" is not translated; PACMAN renders standby recovery settings from cluster policy during rejoin`,
+	}
+	rules["callbacks"] = patroniFieldRule{
+		warning: `Patroni key "callbacks" is not translated; configure cloud role-change callbacks outside PACMAN`,
+	}
+}
+
 func decodePatroniConfig(payload []byte) (DecodeReport, error) {
 	var root yaml.Node
 	decoder := yaml.NewDecoder(bytes.NewReader(payload))

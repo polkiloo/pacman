@@ -21,6 +21,7 @@ var runPassthroughCommand commandRunner = executePassthroughCommand
 
 func executeCommand(ctx context.Context, name string, args ...string) (commandResult, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	configureCommandContextCancel(cmd)
 	output, err := cmd.CombinedOutput()
 	result := commandResult{
 		output:   string(output),
@@ -42,6 +43,7 @@ func executeCommand(ctx context.Context, name string, args ...string) (commandRe
 
 func executePassthroughCommand(ctx context.Context, name string, args ...string) (commandResult, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	configureCommandContextCancel(cmd)
 	err := cmd.Run()
 	result := commandResult{
 		exitCode: 0,

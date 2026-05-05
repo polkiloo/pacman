@@ -169,6 +169,71 @@ CREATE TABLE workflow_negative_standby_write (
 	})
 }
 
+func TestPostgresWorkflowAdditionalNegativeCases(t *testing.T) {
+	if testing.Short() {
+		t.Skip(skipShortMode)
+	}
+
+	primary, standby := startReplicatedPostgresPair(t)
+
+	t.Run("bad password blocks observation query", func(t *testing.T) {
+		t.Setenv("PGPASSWORD", "definitely-wrong")
+
+		observation, err := pgobs.QueryObservation(context.Background(), primary.Address(t))
+		if err == nil {
+			t.Fatal("expected observation query with bad password to fail")
+		}
+		if observation.Role != cluster.MemberRoleUnknown {
+			t.Fatalf("expected unknown role on auth failure, got %+v", observation)
+		}
+	})
+
+	t.Run("missing database blocks health query", func(t *testing.T) {
+		t.Setenv("PGDATABASE", "pacman_missing_database")
+
+		_, err := pgobs.QueryHealth(context.Background(), primary.Address(t))
+		if err == nil {
+			t.Fatal("expected health query against missing database to fail")
+		}
+	})
+
+	t.Run("unknown user blocks system identifier query", func(t *testing.T) {
+		t.Setenv("PGUSER", "pacman_missing_user")
+
+		systemIdentifier, err := pgobs.QuerySystemIdentifier(context.Background(), primary.Address(t))
+		if err == nil {
+			t.Fatal("expected system identifier query with unknown user to fail")
+		}
+		if systemIdentifier != "" {
+			t.Fatalf("expected empty system identifier on auth failure, got %q", systemIdentifier)
+		}
+	})
+
+	t.Run("standby rejects insert into replicated table", func(t *testing.T) {
+		assertStandbyRejectsWrite(t, standby, `
+INSERT INTO topology_marker (id, payload)
+VALUES (2, 'standby-write')`)
+	})
+
+	t.Run("standby rejects drop of replicated table", func(t *testing.T) {
+		assertStandbyRejectsWrite(t, standby, `DROP TABLE topology_marker`)
+	})
+
+	t.Run("standby rejects create database", func(t *testing.T) {
+		assertStandbyRejectsWrite(t, standby, `CREATE DATABASE pacman_negative_created_on_standby`)
+	})
+
+	t.Run("primary rejects duplicate physical replication slot", func(t *testing.T) {
+		assertSQLFails(
+			t,
+			primary,
+			`SELECT pg_create_physical_replication_slot('alpha_2')`,
+			"already exists",
+			"replication slot",
+		)
+	})
+}
+
 func TestPostgresRoleDetectionUsesRealPrimaryAndStandby(t *testing.T) {
 	if testing.Short() {
 		t.Skip(skipShortMode)

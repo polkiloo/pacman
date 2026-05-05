@@ -1,0 +1,5 @@
+apiVersion: pacman.io/v2
+kind: NodeConfig
+node:
+  name: broken-version
+  role: witness

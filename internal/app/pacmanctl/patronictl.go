@@ -245,6 +245,7 @@ func (a *App) runPatronictlSwitchover(ctx context.Context, client *apiClient, ar
 		ScheduledAt: options.scheduledAt,
 		Reason:      options.reason,
 		RequestedBy: options.requestedBy,
+		Force:       options.force,
 	})
 	if err != nil {
 		return err
@@ -276,6 +277,7 @@ func (a *App) runPatronictlFailover(ctx context.Context, client *apiClient, args
 			Candidate:   options.candidate,
 			Reason:      options.reason,
 			RequestedBy: options.requestedBy,
+			Force:       options.force,
 		})
 	} else {
 		response, err = client.failover(ctx, failoverRequestJSON{

@@ -42,6 +42,35 @@ func TestExecuteCommandCapturesFailureExitCodeAndStderr(t *testing.T) {
 	}
 }
 
+func TestExecuteCommandCancelsLongRunningProcess(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("shell sleep semantics differ on windows")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	startedAt := time.Now()
+	result, err := executeCommand(ctx, "sh", "-c", "sleep 5")
+	if err == nil {
+		t.Fatal("expected canceled command to fail")
+	}
+
+	if ctx.Err() == nil {
+		t.Fatalf("expected command context to be canceled, err=%v result=%+v", err, result)
+	}
+
+	if elapsed := time.Since(startedAt); elapsed >= time.Second {
+		t.Fatalf("expected command cancellation before sleep completed, elapsed=%s", elapsed)
+	}
+
+	if result.exitCode == 0 {
+		t.Fatalf("expected non-zero exit code for canceled command, got %+v", result)
+	}
+}
+
 func TestExecutePassthroughCommandReturnsWithoutWaitingForBackgroundChild(t *testing.T) {
 	t.Parallel()
 
@@ -60,6 +89,35 @@ func TestExecutePassthroughCommandReturnsWithoutWaitingForBackgroundChild(t *tes
 
 	if elapsed := time.Since(startedAt); elapsed >= 500*time.Millisecond {
 		t.Fatalf("passthrough command blocked for background child: elapsed=%s", elapsed)
+	}
+}
+
+func TestExecutePassthroughCommandCancelsLongRunningProcess(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("shell sleep semantics differ on windows")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	startedAt := time.Now()
+	result, err := executePassthroughCommand(ctx, "sh", "-c", "sleep 5")
+	if err == nil {
+		t.Fatal("expected canceled passthrough command to fail")
+	}
+
+	if ctx.Err() == nil {
+		t.Fatalf("expected passthrough command context to be canceled, err=%v result=%+v", err, result)
+	}
+
+	if elapsed := time.Since(startedAt); elapsed >= time.Second {
+		t.Fatalf("expected passthrough command cancellation before sleep completed, elapsed=%s", elapsed)
+	}
+
+	if result.exitCode == 0 {
+		t.Fatalf("expected non-zero exit code for canceled passthrough command, got %+v", result)
 	}
 }
 

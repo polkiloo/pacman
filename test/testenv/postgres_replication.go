@@ -85,6 +85,22 @@ func (e *Environment) StartStreamingStandby(t *testing.T, name, alias string, pr
 func (e *Environment) StartRenderedStreamingStandby(t *testing.T, name, alias string, primary *Postgres, slotName string) *Postgres {
 	t.Helper()
 
+	return e.StartRenderedStreamingStandbyWithRestoreCommand(t, name, alias, primary, slotName, "")
+}
+
+// StartRenderedStreamingStandbyWithRestoreCommand starts a PostgreSQL fixture
+// that uses PACMAN-rendered standby artifacts, including an optional
+// restore_command, to stream from the provided primary.
+func (e *Environment) StartRenderedStreamingStandbyWithRestoreCommand(
+	t *testing.T,
+	name string,
+	alias string,
+	primary *Postgres,
+	slotName string,
+	restoreCommand string,
+) *Postgres {
+	t.Helper()
+
 	if primary == nil {
 		t.Fatal("primary postgres fixture must be provided")
 	}
@@ -102,6 +118,7 @@ func (e *Environment) StartRenderedStreamingStandby(t *testing.T, name, alias st
 			slotName,
 		),
 		PrimarySlotName: slotName,
+		RestoreCommand:  restoreCommand,
 	})
 	if err != nil {
 		t.Fatalf("render standby files for %q: %v", name, err)

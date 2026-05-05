@@ -1,0 +1,6 @@
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: broken-security
+  role: witness
+security: {}
