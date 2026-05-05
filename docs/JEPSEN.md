@@ -31,6 +31,43 @@ The target deployment should be PACMAN-native:
 - Drive failover observations through PACMAN APIs and PostgreSQL behavior, not Patroni labels or Patroni-specific Kubernetes metadata.
 - Keep a Patroni baseline target as a separate calibration target, not as the foundation of PACMAN test execution.
 
+## Patroni Baseline Target
+
+The Jepsen harness must include a `patroni` baseline target before PACMAN-only
+assertions are treated as trusted signal. This target exists to calibrate the lab,
+workload generators, nemeses, client routing, and history checkers against a known
+PostgreSQL HA implementation.
+
+The baseline should be implemented as a separate target from `pacman`, not as a
+shared deployment layer:
+
+| Target | Purpose | Deployment shape | Primary discovery |
+|---|---|---|---|
+| `patroni` | Calibration baseline | 3 PostgreSQL data nodes managed by Patroni with the same DCS family used by the selected lab profile | Patroni REST API, PostgreSQL role checks, or the same service endpoint clients will use |
+| `pacman` | Product under test | 3 PostgreSQL data nodes managed by PACMAN, with optional witness added after the base profile stabilizes | PACMAN native API plus PostgreSQL role checks |
+
+The Patroni target should run the same workload and nemesis matrix planned for
+PACMAN:
+
+- smoke: `none` nemesis, short append/register run, verifies client and checker wiring;
+- failover: process kill against the current primary;
+- partition: packet loss / network split that isolates the primary;
+- combined: packet plus process kill;
+- soak: repeated slow-network plus kill campaign using archived seeds and histories.
+
+PACMAN Jepsen assertions are trusted only after the baseline target proves that:
+
+- the lab can complete a no-fault run without false positives;
+- nemesis events are visible in logs and actually affect the intended node links or processes;
+- clients consistently route writes to the observed primary endpoint;
+- checker output and `store/` artifacts are archived and reviewable;
+- known Patroni behavior under aggressive campaigns is recorded as baseline context rather than treated as PACMAN regression evidence.
+
+Baseline results should be kept under a distinct Jepsen store path such as
+`store/patroni/...`, while PACMAN runs use `store/pacman/...`. CI summaries should
+report both target name and workload/nemesis profile so PACMAN failures are compared
+against the matching Patroni calibration run.
+
 ## Consequences
 
 This choice keeps the valuable Jepsen parts: workload generators, nemesis schedule, history checking, and repeat-run campaigns. It avoids coupling PACMAN's first Jepsen campaign to k3s or Patroni-specific assumptions. The tradeoff is that PACMAN needs its own small Clojure target layer for install/start/stop, primary discovery, client connection routing, and artifact collection.

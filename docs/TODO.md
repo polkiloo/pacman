@@ -469,7 +469,7 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 ### Jepsen Fault-Injection Campaigns
 Inspired by [Wolfsrudel/database-postgres-ha-patroni-testing-jepsen](https://github.com/Wolfsrudel/database-postgres-ha-patroni-testing-jepsen), which uses Jepsen + Clojure/Leiningen with a Vagrant / k3s lab and a Patroni cluster target.
 - [x] evaluate whether to adapt the Jepsen harness shape directly or build a PACMAN-specific harness with the same workload / nemesis model; decision recorded in [JEPSEN.md](JEPSEN.md)
-- [ ] add a Patroni baseline target so PACMAN Jepsen runs can be calibrated against a known HA implementation before PACMAN-specific assertions are trusted
+- [x] add a Patroni baseline target so PACMAN Jepsen runs can be calibrated against a known HA implementation before PACMAN-specific assertions are trusted; target contract recorded in [JEPSEN.md](JEPSEN.md)
 - [ ] define a PACMAN Jepsen target topology, including 3 data nodes and optional witness coverage where PACMAN semantics differ from Patroni
 - [ ] define Jepsen workload coverage for append/register-style histories, single-key stress, read committed checks, and serializable checks
 - [ ] define Jepsen nemesis coverage for `none`, `packet`, `kill`, combined `packet,kill`, and slow-network / repeated-failure campaigns inspired by the Patroni repo
