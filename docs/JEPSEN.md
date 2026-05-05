@@ -225,6 +225,66 @@ Pass/fail interpretation:
 - PACMAN regressions require the matching Patroni baseline profile to be either passing or documented as a known Patroni limitation.
 - Intermittent failures must include the failing seed and artifact path in the issue or CI summary.
 
+## Local Lab Prerequisites And Bootstrap
+
+The local Jepsen lab needs a Clojure control environment, SSH-reachable database
+nodes, and a repeatable way to generate both PACMAN and Patroni inventories.
+
+Required local tools:
+
+- JDK, pinned to the version supported by the chosen Jepsen dependency.
+- Leiningen for running Jepsen/Clojure commands.
+- SSH client with key-based access from the Jepsen control node to every lab node.
+- PostgreSQL client tools for manual verification and final artifact inspection.
+- A substrate provider: start with VM or container hosts that match the Ansible/lab
+  deployment model; add `kind` or k3s only when Kubernetes-native Jepsen targets are
+  introduced.
+- PACMAN build artifacts for the exact commit under test.
+- Patroni deployment artifacts for the baseline target.
+
+Substrate guidance:
+
+| Substrate | Use | Status |
+|---|---|---|
+| VM or container hosts with SSH and systemd-like process control | First PACMAN and Patroni Jepsen campaigns | Required for initial local lab. |
+| Existing PACMAN Ansible/lab shape | Inventory, package installation, PostgreSQL bootstrap, PACMAN config rendering | Preferred source for first implementation. |
+| `kind` or k3s | Future Kubernetes-native target and parity with the reference project's k3s path | Optional, after process/Ansible target is stable. |
+
+Inventory generation should produce one machine-readable file consumed by Jepsen and
+one Ansible-compatible inventory for deployment. The generated inventory must include:
+
+- target name, profile, and run id;
+- node name, SSH host, SSH user, and SSH key;
+- PACMAN role and PostgreSQL role at bootstrap;
+- PostgreSQL host/port and credentials for the Jepsen workload user;
+- PACMAN API and control addresses;
+- DCS node addresses and DCS profile;
+- witness membership when the witness target is selected;
+- artifact directory for each node.
+
+Bootstrap flow:
+
+1. Build PACMAN artifacts for the commit under test.
+2. Provision or reset the lab substrate.
+3. Generate the Jepsen inventory and matching Ansible inventory.
+4. Deploy DCS nodes.
+5. Deploy the selected target, either `patroni` baseline or `pacman`.
+6. Wait for a healthy initial primary and all expected members.
+7. Run the Jepsen smoke command with `append-smoke` and `none`.
+8. Collect pre-run topology snapshots, run metadata, and node log locations.
+9. Execute the selected workload/nemesis profile.
+10. Collect final reads, PACMAN or Patroni cluster state, operation history, process logs, PostgreSQL logs, DCS logs, Jepsen history, and checker output.
+11. Destroy or reset the lab before the next seed unless the run is explicitly marked for interactive debugging.
+
+Artifact review checklist:
+
+- Open the Jepsen `results.edn` and checker summary first.
+- Inspect `jepsen-history.edn` for failed, indeterminate, and successful write operations around nemesis windows.
+- Compare `nemesis-schedule.edn` with node logs to verify faults hit the intended processes or links.
+- Review PACMAN `/api/v1/history` and `/api/v1/cluster` snapshots for failover, rejoin, maintenance, and witness-specific state.
+- Confirm PostgreSQL logs from former primaries do not show accepted writes after demotion or isolation.
+- Preserve the full store path and seed in any issue filed from the run.
+
 ## Consequences
 
 This choice keeps the valuable Jepsen parts: workload generators, nemesis schedule, history checking, and repeat-run campaigns. It avoids coupling PACMAN's first Jepsen campaign to k3s or Patroni-specific assumptions. The tradeoff is that PACMAN needs its own small Clojure target layer for install/start/stop, primary discovery, client connection routing, and artifact collection.
