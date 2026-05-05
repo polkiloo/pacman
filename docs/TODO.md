@@ -463,7 +463,7 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - [x] add backup, restore, and cloud-integration coverage inspired by Patroni `tests/test_aws.py`, `tests/test_barman.py`, and `tests/test_wale_restore.py`
 - [x] add DCS backend contract coverage for Consul, etcd, etcd3, Exhibitor, Kubernetes, Raft, and ZooKeeper inspired by Patroni `tests/test_consul.py`, `tests/test_etcd.py`, `tests/test_etcd3.py`, `tests/test_exhibitor.py`, `tests/test_kubernetes.py`, `tests/test_raft.py`, `tests/test_raft_controller.py`, and `tests/test_zookeeper.py`
 - [x] add explicit unsupported-backend regression assertions for Patroni `exhibitor` and `kubernetes` configs so config translation keeps failing clearly until real backend support is implemented
-- [ ] document the current DCS contract split: real service containers for supported/partially supported backends, and compatibility fixtures only for backends rejected before client startup
+- [x] document the current DCS contract split: real service containers for supported/partially supported backends, and compatibility fixtures only for backends rejected before client startup
 - [x] add watchdog and fencing coverage inspired by Patroni `tests/test_watchdog.py`
 
 ### Jepsen Fault-Injection Campaigns

@@ -38,3 +38,8 @@ Current grouping:
 - `postgres`: PostgreSQL replication fixture, subprocess/workflow behavior, promotion/standby rendering, maintenance mode, and PostgreSQL extension lifecycle
 - `ha`: failover, switchover, quorum, rejoin, and end-to-end HA flows
 - `install`: 3-node installation and bootstrap validation for the Ansible deployment path
+
+Patroni DCS backend coverage follows the split documented in
+`docs/ARCHITECTURE_DCS.md`: supported or partially supported inputs run against
+real service containers, while unsupported backends use fixture endpoint shapes
+only to prove config translation fails clearly before any backend client connects.

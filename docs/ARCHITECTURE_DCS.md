@@ -548,3 +548,23 @@ For the Raft backend, CompareAndSet is implemented as a conditional Raft log ent
 | End-to-end | Full stack | 3x pacmand + chosen DCS backend |
 
 A shared conformance test suite (`internal/dcs/dcstest/`) runs the same test cases against every backend implementation, ensuring they all behave identically for the operations the ControlPlane depends on.
+
+### Patroni DCS Contract Split
+
+Patroni compatibility tests intentionally separate executable backend contracts from
+unsupported-backend regression checks:
+
+| Patroni backend | PACMAN status | Testcontainer contract |
+|---|---|---|
+| `etcd` | Supported through the PACMAN etcd backend | Run real etcd, PostgreSQL, and `pacmand`; assert the translated config starts and publishes topology. |
+| `etcd3` | Supported as an etcd-compatible Patroni input | Run real etcd, PostgreSQL, and `pacmand`; assert the translated config starts and publishes topology. |
+| `raft` | Partially supported by translating to PACMAN's embedded Raft shape, not Patroni's Raft topology | Run real PostgreSQL and `pacmand` with the PACMAN Raft backend; assert startup and topology publication. |
+| `consul` | Unsupported Patroni backend | Use only a fixture endpoint shape; assert config translation fails with an explicit unsupported-backend error before any PACMAN Consul client connects. |
+| `zookeeper` | Unsupported Patroni backend | Use only a fixture endpoint shape; assert config translation fails with an explicit unsupported-backend error before any PACMAN ZooKeeper client connects. |
+| `exhibitor` | Unsupported Patroni backend | Use a lightweight HTTP compatibility fixture, not a real Exhibitor/ZooKeeper topology; assert config translation fails before backend connection. |
+| `kubernetes` | Unsupported Patroni backend | Use a lightweight HTTP compatibility fixture, not a real API-server topology; assert config translation fails before backend connection. |
+
+This split prevents compatibility fixtures from implying backend support. When PACMAN
+adds a real backend implementation, its Patroni-inspired coverage must move from the
+unsupported-backend bucket to a real service-container contract that exercises the
+actual client path.
