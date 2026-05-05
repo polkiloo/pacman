@@ -285,6 +285,50 @@ Artifact review checklist:
 - Confirm PostgreSQL logs from former primaries do not show accepted writes after demotion or isolation.
 - Preserve the full store path and seed in any issue filed from the run.
 
+## Local Docker Runner
+
+For laptop runs, use the Dockerized Jepsen control-node wrapper. It builds
+`deploy/jepsen/Dockerfile`, mounts the repository at `/workspace`, mounts the
+host Docker socket when available, and executes the same campaign contract used
+by CI.
+
+Commands:
+
+```bash
+make jepsen-docker-smoke
+make jepsen-docker-nightly
+```
+
+Equivalent direct commands:
+
+```bash
+scripts/local/run-jepsen-docker.sh smoke
+scripts/local/run-jepsen-docker.sh nightly
+```
+
+The runner image includes JDK 21, Leiningen, Docker CLI/Compose, SSH client,
+PostgreSQL client tools, and common network/process debugging tools. It is a
+Jepsen control node, not a PACMAN data node. The Jepsen harness is still expected
+to live in `jepsen/` and provide:
+
+```text
+jepsen/bin/ci-smoke
+jepsen/bin/ci-nightly
+```
+
+Until those harness scripts exist, the Docker runner exits successfully with a
+`skipped` summary in `bin/jepsen-ci/<campaign>/summary.md`. Once they exist, a
+missing `lein`, missing runner, checker failure, or lab bootstrap failure fails
+the command and preserves the same summary/artifact layout used by CI.
+
+Useful overrides:
+
+```bash
+PACMAN_JEPSEN_DOCKER_BUILD=false make jepsen-docker-smoke
+PACMAN_JEPSEN_DOCKER_IMAGE=pacman-jepsen-runner:dev make jepsen-docker-smoke
+PACMAN_JEPSEN_DOCKER_DRY_RUN=true make jepsen-docker-smoke
+```
+
 ## Automation Placement Decision
 
 Jepsen runs must execute outside the fast default PR pipeline. The default PR

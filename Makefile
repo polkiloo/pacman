@@ -37,6 +37,7 @@ GO_TEST_INTEGRATION_PACKAGE ?= ./test/integration
 GO_TEST_INSTALL_PACKAGE ?= ./test/installintegration
 TESTCONTAINERS_RYUK_DISABLED ?=
 JEPSEN_CI_SCRIPT ?= ./scripts/ci/run-jepsen.sh
+JEPSEN_DOCKER_SCRIPT ?= ./scripts/local/run-jepsen-docker.sh
 PG_EXTENSION_DIR ?= ./postgresql/pacman_agent
 PG_EXTENSION_IMAGE ?= postgres:17-bookworm
 PG_EXTENSION_OUTPUT ?= $(BIN_DIR)/pg-extension
@@ -63,7 +64,7 @@ LDFLAGS := -X github.com/polkiloo/pacman/internal/version.Version=$(VERSION) \
 	-X github.com/polkiloo/pacman/internal/version.Commit=$(COMMIT) \
 	-X github.com/polkiloo/pacman/internal/version.BuildDate=$(BUILD_DATE)
 
-.PHONY: fmt test test-dcs-conformance test-integration test-integration-control-plane test-integration-patroni test-integration-postgres test-integration-ha test-integration-install jepsen-ci-check jepsen-smoke jepsen-nightly docker-build-test-image docker-build-pgext-image docker-build-ansible-install-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl build-pg-extension package-pg-extension install-pg-extension clean-pg-extension tidy clean openapi-codegen-check rpm rpm-builder-image rpm-validate ansible-validate
+.PHONY: fmt test test-dcs-conformance test-integration test-integration-control-plane test-integration-patroni test-integration-postgres test-integration-ha test-integration-install jepsen-ci-check jepsen-smoke jepsen-nightly jepsen-docker-smoke jepsen-docker-nightly docker-build-test-image docker-build-pgext-image docker-build-ansible-install-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl build-pg-extension package-pg-extension install-pg-extension clean-pg-extension tidy clean openapi-codegen-check rpm rpm-builder-image rpm-validate ansible-validate
 
 fmt:
 	$(GO) fmt ./...
@@ -132,6 +133,12 @@ jepsen-smoke:
 
 jepsen-nightly:
 	$(JEPSEN_CI_SCRIPT) nightly
+
+jepsen-docker-smoke:
+	$(JEPSEN_DOCKER_SCRIPT) smoke
+
+jepsen-docker-nightly:
+	$(JEPSEN_DOCKER_SCRIPT) nightly
 
 coverage:
 	@set -- $$($(FULL_COVERAGE_PACKAGE_LIST_CMD)); \
