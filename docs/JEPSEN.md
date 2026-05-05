@@ -68,6 +68,51 @@ Baseline results should be kept under a distinct Jepsen store path such as
 report both target name and workload/nemesis profile so PACMAN failures are compared
 against the matching Patroni calibration run.
 
+## PACMAN Target Topology
+
+The first PACMAN Jepsen target is `pacman-3-data`. It should model the production
+Ansible/lab deployment rather than the Go integration-test fixture.
+
+| Node | PACMAN role | PostgreSQL role at bootstrap | Services | Notes |
+|---|---|---|---|---|
+| `n1` | `data` | initial primary | `postgres`, `pacmand` | Preferred bootstrap primary and first client write target. |
+| `n2` | `data` | replica | `postgres`, `pacmand` | Eligible failover candidate. |
+| `n3` | `data` | replica | `postgres`, `pacmand` | Eligible failover candidate. |
+| `dcs1`..`dcs3` | external DCS | none | `etcd` or selected DCS profile | Start as a 3-node DCS quorum so DCS loss can be modeled independently from data-node loss. |
+
+Required topology properties:
+
+- All data nodes run identical PACMAN builds and PostgreSQL major versions.
+- `bootstrap.expectedMembers` includes only the three data members for the base target.
+- `bootstrap.initialPrimary` is `n1`.
+- Every data node has stable addresses for PostgreSQL, PACMAN API, and PACMAN control traffic.
+- Client traffic is routed through Jepsen target code that discovers the current primary before write phases. The first implementation may poll `GET /api/v1/cluster` and verify with PostgreSQL `pg_is_in_recovery()`.
+- The target exposes lifecycle hooks for install, configure, start, stop, restart, current-primary lookup, member status lookup, log collection, and destructive cleanup.
+- Jepsen nemeses must be able to affect PACMAN/PostgreSQL processes independently from DCS processes.
+
+The target should provide these node sets to workload and nemesis code:
+
+- `:data-nodes` for PostgreSQL and `pacmand` process faults;
+- `:dcs-nodes` for DCS faults;
+- `:client-endpoints` for PostgreSQL connections;
+- `:api-endpoints` for PACMAN observation and operation history capture.
+
+Do not add witness behavior to the first passing smoke target. Add witness coverage as
+`pacman-3-data-1-witness` after `pacman-3-data` passes the no-fault and single-primary
+kill profiles.
+
+| Node | PACMAN role | PostgreSQL role | Services | Notes |
+|---|---|---|---|---|
+| `w1` | `witness` | none | `pacmand` | Quorum voter only; no PostgreSQL client traffic and never eligible for promotion. |
+
+Witness-specific expectations:
+
+- The witness appears in PACMAN cluster status as role `witness`, healthy, and not failover-eligible.
+- Loss of one data node with witness quorum available can permit safe failover according to PACMAN policy.
+- Loss or partition of the witness must be visible in cluster status and must not create PostgreSQL write targets.
+- Jepsen clients never connect to the witness as a database endpoint.
+- Witness assertions are PACMAN-specific and are not compared directly with the Patroni baseline.
+
 ## Consequences
 
 This choice keeps the valuable Jepsen parts: workload generators, nemesis schedule, history checking, and repeat-run campaigns. It avoids coupling PACMAN's first Jepsen campaign to k3s or Patroni-specific assumptions. The tradeoff is that PACMAN needs its own small Clojure target layer for install/start/stop, primary discovery, client connection routing, and artifact collection.
