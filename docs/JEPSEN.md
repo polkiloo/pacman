@@ -144,6 +144,45 @@ Implementation order:
 4. `read-committed-txn` after basic primary rediscovery is stable.
 5. `serializable-txn` after retry/error classification is explicit enough to avoid false positives.
 
+## Nemesis Coverage
+
+Nemeses should be shared between Patroni and PACMAN wherever the target shape permits
+it. PACMAN-specific variants may add witness and explicit rejoin assertions, but the
+fault schedule should remain comparable to the Patroni baseline.
+
+| Profile | Fault model | Target set | First workload pairing | Required observations |
+|---|---|---|---|---|
+| `none` | No injected fault | none | `append-smoke` | Establishes no-fault baseline, confirms clients can discover the primary, and verifies artifact capture. |
+| `kill` | Stop or `SIGTERM` the current primary's PostgreSQL and/or `pacmand` process, then allow restart | one node from `:data-nodes`, normally current primary | `append-failover` | Failure is logged, primary changes or safely remains stable, old primary is not writable after demotion/failure, PACMAN history records the transition when one occurs. |
+| `packet` | Drop or reject traffic between one data node and the rest of the cluster | one data node, then current primary once smoke is stable | `single-key-register` | Partition is visible from both sides, isolated primary is not accepted as a safe write target by clients, reachable quorum either promotes safely or blocks writes according to policy. |
+| `packet,kill` | Partition a node and kill one HA process while the partition is active | primary/data-node combinations only after individual profiles pass | `append-failover` and `single-key-register` | Combined fault does not produce two acknowledged writable primaries, and any former primary is marked for rejoin before reuse. |
+| `slow-network` | Add latency, jitter, packet loss, or bandwidth limits without fully partitioning nodes | data-node links first, DCS links later | `read-committed-txn` | Detects timing-sensitive election/failover behavior without treating transient SQL retry errors as successful operations. |
+| `repeated-failure` | Randomized sequence of kill, heal, slow-network, and partition operations over a longer run | data nodes, then DCS nodes after data-node profiles are stable | `serializable-txn` and soak profiles | Used for nondeterministic regressions; every run must archive seeds, schedule, histories, and target logs. |
+
+Fault boundaries:
+
+- Start with data-node faults. Add DCS-node faults only after data-node `none`, `kill`, and `packet` profiles have stable baseline results.
+- Do not kill all DCS quorum members in the default profile; that belongs in an explicit DCS-loss campaign.
+- Do not target witness nodes until `pacman-3-data-1-witness` exists and the base data-node campaigns pass.
+- Do not mix Patroni and PACMAN semantics in the same checker. The nemesis can be shared, but witness and rejoin expectations are PACMAN-only.
+
+Observability requirements:
+
+- Every nemesis operation records target node, affected service or link, start time, heal time, and command/result details.
+- The harness captures PACMAN `/api/v1/cluster`, `/api/v1/history`, PostgreSQL role state, and relevant process logs before fault, during fault, and after heal.
+- Network nemeses must verify the link is actually impaired, for example by failed TCP probes or measured latency/packet loss from the affected peers.
+- Kill nemeses must verify the intended process stopped and whether the deployment supervisor restarted it.
+- Heal operations must be idempotent and verified before the checker finalizes the workload.
+
+Nemesis rollout order:
+
+1. `none` with `append-smoke`.
+2. `kill` against current primary with `append-failover`.
+3. `packet` isolating current primary with `single-key-register`.
+4. `packet,kill` after individual `packet` and `kill` profiles are stable.
+5. `slow-network` with `read-committed-txn`.
+6. `repeated-failure` with archived seeds and the longer soak profile.
+
 ## Consequences
 
 This choice keeps the valuable Jepsen parts: workload generators, nemesis schedule, history checking, and repeat-run campaigns. It avoids coupling PACMAN's first Jepsen campaign to k3s or Patroni-specific assumptions. The tradeoff is that PACMAN needs its own small Clojure target layer for install/start/stop, primary discovery, client connection routing, and artifact collection.
