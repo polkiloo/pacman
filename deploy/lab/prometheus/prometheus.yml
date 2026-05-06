@@ -20,6 +20,13 @@ scrape_configs:
           lab_node: alpha-2
           lab_role: postgres
           lab_service: pacman-replica
+      - targets:
+          - pacman-replica-2:8080
+        labels:
+          lab_member: alpha-3
+          lab_node: alpha-3
+          lab_role: postgres
+          lab_service: pacman-replica-2
 
   - job_name: node-exporter
     static_configs:
@@ -44,6 +51,13 @@ scrape_configs:
           lab_node: alpha-2
           lab_role: postgres
           lab_service: pacman-replica
+      - targets:
+          - pacman-replica-2:9100
+        labels:
+          lab_member: alpha-3
+          lab_node: alpha-3
+          lab_role: postgres
+          lab_service: pacman-replica-2
 
   - job_name: etcd
     metrics_path: /metrics

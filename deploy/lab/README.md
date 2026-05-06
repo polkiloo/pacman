@@ -4,7 +4,8 @@ This directory provides a small Docker Compose lab for the same deployment
 shape that the Ansible automation targets:
 
 - one external etcd node: `pacman-dcs`
-- two PostgreSQL + `pacmand` nodes: `pacman-primary`, `pacman-replica`
+- three PostgreSQL + `pacmand` nodes: `pacman-primary`, `pacman-replica`,
+  `pacman-replica-2`
 
 The lab is intentionally close to the install integration test, but it is
 operator-facing instead of test-only:
@@ -30,7 +31,7 @@ make rpm
 ## Files
 
 - `compose.yml`
-  three-node container topology for the lab
+  four-node data/DCS container topology for the lab
 - `inventory.ini`
   local-connection Ansible inventory used inside the containers
 - `vars.yml`
@@ -85,7 +86,8 @@ The runtime demo stages intentionally run from inside the lab containers:
   native PACMAN views
 - the host only needs Docker, `make`, and standard shell tools for the demo
 - the script defaults to container-reachable PACMAN API URLs:
-  `http://pacman-primary:8080` and `http://pacman-replica:8080`
+  `http://pacman-primary:8080`, `http://pacman-replica:8080`, and
+  `http://pacman-replica-2:8080`
 
 That flow:
 
@@ -93,9 +95,9 @@ That flow:
   default before applying the lab deployment
 - finds the latest PACMAN runtime RPM in `bin/ansible-install-rpm/`
 - builds the lab image from `test/docker/pacman-ansible-install.Dockerfile`
-- starts the three-node compose environment
+- starts the four-container data/DCS compose environment
 - applies the Ansible deployment to each container with `ansible_connection=local`
-- starts the external etcd daemon and both `pacmand` daemons
+- starts the external etcd daemon and all three `pacmand` daemons
 - restarts `pacmand` and `vip-manager` during bootstrap so the lab picks up the
   freshly installed binaries and config
 - verifies etcd and PACMAN health endpoints
@@ -109,11 +111,11 @@ Useful host endpoints after bootstrap:
 
 - etcd: `http://127.0.0.1:2379`
 - primary PACMAN API: `http://127.0.0.1:8081`
-- replica PACMAN API: `http://127.0.0.1:8082`
+- replica PACMAN APIs: `http://127.0.0.1:8082`, `http://127.0.0.1:8083`
 - Prometheus: `http://127.0.0.1:9093`
 - Grafana: `http://127.0.0.1:3000` (`admin` / `pacman-demo`)
 - primary PostgreSQL: `127.0.0.1:5433`
-- replica PostgreSQL: `127.0.0.1:5434`
+- replica PostgreSQL: `127.0.0.1:5434`, `127.0.0.1:5435`
 
 For non-demo automation that only needs PACMAN/PostgreSQL health, skip waiting
 for Prometheus and Grafana readiness:
@@ -128,13 +130,13 @@ intended for live demos and includes:
 - current primary and active control-plane operation
 - member health, primary-role movement, timeline, and replication lag
 - per-node network throughput from `node_exporter` for `alpha-1`, `alpha-2`,
-  and `alpha-dcs`
+  `alpha-3`, and `alpha-dcs`
 - Prometheus scrape-target health for PACMAN, `node_exporter`, and etcd
 
 If you override `PACMAN_DEMO_PRIMARY_API_URL` or
 `PACMAN_DEMO_REPLICA_API_URL`, use addresses that are reachable from inside the
-lab containers. `127.0.0.1:8081` and `127.0.0.1:8082` are host-side published
-ports, not container-side loopback listeners.
+lab containers. `127.0.0.1:8081`, `127.0.0.1:8082`, and `127.0.0.1:8083`
+are host-side published ports, not container-side loopback listeners.
 
 Destroy containers but keep state:
 
@@ -175,6 +177,12 @@ The lab persists host-side state under `deploy/lab/.local/`:
     var/lib/pacman/raft/
     var/lib/pgsql/17/data/
     var/log/
+  alpha-3/
+    etc/pacman/
+    var/lib/pacman/
+    var/lib/pacman/raft/
+    var/lib/pgsql/17/data/
+    var/log/
 ```
 
 Persistent control-plane state paths:
@@ -184,7 +192,8 @@ Persistent control-plane state paths:
 - embedded Raft deployments:
   the upgrade-safe local control-plane state path is `/var/lib/pacman/raft`
   on each PACMAN node, represented here by
-  `alpha-1/var/lib/pacman/raft` and `alpha-2/var/lib/pacman/raft`
+  `alpha-1/var/lib/pacman/raft`, `alpha-2/var/lib/pacman/raft`, and
+  `alpha-3/var/lib/pacman/raft`
 
 The bind mounts intentionally preserve `/etc/pacman`, `/var/lib/pacman`, and
 the DCS data directory across container rebuilds so operators can rehearse

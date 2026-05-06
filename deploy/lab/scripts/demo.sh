@@ -10,8 +10,10 @@ dry_run=false
 
 primary_service="${PACMAN_DEMO_PRIMARY_SERVICE:-pacman-primary}"
 replica_service="${PACMAN_DEMO_REPLICA_SERVICE:-pacman-replica}"
+second_replica_service="${PACMAN_DEMO_SECOND_REPLICA_SERVICE:-pacman-replica-2}"
 primary_api_url="${PACMAN_DEMO_PRIMARY_API_URL:-http://${primary_service}:8080}"
 replica_api_url="${PACMAN_DEMO_REPLICA_API_URL:-http://${replica_service}:8080}"
+second_replica_api_url="${PACMAN_DEMO_SECOND_REPLICA_API_URL:-http://${second_replica_service}:8080}"
 prometheus_internal_url="${PACMAN_DEMO_PROMETHEUS_INTERNAL_URL:-http://prometheus:9090}"
 prometheus_url="${PACMAN_DEMO_PROMETHEUS_URL:-http://127.0.0.1:9093}"
 grafana_url="${PACMAN_DEMO_GRAFANA_URL:-http://127.0.0.1:3000}"
@@ -44,6 +46,8 @@ pgbench_pid_file="/tmp/pacman-demo-pgbench.pid"
 pgbench_child_pid_file="/tmp/pacman-demo-pgbench.child.pid"
 pgbench_pause_file="/tmp/pacman-demo-pgbench.pause"
 pgbench_log_file="/tmp/pacman-demo-pgbench.log"
+
+data_services=("${primary_service}" "${replica_service}" "${second_replica_service}")
 
 print_usage() {
 	cat <<EOF
@@ -78,8 +82,10 @@ Stages:
 Environment:
   PACMAN_DEMO_PRIMARY_SERVICE      default: ${primary_service}
   PACMAN_DEMO_REPLICA_SERVICE      default: ${replica_service}
+  PACMAN_DEMO_SECOND_REPLICA_SERVICE default: ${second_replica_service}
   PACMAN_DEMO_PRIMARY_API_URL      default: ${primary_api_url}
   PACMAN_DEMO_REPLICA_API_URL      default: ${replica_api_url}
+  PACMAN_DEMO_SECOND_REPLICA_API_URL default: ${second_replica_api_url}
   PACMAN_DEMO_PROMETHEUS_INTERNAL_URL default: ${prometheus_internal_url}
   PACMAN_DEMO_PROMETHEUS_URL       default: ${prometheus_url}
   PACMAN_DEMO_GRAFANA_URL          default: ${grafana_url}
@@ -118,7 +124,7 @@ Notes:
     each demo node namespace, including the external DCS node.
   - the Grafana stack auto-loads the "PACMAN Demo Overview" dashboard with
     Prometheus as the default datasource.
-  - The local lab member names are alpha-1 and alpha-2.
+  - The local lab member names are alpha-1, alpha-2, and alpha-3.
   - switchover auto-selects a healthy non-primary member when you omit the
     candidate argument. PACMAN_DEMO_SWITCHOVER_CANDIDATE is only a fallback
     when automatic discovery is unavailable.
@@ -272,8 +278,11 @@ ensure_vip_manager_running_service() {
 }
 
 ensure_vip_managers_running() {
-	ensure_vip_manager_running_service "${primary_service}"
-	ensure_vip_manager_running_service "${replica_service}"
+	local service
+
+	for service in "${data_services[@]}"; do
+		ensure_vip_manager_running_service "${service}"
+	done
 }
 
 ensure_container_api_url() {
@@ -300,6 +309,9 @@ service_api_url() {
 			;;
 		"${replica_service}")
 			printf '%s\n' "${replica_api_url}"
+			;;
+		"${second_replica_service}")
+			printf '%s\n' "${second_replica_api_url}"
 			;;
 		*)
 			printf 'http://%s:8080\n' "${service}"
@@ -337,7 +349,7 @@ resolve_current_controlplane_service() {
 		return 0
 	fi
 
-	for service in "${primary_service}" "${replica_service}"; do
+	for service in "${data_services[@]}"; do
 		if service_is_primary "${service}"; then
 			printf '%s\n' "${service}"
 			return 0
@@ -786,15 +798,25 @@ stage_bootstrap() {
 }
 
 stage_probes() {
+	local service api_url label
+
 	ensure_container_api_url "${primary_api_url}" "PACMAN_DEMO_PRIMARY_API_URL" "${primary_service}"
 	ensure_container_api_url "${replica_api_url}" "PACMAN_DEMO_REPLICA_API_URL" "${replica_service}"
+	ensure_container_api_url "${second_replica_api_url}" "PACMAN_DEMO_SECOND_REPLICA_API_URL" "${second_replica_service}"
 	ensure_vip_managers_running
-	show_probe "${primary_service}" "${primary_api_url}/health" "primary /health [Patroni-compatible API]"
-	show_probe "${replica_service}" "${replica_api_url}/health" "replica /health [Patroni-compatible API]"
-	show_probe "${primary_service}" "${primary_api_url}/primary" "primary /primary [Patroni-compatible API]"
-	show_probe "${replica_service}" "${replica_api_url}/primary" "replica /primary [Patroni-compatible API]"
-	show_vip_assignment "${primary_service}"
-	show_vip_assignment "${replica_service}"
+	for service in "${data_services[@]}"; do
+		api_url=$(service_api_url "${service}")
+		label="${service} /health [Patroni-compatible API]"
+		show_probe "${service}" "${api_url}/health" "${label}"
+	done
+	for service in "${data_services[@]}"; do
+		api_url=$(service_api_url "${service}")
+		label="${service} /primary [Patroni-compatible API]"
+		show_probe "${service}" "${api_url}/primary" "${label}"
+	done
+	for service in "${data_services[@]}"; do
+		show_vip_assignment "${service}"
+	done
 	show_vip_postgres_route
 }
 

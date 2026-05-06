@@ -66,7 +66,7 @@ Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
 PACMAN cluster/history snapshots, Docker logs, PostgreSQL logs, and a small
 `index.html` for operator review.
 
-This harness deliberately uses the existing `deploy/lab` topology, which is two
-PACMAN data nodes plus external etcd. The broader Jepsen plan in
-`docs/JEPSEN.md` still tracks the later full 3-data-node target, Patroni
-baseline, and Clojure/Jepsen checker port.
+This harness deliberately uses the existing `deploy/lab` topology, which is
+three PACMAN data nodes plus external etcd. The broader Jepsen plan in
+`docs/JEPSEN.md` still tracks the Patroni baseline, optional witness target, and
+Clojure/Jepsen checker port.

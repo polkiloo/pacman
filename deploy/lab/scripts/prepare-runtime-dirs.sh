@@ -18,4 +18,8 @@ mkdir -p \
   "${runtime_dir}/alpha-2/etc/pacman" \
   "${runtime_dir}/alpha-2/var/lib/pacman/raft" \
   "${runtime_dir}/alpha-2/var/lib/pgsql/17/data" \
-  "${runtime_dir}/alpha-2/var/log"
+  "${runtime_dir}/alpha-2/var/log" \
+  "${runtime_dir}/alpha-3/etc/pacman" \
+  "${runtime_dir}/alpha-3/var/lib/pacman/raft" \
+  "${runtime_dir}/alpha-3/var/lib/pgsql/17/data" \
+  "${runtime_dir}/alpha-3/var/log"

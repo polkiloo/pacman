@@ -81,14 +81,16 @@ service_for_member() {
   case "$1" in
     alpha-1) printf 'pacman-primary\n' ;;
     alpha-2) printf 'pacman-replica\n' ;;
+    alpha-3) printf 'pacman-replica-2\n' ;;
     *) return 1 ;;
   esac
 }
 
 peer_service_for_member() {
   case "$1" in
-    alpha-1) printf 'pacman-replica\n' ;;
+    alpha-1) printf 'pacman-replica pacman-replica-2\n' ;;
     alpha-2) printf 'pacman-primary\n' ;;
+    alpha-3) printf 'pacman-primary\n' ;;
     *) return 1 ;;
   esac
 }
@@ -97,6 +99,7 @@ service_ip() {
   case "$1" in
     pacman-primary) printf '172.28.0.11\n' ;;
     pacman-replica) printf '172.28.0.12\n' ;;
+    pacman-replica-2) printf '172.28.0.13\n' ;;
     pacman-dcs) printf '172.28.0.10\n' ;;
     *) return 1 ;;
   esac
@@ -368,22 +371,26 @@ EOF
 
 iptables_partition() {
   local service=$1
-  local peer=$2
-  local peer_ip
-  peer_ip=$(service_ip "${peer}")
+  shift
+  local peer peer_ip
 
-  compose_exec "${service}" /bin/sh -lc \
-    "iptables -I INPUT -s '${peer_ip}' -j DROP; iptables -I OUTPUT -d '${peer_ip}' -j DROP"
+  for peer in "$@"; do
+    peer_ip=$(service_ip "${peer}")
+    compose_exec "${service}" /bin/sh -lc \
+      "iptables -I INPUT -s '${peer_ip}' -j DROP; iptables -I OUTPUT -d '${peer_ip}' -j DROP"
+  done
 }
 
 iptables_heal() {
   local service=$1
-  local peer=$2
-  local peer_ip
-  peer_ip=$(service_ip "${peer}")
+  shift
+  local peer peer_ip
 
-  compose_exec "${service}" /bin/sh -lc \
-    "while iptables -D INPUT -s '${peer_ip}' -j DROP 2>/dev/null; do :; done; while iptables -D OUTPUT -d '${peer_ip}' -j DROP 2>/dev/null; do :; done"
+  for peer in "$@"; do
+    peer_ip=$(service_ip "${peer}")
+    compose_exec "${service}" /bin/sh -lc \
+      "while iptables -D INPUT -s '${peer_ip}' -j DROP 2>/dev/null; do :; done; while iptables -D OUTPUT -d '${peer_ip}' -j DROP 2>/dev/null; do :; done"
+  done
 }
 
 slow_network_on() {
@@ -430,10 +437,10 @@ run_nemesis_profile() {
 
   (
     sleep $(( duration / 3 > 1 ? duration / 3 : 1 ))
-    local member service peer
+    local member service peer_services
     member=$(current_primary_name 2>/dev/null || true)
     service=$(service_for_member "${member}" 2>/dev/null || printf 'pacman-primary')
-    peer=$(peer_service_for_member "${member}" 2>/dev/null || printf 'pacman-replica')
+    peer_services=$(peer_service_for_member "${member}" 2>/dev/null || printf 'pacman-replica pacman-replica-2')
 
     case "${profile}" in
       kill)
@@ -445,18 +452,18 @@ run_nemesis_profile() {
         ;;
       packet)
         printf '{:time "%s" :nemesis :packet :action :start :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
-        iptables_partition "${service}" "${peer}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        iptables_partition "${service}" ${peer_services} >>"${run_dir}/nemesis.log" 2>&1 || true
         sleep "${jepsen_nemesis_hold_seconds}"
-        iptables_heal "${service}" "${peer}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        iptables_heal "${service}" ${peer_services} >>"${run_dir}/nemesis.log" 2>&1 || true
         printf '{:time "%s" :nemesis :packet :action :stop :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
         ;;
       packet,kill)
         printf '{:time "%s" :nemesis :packet-kill :action :start :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
-        iptables_partition "${service}" "${peer}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        iptables_partition "${service}" ${peer_services} >>"${run_dir}/nemesis.log" 2>&1 || true
         stop_postgres "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
         sleep "${jepsen_nemesis_hold_seconds}"
         start_postgres "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
-        iptables_heal "${service}" "${peer}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        iptables_heal "${service}" ${peer_services} >>"${run_dir}/nemesis.log" 2>&1 || true
         printf '{:time "%s" :nemesis :packet-kill :action :stop :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
         ;;
       slow-network)
@@ -471,9 +478,9 @@ run_nemesis_profile() {
         slow_network_on "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
         sleep 3
         slow_network_off "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
-        iptables_partition "${service}" "${peer}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        iptables_partition "${service}" ${peer_services} >>"${run_dir}/nemesis.log" 2>&1 || true
         sleep 3
-        iptables_heal "${service}" "${peer}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        iptables_heal "${service}" ${peer_services} >>"${run_dir}/nemesis.log" 2>&1 || true
         stop_postgres "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
         sleep "${jepsen_nemesis_hold_seconds}"
         start_postgres "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true

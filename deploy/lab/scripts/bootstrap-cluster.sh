@@ -118,16 +118,16 @@ wait_for_pacmand_health() {
 
 wait_for_postgres_vip() {
   local deadline=$((SECONDS + 90))
+  local service
 
   until compose_exec pacman-primary /bin/sh -lc \
     "/usr/pgsql-17/bin/pg_isready -h '${vip_address}' -p 5432 -d postgres >/dev/null" >/dev/null 2>&1; do
     if (( SECONDS >= deadline )); then
-      compose_exec pacman-primary /bin/sh -lc "ip -brief addr show dev eth0 || true"
-      compose_exec pacman-replica /bin/sh -lc "ip -brief addr show dev eth0 || true"
-      compose_exec pacman-primary /bin/sh -lc "ps -ef | grep '[v]ip-manager' || true"
-      compose_exec pacman-replica /bin/sh -lc "ps -ef | grep '[v]ip-manager' || true"
-      compose_exec pacman-primary /bin/sh -lc 'cat /var/log/pacman/vip-manager.log || true'
-      compose_exec pacman-replica /bin/sh -lc 'cat /var/log/pacman/vip-manager.log || true'
+      for service in pacman-primary pacman-replica pacman-replica-2; do
+        compose_exec "${service}" /bin/sh -lc "ip -brief addr show dev eth0 || true"
+        compose_exec "${service}" /bin/sh -lc "ps -ef | grep '[v]ip-manager' || true"
+        compose_exec "${service}" /bin/sh -lc 'cat /var/log/pacman/vip-manager.log || true'
+      done
       return 1
     fi
     sleep 2
@@ -224,12 +224,15 @@ main() {
   apply_playbook pacman-dcs alpha-dcs
   apply_playbook pacman-primary alpha-1
   apply_playbook pacman-replica alpha-2
+  apply_playbook pacman-replica-2 alpha-3
 
   start_etcd
   start_pacmand pacman-primary pacman-primary
   start_pacmand pacman-replica pacman-replica
+  start_pacmand pacman-replica-2 pacman-replica-2
   start_vip_manager pacman-primary
   start_vip_manager pacman-replica
+  start_vip_manager pacman-replica-2
   wait_for_postgres_vip
   if [[ "${wait_for_observability}" == "true" ]]; then
     wait_for_internal_http "${prometheus_internal_url}" "Prometheus" prometheus
@@ -238,7 +241,7 @@ main() {
 
   printf 'PACMAN lab bootstrapped successfully.\n'
   printf 'Primary API: http://127.0.0.1:8081\n'
-  printf 'Replica API: http://127.0.0.1:8082\n'
+  printf 'Replica APIs: http://127.0.0.1:8082, http://127.0.0.1:8083\n'
   printf 'etcd: http://127.0.0.1:2379\n'
   printf 'Writable PostgreSQL VIP: %s:5432\n' "${vip_address}"
   if [[ "${wait_for_observability}" == "true" ]]; then

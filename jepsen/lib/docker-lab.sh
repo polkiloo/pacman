@@ -58,6 +58,9 @@ collect_artifacts() {
   compose_exec pacman-replica /bin/sh -lc \
     "cat /var/log/pacman/pacmand.log 2>/dev/null || true" \
     >"${run_dir}/node-logs/alpha-2-pacmand.log" 2>&1 || true
+  compose_exec pacman-replica-2 /bin/sh -lc \
+    "cat /var/log/pacman/pacmand.log 2>/dev/null || true" \
+    >"${run_dir}/node-logs/alpha-3-pacmand.log" 2>&1 || true
   compose_exec pacman-dcs /bin/sh -lc \
     "cat /var/log/etcd.log 2>/dev/null || true" \
     >"${run_dir}/dcs-logs/alpha-dcs-etcd.log" 2>&1 || true
@@ -68,6 +71,9 @@ collect_artifacts() {
   compose_exec pacman-replica /bin/sh -lc \
     "if [ -d /var/lib/pgsql/17/data/log ]; then find /var/lib/pgsql/17/data/log -maxdepth 1 -type f -print -exec cat {} \\; 2>/dev/null; fi" \
     >"${run_dir}/postgres-logs/alpha-2-postgres.log" 2>&1 || true
+  compose_exec pacman-replica-2 /bin/sh -lc \
+    "if [ -d /var/lib/pgsql/17/data/log ]; then find /var/lib/pgsql/17/data/log -maxdepth 1 -type f -print -exec cat {} \\; 2>/dev/null; fi" \
+    >"${run_dir}/postgres-logs/alpha-3-postgres.log" 2>&1 || true
 
   compose_exec pacman-primary /bin/sh -lc \
     "PACMANCTL_API_URL=http://pacman-primary:8080 PACMANCTL_API_TOKEN=lab-admin-token pacmanctl cluster status -o json" \
