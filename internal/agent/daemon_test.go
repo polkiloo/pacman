@@ -1255,11 +1255,24 @@ func TestDaemonStartServesPeerIdentityOverMTLS(t *testing.T) {
 		t.Fatalf("new daemon: %v", err)
 	}
 
+	peerServer := &loopbackPeerServer{
+		Server: peerapi.New(cfg.Node.Name, logging.New("peerapi", &bytes.Buffer{}), peerapi.Config{
+			TLSConfig:    serverTLSConfig,
+			AllowedPeers: memberPeerSubjects(cfg),
+		}),
+	}
+	daemon.peerServer = peerServer
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	if err := daemon.Start(ctx); err != nil {
 		t.Fatalf("start daemon: %v", err)
+	}
+
+	peerAddress := peerServer.Address()
+	if peerAddress == "" {
+		t.Fatal("expected peer server address")
 	}
 
 	client := &http.Client{
@@ -1269,9 +1282,9 @@ func TestDaemonStartServesPeerIdentityOverMTLS(t *testing.T) {
 		},
 	}
 
-	waitForHTTPServer(t, client, "https://"+cfg.Node.ControlAddress+"/peer/v1/identity")
+	waitForHTTPServer(t, client, "https://"+peerAddress+"/peer/v1/identity")
 
-	response := mustGET(t, client, "https://"+cfg.Node.ControlAddress+"/peer/v1/identity", "")
+	response := mustGET(t, client, "https://"+peerAddress+"/peer/v1/identity", "")
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
@@ -1588,6 +1601,14 @@ func (server startErrorServer) Start(context.Context, string) error {
 
 func (server startErrorServer) Wait() error {
 	return nil
+}
+
+type loopbackPeerServer struct {
+	*peerapi.Server
+}
+
+func (server *loopbackPeerServer) Start(ctx context.Context, _ string) error {
+	return server.Server.Start(ctx, "127.0.0.1:0")
 }
 
 type failingBootstrapStore struct {
