@@ -4,6 +4,7 @@ RUN apk add --no-cache \
 	bash \
 	ca-certificates \
 	curl \
+	docker-cli-compose \
 	git \
 	iproute2 \
 	iptables \

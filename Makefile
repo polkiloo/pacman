@@ -135,9 +135,11 @@ jepsen-nightly:
 	$(JEPSEN_CI_SCRIPT) nightly
 
 jepsen-docker-smoke:
+	$(MAKE) rpm RPM_OUTPUT_DIR=$(PACMAN_ANSIBLE_INSTALL_RPM_DIR)
 	$(JEPSEN_DOCKER_SCRIPT) smoke
 
 jepsen-docker-nightly:
+	$(MAKE) rpm RPM_OUTPUT_DIR=$(PACMAN_ANSIBLE_INSTALL_RPM_DIR)
 	$(JEPSEN_DOCKER_SCRIPT) nightly
 
 coverage:

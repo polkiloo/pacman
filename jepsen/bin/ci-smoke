@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/docker-lab.sh
+source "${script_dir}/../lib/docker-lab.sh"
+
+require_tool docker
+
+campaign="smoke"
+run_dir="$(run_dir_for "${campaign}")"
+history_file="${run_dir}/jepsen-history.edn"
+
+export PACMAN_JEPSEN_CAMPAIGN="${campaign}"
+
+mkdir -p "${run_dir}"
+: >"${history_file}"
+
+finish() {
+  local exit_status=$?
+  local valid=false
+
+  if [[ "${exit_status}" -eq 0 ]]; then
+    valid=true
+  fi
+
+  collect_artifacts "${run_dir}" "${valid}"
+
+  if [[ "${exit_status}" -eq 0 ]]; then
+    printf 'PACMAN Jepsen smoke artifacts: %s\n' "${run_dir}"
+  fi
+}
+
+trap finish EXIT
+
+cat >"${run_dir}/nemesis-schedule.edn" <<EOF
+[{:time "$(timestamp_utc)" :nemesis :none :action :start}
+ {:time "$(timestamp_utc)" :nemesis :none :action :stop}]
+EOF
+
+write_edn_event "${history_file}" "bootstrap" "invoke" "\"docker-lab\""
+bootstrap_lab
+write_edn_event "${history_file}" "bootstrap" "ok" "\"docker-lab\""
+
+compose_exec pacman-primary /bin/sh -lc \
+  "PACMANCTL_API_URL=http://pacman-primary:8080 PACMANCTL_API_TOKEN=lab-admin-token pacmanctl cluster status -o json" \
+  >"${run_dir}/pacman-cluster-before.json"
+
+write_edn_event "${history_file}" "verify" "invoke" "\"demo-verify\""
+verify_lab
+write_edn_event "${history_file}" "verify" "ok" "\"demo-verify\""

@@ -308,18 +308,22 @@ scripts/local/run-jepsen-docker.sh nightly
 
 The runner image includes JDK 21, Leiningen, Docker CLI/Compose, SSH client,
 PostgreSQL client tools, and common network/process debugging tools. It is a
-Jepsen control node, not a PACMAN data node. The Jepsen harness is still expected
-to live in `jepsen/` and provide:
+Jepsen control node, not a PACMAN data node. The Make targets build the PACMAN
+runtime RPM into `bin/ansible-install-rpm/` before starting the runner so the
+Docker lab can install the exact workspace build.
+
+The current harness lives in `jepsen/` and provides:
 
 ```text
 jepsen/bin/ci-smoke
 jepsen/bin/ci-nightly
 ```
 
-Until those harness scripts exist, the Docker runner exits successfully with a
-`skipped` summary in `bin/jepsen-ci/<campaign>/summary.md`. Once they exist, a
-missing `lein`, missing runner, checker failure, or lab bootstrap failure fails
-the command and preserves the same summary/artifact layout used by CI.
+`ci-smoke` bootstraps the Docker Compose lab and runs the lab verification stage.
+`ci-nightly` bootstraps the same lab, verifies it, runs a planned switchover, and
+verifies it again. A missing `lein`, missing runner, checker failure, or lab
+bootstrap failure fails the command and preserves the same summary/artifact
+layout used by CI.
 
 Useful overrides:
 
