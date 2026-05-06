@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_source="${PACMAN_JEPSEN_SCRIPT_SOURCE:-$0}"
+if [[ "${PACMAN_JEPSEN_SCRIPT_SNAPSHOT:-false}" != "true" ]]; then
+  snapshot_path="${TMPDIR:-/tmp}/pacman-run-jepsen-$PPID-$$.sh"
+  cp "${script_source}" "${snapshot_path}"
+  chmod +x "${snapshot_path}"
+  export PACMAN_JEPSEN_SCRIPT_SNAPSHOT=true
+  export PACMAN_JEPSEN_SCRIPT_SOURCE="${script_source}"
+  exec bash "${snapshot_path}" "$@"
+fi
+
 usage() {
   echo "usage: $0 smoke|nightly|case [case-name|workload:nemesis]" >&2
 }
@@ -28,7 +38,7 @@ if [[ "${campaign}" == "case" ]]; then
   fi
 fi
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+repo_root="$(cd "$(dirname "${PACMAN_JEPSEN_SCRIPT_SOURCE}")/../.." && pwd)"
 jepsen_dir="${PACMAN_JEPSEN_DIR:-${repo_root}/jepsen}"
 artifact_dir="${PACMAN_JEPSEN_ARTIFACT_DIR:-${jepsen_dir}/store}"
 ci_artifact_dir="${PACMAN_JEPSEN_CI_ARTIFACT_DIR:-${repo_root}/bin/jepsen-ci/${campaign}}"
