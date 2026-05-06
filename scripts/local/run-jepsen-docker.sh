@@ -11,7 +11,7 @@ Environment:
   PACMAN_JEPSEN_DOCKER_IMAGE       runner image tag (default: pacman-jepsen-runner:local)
   PACMAN_JEPSEN_DOCKER_BUILD       set false to skip image build
   PACMAN_JEPSEN_DOCKER_DRY_RUN     set true to print commands without running them
-  PACMAN_JEPSEN_DIR                harness path inside the repo (default: /workspace/jepsen)
+  PACMAN_JEPSEN_DIR                harness path inside the repo (default: <repo>/jepsen)
 EOF
 }
 
@@ -63,11 +63,11 @@ docker_args=(
   run
   --rm
   -t
-  -v "${repo_root}:/workspace"
-  -w /workspace
-  -e "PACMAN_JEPSEN_DIR=${PACMAN_JEPSEN_DIR:-/workspace/jepsen}"
-  -e "PACMAN_JEPSEN_ARTIFACT_DIR=${PACMAN_JEPSEN_ARTIFACT_DIR:-/workspace/jepsen/store}"
-  -e "PACMAN_JEPSEN_CI_ARTIFACT_DIR=${PACMAN_JEPSEN_CI_ARTIFACT_DIR:-/workspace/bin/jepsen-ci/${campaign}}"
+  -v "${repo_root}:${repo_root}"
+  -w "${repo_root}"
+  -e "PACMAN_JEPSEN_DIR=${PACMAN_JEPSEN_DIR:-${repo_root}/jepsen}"
+  -e "PACMAN_JEPSEN_ARTIFACT_DIR=${PACMAN_JEPSEN_ARTIFACT_DIR:-${repo_root}/jepsen/store}"
+  -e "PACMAN_JEPSEN_CI_ARTIFACT_DIR=${PACMAN_JEPSEN_CI_ARTIFACT_DIR:-${repo_root}/bin/jepsen-ci/${campaign}}"
 )
 
 if [[ -S "${docker_sock}" ]]; then
@@ -88,7 +88,7 @@ fi
 
 docker_args+=(
   "${image}"
-  /workspace/scripts/ci/run-jepsen.sh
+  "${repo_root}/scripts/ci/run-jepsen.sh"
   "${campaign}"
 )
 

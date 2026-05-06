@@ -288,9 +288,11 @@ Artifact review checklist:
 ## Local Docker Runner
 
 For laptop runs, use the Dockerized Jepsen control-node wrapper. It builds
-`deploy/jepsen/Dockerfile`, mounts the repository at `/workspace`, mounts the
-host Docker socket when available, and executes the same campaign contract used
-by CI.
+`deploy/jepsen/Dockerfile`, mounts the repository at the same absolute path
+inside the control container, mounts the host Docker socket when available, and
+executes the same campaign contract used by CI. Keeping the same absolute path is
+required on Docker Desktop because Docker Compose talks to the host daemon, and
+the host daemon must see bind-mount paths that exist on the host.
 
 Commands:
 
