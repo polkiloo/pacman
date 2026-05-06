@@ -92,6 +92,7 @@ EOF
 <p>Status: ${status}</p>
 <ul>
 <li><a href="results.edn">results.edn</a></li>
+<li><a href="case-results.jsonl">case-results.jsonl</a></li>
 <li><a href="jepsen-history.edn">jepsen-history.edn</a></li>
 <li><a href="nemesis-schedule.edn">nemesis-schedule.edn</a></li>
 <li><a href="pacman-cluster-after.json">pacman-cluster-after.json</a></li>

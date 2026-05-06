@@ -90,6 +90,8 @@ write_summary() {
         -name 'jepsen-history.edn' -o \
         -name 'results.edn' -o \
         -name 'nemesis-schedule.edn' -o \
+        -name 'case-results.jsonl' -o \
+        -name 'checker.json' -o \
         -name '*.log' -o \
         -name '*.json' \
       \) | sort

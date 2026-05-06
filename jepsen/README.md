@@ -1,9 +1,9 @@
 # PACMAN Jepsen Harness
 
-This directory contains the first executable PACMAN Jepsen campaign contract.
-The current implementation is a Docker Compose lab smoke harness, intended to
-make local and CI Jepsen entry points run real PACMAN lab validation instead of
-skipping while the full Clojure workload/nemesis suite is built out.
+This directory contains the executable PACMAN Jepsen campaign contract for the
+Docker Compose lab. The harness runs PACMAN lab bootstrap, PostgreSQL workload
+histories, nemesis actions, SQL checkers, and artifact collection from a
+Dockerized control node.
 
 Run locally through the Dockerized control node:
 
@@ -12,9 +12,42 @@ make jepsen-docker-smoke
 make jepsen-docker-nightly
 ```
 
-The smoke campaign bootstraps the Docker lab and runs the existing lab
-verification stage. The nightly campaign bootstraps the same lab, verifies it,
-runs a planned switchover, then verifies it again.
+The smoke campaign bootstraps the Docker lab, verifies it, runs
+`append-smoke:none`, and verifies the lab again. The nightly campaign defaults to
+the broader implemented matrix:
+
+```text
+append-smoke:none
+append-failover:kill
+single-key-register:packet
+read-committed-txn:slow-network
+serializable-txn:packet,kill
+append-failover:repeated-failure
+```
+
+Override the case list when running manually:
+
+```bash
+PACMAN_JEPSEN_CASES="single-key-register:packet read-committed-txn:slow-network" \
+  make jepsen-docker-smoke
+```
+
+Implemented workload profiles:
+
+- `append-smoke`
+- `append-failover`
+- `single-key-register`
+- `read-committed-txn`
+- `serializable-txn`
+
+Implemented nemesis profiles:
+
+- `none`
+- `kill`
+- `packet`
+- `packet,kill`
+- `slow-network`
+- `repeated-failure`
 
 Campaigns reset `deploy/lab/.local/` before bootstrap by default so repeated
 runs start from a clean PostgreSQL and DCS state. Set
@@ -28,7 +61,12 @@ jepsen/store/pacman/<campaign>/<timestamp>/
 bin/jepsen-ci/<campaign>/summary.md
 ```
 
+Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
+`case-results.jsonl`, per-case `history.edn`, `checker.json`, nemesis logs,
+PACMAN cluster/history snapshots, Docker logs, PostgreSQL logs, and a small
+`index.html` for operator review.
+
 This harness deliberately uses the existing `deploy/lab` topology, which is two
 PACMAN data nodes plus external etcd. The broader Jepsen plan in
 `docs/JEPSEN.md` still tracks the later full 3-data-node target, Patroni
-baseline, Clojure workload generators, and packet/kill nemeses.
+baseline, and Clojure/Jepsen checker port.

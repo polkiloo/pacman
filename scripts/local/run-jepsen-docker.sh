@@ -12,6 +12,7 @@ Environment:
   PACMAN_JEPSEN_DOCKER_BUILD       set false to skip image build
   PACMAN_JEPSEN_DOCKER_DRY_RUN     set true to print commands without running them
   PACMAN_JEPSEN_DIR                harness path inside the repo (default: <repo>/jepsen)
+  PACMAN_JEPSEN_CASES              space-separated workload:nemesis cases
 EOF
 }
 
@@ -68,6 +69,10 @@ docker_args=(
   -e "PACMAN_JEPSEN_DIR=${PACMAN_JEPSEN_DIR:-${repo_root}/jepsen}"
   -e "PACMAN_JEPSEN_ARTIFACT_DIR=${PACMAN_JEPSEN_ARTIFACT_DIR:-${repo_root}/jepsen/store}"
   -e "PACMAN_JEPSEN_CI_ARTIFACT_DIR=${PACMAN_JEPSEN_CI_ARTIFACT_DIR:-${repo_root}/bin/jepsen-ci/${campaign}}"
+  -e "PACMAN_JEPSEN_CASES=${PACMAN_JEPSEN_CASES:-}"
+  -e "PACMAN_JEPSEN_WORKLOAD_OPS=${PACMAN_JEPSEN_WORKLOAD_OPS:-}"
+  -e "PACMAN_JEPSEN_WORKLOAD_DURATION_SECONDS=${PACMAN_JEPSEN_WORKLOAD_DURATION_SECONDS:-}"
+  -e "PACMAN_JEPSEN_NEMESIS_HOLD_SECONDS=${PACMAN_JEPSEN_NEMESIS_HOLD_SECONDS:-}"
 )
 
 if [[ -S "${docker_sock}" ]]; then

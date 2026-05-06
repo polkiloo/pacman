@@ -4,10 +4,14 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/docker-lab.sh
 source "${script_dir}/../lib/docker-lab.sh"
+# shellcheck source=../lib/workloads.sh
+source "${script_dir}/../lib/workloads.sh"
 
 require_tool docker
+require_tool jq
 
 campaign="smoke"
+cases="${PACMAN_JEPSEN_CASES:-append-smoke:none}"
 run_dir="$(run_dir_for "${campaign}")"
 history_file="${run_dir}/jepsen-history.edn"
 
@@ -33,10 +37,7 @@ finish() {
 
 trap finish EXIT
 
-cat >"${run_dir}/nemesis-schedule.edn" <<EOF
-[{:time "$(timestamp_utc)" :nemesis :none :action :start}
- {:time "$(timestamp_utc)" :nemesis :none :action :stop}]
-EOF
+: >"${run_dir}/nemesis-schedule.edn"
 
 write_edn_event "${history_file}" "bootstrap" "invoke" "\"docker-lab\""
 bootstrap_lab
@@ -49,3 +50,11 @@ compose_exec pacman-primary /bin/sh -lc \
 write_edn_event "${history_file}" "verify" "invoke" "\"demo-verify\""
 verify_lab
 write_edn_event "${history_file}" "verify" "ok" "\"demo-verify\""
+
+write_edn_event "${history_file}" "cases" "invoke" "\"${cases}\""
+run_jepsen_cases "${cases}" "${run_dir}" "${history_file}" "${run_dir}/nemesis-schedule.edn"
+write_edn_event "${history_file}" "cases" "ok" "\"${cases}\""
+
+write_edn_event "${history_file}" "verify" "invoke" "\"demo-verify-after-cases\""
+verify_lab
+write_edn_event "${history_file}" "verify" "ok" "\"demo-verify-after-cases\""
