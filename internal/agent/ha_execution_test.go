@@ -920,29 +920,7 @@ func writeTracingBinary(t *testing.T, binaryName, scriptTemplate string) (string
 		),
 	) + "\n")
 
-	file, err := os.CreateTemp(binDir, "."+binaryName+".tmp-*")
-	if err != nil {
-		t.Fatalf("create temp %s script: %v", binaryName, err)
-	}
-	tempPath := file.Name()
-	defer func() {
-		_ = os.Remove(tempPath)
-	}()
-
-	if _, err := file.Write(script); err != nil {
-		_ = file.Close()
-		t.Fatalf("write temp %s script: %v", binaryName, err)
-	}
-
-	if err := file.Close(); err != nil {
-		t.Fatalf("close temp %s script: %v", binaryName, err)
-	}
-
-	if err := os.Chmod(tempPath, 0o755); err != nil {
-		t.Fatalf("chmod temp %s script: %v", binaryName, err)
-	}
-
-	if err := os.Rename(tempPath, scriptPath); err != nil {
+	if err := os.WriteFile(scriptPath, script, 0o755); err != nil {
 		t.Fatalf("write %s script: %v", binaryName, err)
 	}
 
