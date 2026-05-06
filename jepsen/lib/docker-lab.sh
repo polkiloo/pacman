@@ -103,6 +103,10 @@ EOF
 }
 
 bootstrap_lab() {
+  if [[ "${PACMAN_JEPSEN_RESET_LAB:-true}" == "true" ]]; then
+    "${repo_root}/deploy/lab/scripts/reset-state.sh"
+  fi
+
   PACMAN_LAB_AUTO_PREPARE=false \
     PACMAN_LAB_WAIT_FOR_OBSERVABILITY=false \
     "${repo_root}/deploy/lab/scripts/bootstrap-cluster.sh"

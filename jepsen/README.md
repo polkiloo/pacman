@@ -16,6 +16,11 @@ The smoke campaign bootstraps the Docker lab and runs the existing lab
 verification stage. The nightly campaign bootstraps the same lab, verifies it,
 runs a planned switchover, then verifies it again.
 
+Campaigns reset `deploy/lab/.local/` before bootstrap by default so repeated
+runs start from a clean PostgreSQL and DCS state. Set
+`PACMAN_JEPSEN_RESET_LAB=false` only when preserving the lab for interactive
+debugging.
+
 Artifacts are written under:
 
 ```text
