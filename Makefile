@@ -64,7 +64,7 @@ LDFLAGS := -X github.com/polkiloo/pacman/internal/version.Version=$(VERSION) \
 	-X github.com/polkiloo/pacman/internal/version.Commit=$(COMMIT) \
 	-X github.com/polkiloo/pacman/internal/version.BuildDate=$(BUILD_DATE)
 
-.PHONY: fmt test test-dcs-conformance test-integration test-integration-control-plane test-integration-patroni test-integration-postgres test-integration-ha test-integration-install jepsen-ci-check jepsen-list-cases jepsen-smoke jepsen-nightly jepsen-case jepsen-docker-smoke jepsen-docker-nightly jepsen-docker-case docker-build-test-image docker-build-pgext-image docker-build-ansible-install-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl build-pg-extension package-pg-extension install-pg-extension clean-pg-extension tidy clean openapi-codegen-check rpm rpm-builder-image rpm-validate ansible-validate
+.PHONY: fmt test test-dcs-conformance test-integration test-integration-control-plane test-integration-patroni test-integration-postgres test-integration-ha test-integration-install jepsen-ci-check jepsen-list-cases jepsen-smoke jepsen-nightly jepsen-case jepsen-case-append-smoke-none jepsen-case-append-failover-kill jepsen-case-single-key-register-packet jepsen-case-read-committed-txn-slow-network jepsen-case-serializable-txn-packet-kill jepsen-case-append-failover-repeated-failure jepsen-docker-smoke jepsen-docker-nightly jepsen-docker-case jepsen-docker-case-append-smoke-none jepsen-docker-case-append-failover-kill jepsen-docker-case-single-key-register-packet jepsen-docker-case-read-committed-txn-slow-network jepsen-docker-case-serializable-txn-packet-kill jepsen-docker-case-append-failover-repeated-failure docker-build-test-image docker-build-pgext-image docker-build-ansible-install-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl build-pg-extension package-pg-extension install-pg-extension clean-pg-extension tidy clean openapi-codegen-check rpm rpm-builder-image rpm-validate ansible-validate
 
 fmt:
 	$(GO) fmt ./...
@@ -140,6 +140,24 @@ jepsen-nightly:
 jepsen-case:
 	$(JEPSEN_CI_SCRIPT) case $(PACMAN_JEPSEN_CASE)
 
+jepsen-case-append-smoke-none:
+	$(MAKE) jepsen-case PACMAN_JEPSEN_CASE=append-smoke-none
+
+jepsen-case-append-failover-kill:
+	$(MAKE) jepsen-case PACMAN_JEPSEN_CASE=append-failover-kill
+
+jepsen-case-single-key-register-packet:
+	$(MAKE) jepsen-case PACMAN_JEPSEN_CASE=single-key-register-packet
+
+jepsen-case-read-committed-txn-slow-network:
+	$(MAKE) jepsen-case PACMAN_JEPSEN_CASE=read-committed-txn-slow-network
+
+jepsen-case-serializable-txn-packet-kill:
+	$(MAKE) jepsen-case PACMAN_JEPSEN_CASE=serializable-txn-packet-kill
+
+jepsen-case-append-failover-repeated-failure:
+	$(MAKE) jepsen-case PACMAN_JEPSEN_CASE=append-failover-repeated-failure
+
 jepsen-docker-smoke:
 	$(MAKE) rpm RPM_OUTPUT_DIR=$(PACMAN_ANSIBLE_INSTALL_RPM_DIR)
 	$(JEPSEN_DOCKER_SCRIPT) smoke
@@ -151,6 +169,24 @@ jepsen-docker-nightly:
 jepsen-docker-case:
 	$(MAKE) rpm RPM_OUTPUT_DIR=$(PACMAN_ANSIBLE_INSTALL_RPM_DIR)
 	$(JEPSEN_DOCKER_SCRIPT) case $(PACMAN_JEPSEN_CASE)
+
+jepsen-docker-case-append-smoke-none:
+	$(MAKE) jepsen-docker-case PACMAN_JEPSEN_CASE=append-smoke-none
+
+jepsen-docker-case-append-failover-kill:
+	$(MAKE) jepsen-docker-case PACMAN_JEPSEN_CASE=append-failover-kill
+
+jepsen-docker-case-single-key-register-packet:
+	$(MAKE) jepsen-docker-case PACMAN_JEPSEN_CASE=single-key-register-packet
+
+jepsen-docker-case-read-committed-txn-slow-network:
+	$(MAKE) jepsen-docker-case PACMAN_JEPSEN_CASE=read-committed-txn-slow-network
+
+jepsen-docker-case-serializable-txn-packet-kill:
+	$(MAKE) jepsen-docker-case PACMAN_JEPSEN_CASE=serializable-txn-packet-kill
+
+jepsen-docker-case-append-failover-repeated-failure:
+	$(MAKE) jepsen-docker-case PACMAN_JEPSEN_CASE=append-failover-repeated-failure
 
 coverage:
 	@set -- $$($(FULL_COVERAGE_PACKAGE_LIST_CMD)); \

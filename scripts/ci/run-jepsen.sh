@@ -19,6 +19,11 @@ if [[ "${campaign}" == "case" ]]; then
   export PACMAN_JEPSEN_CASE="${2:-${PACMAN_JEPSEN_CASE:-}}"
   if [[ -z "${PACMAN_JEPSEN_CASE}" ]]; then
     usage
+    if [[ -x "./jepsen/bin/list-cases" ]]; then
+      echo >&2
+      echo "Supported cases:" >&2
+      ./jepsen/bin/list-cases >&2
+    fi
     exit 2
   fi
 fi

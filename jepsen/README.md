@@ -29,18 +29,19 @@ append-failover:repeated-failure
 Run one case at a time by name:
 
 ```bash
-PACMAN_JEPSEN_CASE=append-smoke-none make jepsen-docker-case
-PACMAN_JEPSEN_CASE=append-failover-kill make jepsen-docker-case
-PACMAN_JEPSEN_CASE=single-key-register-packet make jepsen-docker-case
-PACMAN_JEPSEN_CASE=read-committed-txn-slow-network make jepsen-docker-case
-PACMAN_JEPSEN_CASE=serializable-txn-packet-kill make jepsen-docker-case
-PACMAN_JEPSEN_CASE=append-failover-repeated-failure make jepsen-docker-case
+make jepsen-docker-case-append-smoke-none
+make jepsen-docker-case-append-failover-kill
+make jepsen-docker-case-single-key-register-packet
+make jepsen-docker-case-read-committed-txn-slow-network
+make jepsen-docker-case-serializable-txn-packet-kill
+make jepsen-docker-case-append-failover-repeated-failure
 ```
 
 The same target also accepts the explicit `workload:nemesis` form:
 
 ```bash
 PACMAN_JEPSEN_CASE='serializable-txn:packet,kill' make jepsen-docker-case
+./scripts/local/run-jepsen-docker.sh case serializable-txn:packet,kill
 ```
 
 Override the case list when running manually:
