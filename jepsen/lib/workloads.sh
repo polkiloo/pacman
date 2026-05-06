@@ -11,6 +11,58 @@ jepsen_default_duration="${PACMAN_JEPSEN_WORKLOAD_DURATION_SECONDS:-20}"
 jepsen_default_clients="${PACMAN_JEPSEN_WORKLOAD_CLIENTS:-3}"
 jepsen_default_keys="${PACMAN_JEPSEN_WORKLOAD_KEYS:-3}"
 jepsen_nemesis_hold_seconds="${PACMAN_JEPSEN_NEMESIS_HOLD_SECONDS:-8}"
+jepsen_smoke_cases_default="append-smoke:none"
+jepsen_nightly_cases_default="append-smoke:none append-failover:kill single-key-register:packet read-committed-txn:slow-network serializable-txn:packet,kill append-failover:repeated-failure"
+
+jepsen_default_cases() {
+  case "$1" in
+    smoke) printf '%s\n' "${jepsen_smoke_cases_default}" ;;
+    nightly) printf '%s\n' "${jepsen_nightly_cases_default}" ;;
+    *)
+      printf 'unsupported Jepsen campaign: %s\n' "$1" >&2
+      return 2
+      ;;
+  esac
+}
+
+jepsen_cases_for_campaign() {
+  local campaign=$1
+  if [[ -n "${PACMAN_JEPSEN_CASES:-}" ]]; then
+    printf '%s\n' "${PACMAN_JEPSEN_CASES}"
+    return 0
+  fi
+  jepsen_default_cases "${campaign}"
+}
+
+list_jepsen_cases() {
+  cat <<'EOF'
+append-smoke-none append-smoke:none Smoke append workload without nemesis.
+append-failover-kill append-failover:kill Append workload while killing current primary PostgreSQL.
+single-key-register-packet single-key-register:packet Register workload while partitioning the current primary.
+read-committed-txn-slow-network read-committed-txn:slow-network Read committed transaction workload under latency and loss.
+serializable-txn-packet-kill serializable-txn:packet,kill Serializable transaction workload under partition plus kill.
+append-failover-repeated-failure append-failover:repeated-failure Append workload under slow network, partition, and kill sequence.
+EOF
+}
+
+resolve_jepsen_case_spec() {
+  local name=$1
+
+  case "${name}" in
+    append-smoke-none | append-smoke:none) printf 'append-smoke:none\n' ;;
+    append-failover-kill | append-failover:kill) printf 'append-failover:kill\n' ;;
+    single-key-register-packet | single-key-register:packet) printf 'single-key-register:packet\n' ;;
+    read-committed-txn-slow-network | read-committed-txn:slow-network) printf 'read-committed-txn:slow-network\n' ;;
+    serializable-txn-packet-kill | serializable-txn:packet,kill) printf 'serializable-txn:packet,kill\n' ;;
+    append-failover-repeated-failure | append-failover:repeated-failure) printf 'append-failover:repeated-failure\n' ;;
+    *)
+      printf 'unsupported Jepsen case: %s\n' "${name}" >&2
+      printf 'Supported cases:\n' >&2
+      list_jepsen_cases >&2
+      return 2
+      ;;
+  esac
+}
 
 json_escape() {
   printf '%s' "${1}" | jq -Rsa .

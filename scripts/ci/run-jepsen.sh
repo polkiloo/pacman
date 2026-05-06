@@ -2,18 +2,26 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 smoke|nightly" >&2
+  echo "usage: $0 smoke|nightly|case [case-name|workload:nemesis]" >&2
 }
 
 campaign="${1:-}"
 case "${campaign}" in
-  smoke | nightly)
+  smoke | nightly | case)
     ;;
   *)
     usage
     exit 2
     ;;
 esac
+
+if [[ "${campaign}" == "case" ]]; then
+  export PACMAN_JEPSEN_CASE="${2:-${PACMAN_JEPSEN_CASE:-}}"
+  if [[ -z "${PACMAN_JEPSEN_CASE}" ]]; then
+    usage
+    exit 2
+  fi
+fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 jepsen_dir="${PACMAN_JEPSEN_DIR:-${repo_root}/jepsen}"
@@ -49,6 +57,9 @@ write_summary() {
     echo "# Jepsen ${campaign} ${status_label}"
     echo
     echo "- Campaign: \`${campaign}\`"
+    if [[ "${campaign}" == "case" ]]; then
+      echo "- Case: \`${PACMAN_JEPSEN_CASE}\`"
+    fi
     echo "- Status: \`${status_label}\`"
     echo "- Harness: \`${jepsen_dir}\`"
     echo "- Store: \`${artifact_dir}\`"
@@ -142,6 +153,10 @@ export PACMAN_JEPSEN_SUMMARY_PATH="${summary_path}"
 
 cd "${jepsen_dir}"
 status=0
-"${runner}" || status=$?
+if [[ "${campaign}" == "case" ]]; then
+  "${runner}" "${PACMAN_JEPSEN_CASE}" || status=$?
+else
+  "${runner}" || status=$?
+fi
 write_summary "${status}"
 exit "${status}"

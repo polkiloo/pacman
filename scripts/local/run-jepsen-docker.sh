@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-usage: scripts/local/run-jepsen-docker.sh smoke|nightly
+usage: scripts/local/run-jepsen-docker.sh smoke|nightly|case [case-name|workload:nemesis]
 
 Runs the PACMAN Jepsen campaign from a Dockerized control-node container.
 
@@ -13,18 +13,27 @@ Environment:
   PACMAN_JEPSEN_DOCKER_DRY_RUN     set true to print commands without running them
   PACMAN_JEPSEN_DIR                harness path inside the repo (default: <repo>/jepsen)
   PACMAN_JEPSEN_CASES              space-separated workload:nemesis cases
+  PACMAN_JEPSEN_CASE               single case for the case campaign
 EOF
 }
 
 campaign="${1:-}"
 case "${campaign}" in
-  smoke | nightly)
+  smoke | nightly | case)
     ;;
   *)
     usage
     exit 2
     ;;
 esac
+
+if [[ "${campaign}" == "case" ]]; then
+  export PACMAN_JEPSEN_CASE="${2:-${PACMAN_JEPSEN_CASE:-}}"
+  if [[ -z "${PACMAN_JEPSEN_CASE}" ]]; then
+    usage
+    exit 2
+  fi
+fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/../.." && pwd)"
@@ -70,6 +79,7 @@ docker_args=(
   -e "PACMAN_JEPSEN_ARTIFACT_DIR=${PACMAN_JEPSEN_ARTIFACT_DIR:-${repo_root}/jepsen/store}"
   -e "PACMAN_JEPSEN_CI_ARTIFACT_DIR=${PACMAN_JEPSEN_CI_ARTIFACT_DIR:-${repo_root}/bin/jepsen-ci/${campaign}}"
   -e "PACMAN_JEPSEN_CASES=${PACMAN_JEPSEN_CASES:-}"
+  -e "PACMAN_JEPSEN_CASE=${PACMAN_JEPSEN_CASE:-}"
   -e "PACMAN_JEPSEN_WORKLOAD_OPS=${PACMAN_JEPSEN_WORKLOAD_OPS:-}"
   -e "PACMAN_JEPSEN_WORKLOAD_DURATION_SECONDS=${PACMAN_JEPSEN_WORKLOAD_DURATION_SECONDS:-}"
   -e "PACMAN_JEPSEN_NEMESIS_HOLD_SECONDS=${PACMAN_JEPSEN_NEMESIS_HOLD_SECONDS:-}"
@@ -96,5 +106,9 @@ docker_args+=(
   "${repo_root}/scripts/ci/run-jepsen.sh"
   "${campaign}"
 )
+
+if [[ "${campaign}" == "case" ]]; then
+  docker_args+=("${PACMAN_JEPSEN_CASE}")
+fi
 
 run_cmd docker "${docker_args[@]}"

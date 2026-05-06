@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage() {
+  cat >&2 <<'EOF'
+usage: jepsen/bin/ci-case <case-name|workload:nemesis>
+
+Run one PACMAN Jepsen case against the Docker lab.
+Use jepsen/bin/list-cases to see supported names.
+EOF
+}
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/docker-lab.sh
 source "${script_dir}/../lib/docker-lab.sh"
@@ -10,8 +19,15 @@ source "${script_dir}/../lib/workloads.sh"
 require_tool docker
 require_tool jq
 
-campaign="nightly"
-cases="$(jepsen_cases_for_campaign "${campaign}")"
+case_name="${1:-${PACMAN_JEPSEN_CASE:-}}"
+if [[ -z "${case_name}" ]]; then
+  usage
+  exit 2
+fi
+
+case_spec="$(resolve_jepsen_case_spec "${case_name}")"
+case_slug_name="$(case_slug "${case_spec}")"
+campaign="case-${case_slug_name}"
 run_dir="$(run_dir_for "${campaign}")"
 history_file="${run_dir}/jepsen-history.edn"
 
@@ -31,7 +47,7 @@ finish() {
   collect_artifacts "${run_dir}" "${valid}"
 
   if [[ "${exit_status}" -eq 0 ]]; then
-    printf 'PACMAN Jepsen nightly artifacts: %s\n' "${run_dir}"
+    printf 'PACMAN Jepsen case artifacts: %s\n' "${run_dir}"
   fi
 }
 
@@ -51,14 +67,10 @@ write_edn_event "${history_file}" "verify" "invoke" "\"demo-verify-before\""
 verify_lab
 write_edn_event "${history_file}" "verify" "ok" "\"demo-verify-before\""
 
-write_edn_event "${history_file}" "cases" "invoke" "\"${cases}\""
-run_jepsen_cases "${cases}" "${run_dir}" "${history_file}" "${run_dir}/nemesis-schedule.edn"
-write_edn_event "${history_file}" "cases" "ok" "\"${cases}\""
+write_edn_event "${history_file}" "case" "invoke" "\"${case_spec}\""
+run_jepsen_cases "${case_spec}" "${run_dir}" "${history_file}" "${run_dir}/nemesis-schedule.edn"
+write_edn_event "${history_file}" "case" "ok" "\"${case_spec}\""
 
-write_edn_event "${history_file}" "switchover" "invoke" "\"alpha-2\""
-"${repo_root}/deploy/lab/scripts/demo.sh" switchover alpha-2
-write_edn_event "${history_file}" "switchover" "ok" "\"alpha-2\""
-
-write_edn_event "${history_file}" "verify" "invoke" "\"demo-verify-after\""
+write_edn_event "${history_file}" "verify" "invoke" "\"demo-verify-after-case\""
 verify_lab
-write_edn_event "${history_file}" "verify" "ok" "\"demo-verify-after\""
+write_edn_event "${history_file}" "verify" "ok" "\"demo-verify-after-case\""

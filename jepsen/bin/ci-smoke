@@ -11,7 +11,7 @@ require_tool docker
 require_tool jq
 
 campaign="smoke"
-cases="${PACMAN_JEPSEN_CASES:-append-smoke:none}"
+cases="$(jepsen_cases_for_campaign "${campaign}")"
 run_dir="$(run_dir_for "${campaign}")"
 history_file="${run_dir}/jepsen-history.edn"
 

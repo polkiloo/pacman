@@ -8,6 +8,7 @@ Dockerized control node.
 Run locally through the Dockerized control node:
 
 ```bash
+make jepsen-list-cases
 make jepsen-docker-smoke
 make jepsen-docker-nightly
 ```
@@ -23,6 +24,23 @@ single-key-register:packet
 read-committed-txn:slow-network
 serializable-txn:packet,kill
 append-failover:repeated-failure
+```
+
+Run one case at a time by name:
+
+```bash
+PACMAN_JEPSEN_CASE=append-smoke-none make jepsen-docker-case
+PACMAN_JEPSEN_CASE=append-failover-kill make jepsen-docker-case
+PACMAN_JEPSEN_CASE=single-key-register-packet make jepsen-docker-case
+PACMAN_JEPSEN_CASE=read-committed-txn-slow-network make jepsen-docker-case
+PACMAN_JEPSEN_CASE=serializable-txn-packet-kill make jepsen-docker-case
+PACMAN_JEPSEN_CASE=append-failover-repeated-failure make jepsen-docker-case
+```
+
+The same target also accepts the explicit `workload:nemesis` form:
+
+```bash
+PACMAN_JEPSEN_CASE='serializable-txn:packet,kill' make jepsen-docker-case
 ```
 
 Override the case list when running manually:

@@ -64,7 +64,7 @@ LDFLAGS := -X github.com/polkiloo/pacman/internal/version.Version=$(VERSION) \
 	-X github.com/polkiloo/pacman/internal/version.Commit=$(COMMIT) \
 	-X github.com/polkiloo/pacman/internal/version.BuildDate=$(BUILD_DATE)
 
-.PHONY: fmt test test-dcs-conformance test-integration test-integration-control-plane test-integration-patroni test-integration-postgres test-integration-ha test-integration-install jepsen-ci-check jepsen-smoke jepsen-nightly jepsen-docker-smoke jepsen-docker-nightly docker-build-test-image docker-build-pgext-image docker-build-ansible-install-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl build-pg-extension package-pg-extension install-pg-extension clean-pg-extension tidy clean openapi-codegen-check rpm rpm-builder-image rpm-validate ansible-validate
+.PHONY: fmt test test-dcs-conformance test-integration test-integration-control-plane test-integration-patroni test-integration-postgres test-integration-ha test-integration-install jepsen-ci-check jepsen-list-cases jepsen-smoke jepsen-nightly jepsen-case jepsen-docker-smoke jepsen-docker-nightly jepsen-docker-case docker-build-test-image docker-build-pgext-image docker-build-ansible-install-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl build-pg-extension package-pg-extension install-pg-extension clean-pg-extension tidy clean openapi-codegen-check rpm rpm-builder-image rpm-validate ansible-validate
 
 fmt:
 	$(GO) fmt ./...
@@ -128,11 +128,17 @@ jepsen-ci-check:
 		PACMAN_JEPSEN_CI_ARTIFACT_DIR="$$tmpdir/artifacts" \
 		$(JEPSEN_CI_SCRIPT) smoke
 
+jepsen-list-cases:
+	./jepsen/bin/list-cases
+
 jepsen-smoke:
 	$(JEPSEN_CI_SCRIPT) smoke
 
 jepsen-nightly:
 	$(JEPSEN_CI_SCRIPT) nightly
+
+jepsen-case:
+	$(JEPSEN_CI_SCRIPT) case $(PACMAN_JEPSEN_CASE)
 
 jepsen-docker-smoke:
 	$(MAKE) rpm RPM_OUTPUT_DIR=$(PACMAN_ANSIBLE_INSTALL_RPM_DIR)
@@ -141,6 +147,10 @@ jepsen-docker-smoke:
 jepsen-docker-nightly:
 	$(MAKE) rpm RPM_OUTPUT_DIR=$(PACMAN_ANSIBLE_INSTALL_RPM_DIR)
 	$(JEPSEN_DOCKER_SCRIPT) nightly
+
+jepsen-docker-case:
+	$(MAKE) rpm RPM_OUTPUT_DIR=$(PACMAN_ANSIBLE_INSTALL_RPM_DIR)
+	$(JEPSEN_DOCKER_SCRIPT) case $(PACMAN_JEPSEN_CASE)
 
 coverage:
 	@set -- $$($(FULL_COVERAGE_PACKAGE_LIST_CMD)); \
