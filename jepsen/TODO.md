@@ -5,7 +5,7 @@ possible PostgreSQL HA chaos test.
 
 The goal is to prove PACMAN's core HA safety claims first:
 
-- [ ] PACMAN never exposes two writable PostgreSQL primaries at the same time.
+- [x] PACMAN never exposes two writable PostgreSQL primaries at the same time.
 - [ ] Acknowledged writes are preserved, or any async-mode loss is explicitly
       measured and reported as allowed data loss.
 - [ ] Failover promotes only eligible replicas.
@@ -36,10 +36,10 @@ Implement these before expanding the campaign matrix.
 
 ### Checkers
 
-- [ ] Single writable primary checker.
-  - [ ] Sample every data node with `pg_is_in_recovery()`.
-  - [ ] Record node identity, writable state, timeline, and observation time.
-  - [ ] Fail if two nodes are writable during the same observation window.
+- [x] Single writable primary checker.
+  - [x] Sample every data node with `pg_is_in_recovery()`.
+  - [x] Record node identity, writable state, timeline, and observation time.
+  - [x] Fail if two nodes are writable during the same observation window.
 
 - [ ] Acknowledged write preservation checker.
   - [ ] Insert globally unique operation IDs.
@@ -76,7 +76,7 @@ Collect these for every MVP-1 run:
 - [x] PACMAN logs.
 - [x] DCS logs.
 - [ ] PACMAN cluster snapshot before, during, and after each nemesis window.
-- [ ] PostgreSQL role/timeline/LSN snapshot from every data node.
+- [x] PostgreSQL role/timeline/LSN snapshot from every data node.
 - [ ] `pg_stat_replication` from the current primary.
 - [ ] `pg_stat_wal_receiver` from replicas.
 
@@ -176,7 +176,7 @@ MVP-1 is done when:
 - [ ] Every nemesis action records target, start, heal, and command result.
 - [ ] Every failed run produces enough logs and snapshots to explain the failure.
 - [ ] Checkers report:
-  - [ ] split-brain result;
+  - [x] split-brain result;
   - [ ] acknowledged write preservation result;
   - [ ] timeline convergence result;
   - [ ] failover/rejoin summary.

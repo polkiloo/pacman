@@ -81,7 +81,8 @@ bin/jepsen-ci/<campaign>/summary.md
 ```
 
 Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
-`case-results.jsonl`, per-case `history.edn`, `checker.json`, nemesis logs,
+`case-results.jsonl`, per-case `history.edn`, workload `checker.json`,
+`primary-observations.jsonl`, `single-primary-checker.json`, nemesis logs,
 PACMAN cluster/history snapshots, Docker logs, PostgreSQL logs, and a small
 `index.html` for operator review.
 

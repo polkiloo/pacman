@@ -11,6 +11,7 @@ jepsen_default_duration="${PACMAN_JEPSEN_WORKLOAD_DURATION_SECONDS:-20}"
 jepsen_default_clients="${PACMAN_JEPSEN_WORKLOAD_CLIENTS:-3}"
 jepsen_default_keys="${PACMAN_JEPSEN_WORKLOAD_KEYS:-3}"
 jepsen_nemesis_hold_seconds="${PACMAN_JEPSEN_NEMESIS_HOLD_SECONDS:-8}"
+jepsen_primary_sample_interval="${PACMAN_JEPSEN_PRIMARY_SAMPLE_INTERVAL_SECONDS:-1}"
 jepsen_smoke_cases_default="append-smoke:none"
 jepsen_nightly_cases_default="append-smoke:none append-failover:kill single-key-register:packet read-committed-txn:slow-network serializable-txn:packet,kill append-failover:repeated-failure"
 
@@ -101,6 +102,22 @@ psql_vip_optional() {
   psql_vip "${sql}" 2>&1 || return 0
 }
 
+psql_service() {
+  local service=$1
+  local sql=$2
+
+  docker compose -f "${compose_file}" exec -T "${service}" \
+    env "PGPASSWORD=${jepsen_pg_password}" \
+    /usr/pgsql-17/bin/psql \
+      -v ON_ERROR_STOP=1 \
+      -h 127.0.0.1 \
+      -p 5432 \
+      -U "${jepsen_pg_user}" \
+      -d "${jepsen_pg_database}" \
+      -F $'\t' \
+      -Atq <<<"${sql}"
+}
+
 append_jsonl() {
   local path=$1
   shift
@@ -155,6 +172,141 @@ service_ip() {
     pacman-dcs) printf '172.28.0.10\n' ;;
     *) return 1 ;;
   esac
+}
+
+sample_primary_state() {
+  local sample_id=$1
+  local observation_file=$2
+  local observed_at
+  observed_at="$(timestamp_utc)"
+
+  local member service output status in_recovery timeline lsn writable
+  for member in alpha-1 alpha-2 alpha-3; do
+    service=$(service_for_member "${member}")
+    status=0
+    output=$(psql_service "${service}" "
+with local as (
+  select
+    pg_is_in_recovery() as in_recovery,
+    case
+      when pg_is_in_recovery() then null
+      else pg_current_wal_lsn()::text
+    end as write_lsn,
+    pg_last_wal_replay_lsn()::text as replay_lsn
+)
+select
+  local.in_recovery,
+  case
+    when local.in_recovery then greatest(
+      coalesce(nullif(recovery.min_recovery_end_timeline, 0), 0),
+      coalesce((select max(received_tli) from pg_stat_wal_receiver), 0),
+      checkpoint.timeline_id
+    )
+    else ('x' || substr(pg_walfile_name(local.write_lsn::pg_lsn), 1, 8))::bit(32)::bigint
+  end,
+  coalesce(local.write_lsn, local.replay_lsn, '')
+from local
+cross join pg_control_checkpoint() as checkpoint
+cross join pg_control_recovery() as recovery;
+" 2>&1) || status=$?
+
+    if [[ "${status}" -ne 0 ]]; then
+      append_jsonl "${observation_file}" \
+        sampleId "${sample_id}" \
+        observedAt "$(json_escape "${observed_at}")" \
+        member "$(json_escape "${member}")" \
+        service "$(json_escape "${service}")" \
+        reachable false \
+        writable false \
+        inRecovery null \
+        timeline null \
+        lsn "$(json_escape "")" \
+        error "$(json_escape "${output}")"
+      continue
+    fi
+
+    IFS=$'\t' read -r in_recovery timeline lsn <<<"${output}"
+    writable=false
+    if [[ "${in_recovery}" == "f" ]]; then
+      writable=true
+    fi
+
+    append_jsonl "${observation_file}" \
+      sampleId "${sample_id}" \
+      observedAt "$(json_escape "${observed_at}")" \
+      member "$(json_escape "${member}")" \
+      service "$(json_escape "${service}")" \
+      reachable true \
+      writable "${writable}" \
+      inRecovery "$([[ "${in_recovery}" == "t" ]] && printf true || printf false)" \
+      timeline "${timeline:-0}" \
+      lsn "$(json_escape "${lsn:-}")" \
+      error "$(json_escape "")"
+  done
+}
+
+start_primary_sampler() {
+  local case_dir=$1
+  local __pid_var=$2
+  local observation_file="${case_dir}/primary-observations.jsonl"
+
+  : >"${observation_file}"
+
+  (
+    local sample_id=1
+    while true; do
+      sample_primary_state "${sample_id}" "${observation_file}"
+      sample_id=$((sample_id + 1))
+      sleep "${jepsen_primary_sample_interval}"
+    done
+  ) >/dev/null 2>>"${case_dir}/primary-sampler.log" &
+  printf -v "${__pid_var}" '%s' "$!"
+}
+
+stop_primary_sampler() {
+  local pid=$1
+
+  if [[ -n "${pid}" ]]; then
+    kill "${pid}" 2>/dev/null || true
+    wait "${pid}" 2>/dev/null || true
+  fi
+}
+
+check_single_writable_primary() {
+  local case_dir=$1
+  local observation_file="${case_dir}/primary-observations.jsonl"
+  local checker_file="${case_dir}/single-primary-checker.json"
+
+  if [[ ! -s "${observation_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"single-writable-primary","valid":false,"observations":0,"samples":0,"writableObservations":0,"violationSamples":[]}
+EOF
+    return 1
+  fi
+
+  jq -s '
+    def writable: map(select(.reachable == true and .writable == true));
+    def violation_samples:
+      writable
+      | group_by(.sampleId)
+      | map(select(length > 1))
+      | map({
+          sampleId: .[0].sampleId,
+          observedAt: .[0].observedAt,
+          writableMembers: map(.member),
+          timelines: map(.timeline)
+        });
+    {
+      checker: "single-writable-primary",
+      valid: ((violation_samples | length) == 0),
+      observations: length,
+      samples: ([.[].sampleId] | unique | length),
+      writableObservations: (writable | length),
+      violationSamples: violation_samples
+    }
+  ' "${observation_file}" >"${checker_file}"
+
+  jq -e '.valid == true and .samples > 0' "${checker_file}" >/dev/null
 }
 
 ensure_workload_schema() {
@@ -477,12 +629,14 @@ run_nemesis_profile() {
   local profile=$1
   local run_dir=$2
   local schedule_file=$3
-  local duration=${4:-${jepsen_default_duration}}
+  local __pid_var=$4
+  local duration=${5:-${jepsen_default_duration}}
 
   case "${profile}" in
     none)
       printf '{:time "%s" :nemesis :none :action :start}\n' "$(timestamp_utc)" >>"${schedule_file}"
       printf '{:time "%s" :nemesis :none :action :stop}\n' "$(timestamp_utc)" >>"${schedule_file}"
+      printf -v "${__pid_var}" '%s' ''
       return 0
       ;;
   esac
@@ -543,8 +697,8 @@ run_nemesis_profile() {
         return 2
         ;;
     esac
-  ) &
-  printf '%s\n' "$!"
+  ) >/dev/null 2>>"${run_dir}/nemesis.log" &
+  printf -v "${__pid_var}" '%s' "$!"
 }
 
 wait_for_nemesis() {
@@ -624,30 +778,37 @@ run_jepsen_case() {
   write_case_event "${case_dir}/history.edn" ":case" "invoke" "workload" \
     "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\"}"
 
+  local primary_sampler_pid=""
+  start_primary_sampler "${case_dir}" primary_sampler_pid
+
   local nemesis_pid=""
-  nemesis_pid=$(run_nemesis_profile "${nemesis}" "${case_dir}" "${schedule_file}" "${jepsen_default_duration}" || true)
+  run_nemesis_profile "${nemesis}" "${case_dir}" "${schedule_file}" nemesis_pid "${jepsen_default_duration}" || true
 
   local workload_status=0
   run_workload_profile "${workload}" "${run_id}" "${case_dir}" || workload_status=$?
   wait_for_nemesis "${nemesis_pid}"
+  stop_primary_sampler "${primary_sampler_pid}"
 
-  local checker_status=0
-  check_workload_profile "${workload}" "${run_id}" "${case_dir}" || checker_status=$?
+  local workload_checker_status=0
+  check_workload_profile "${workload}" "${run_id}" "${case_dir}" || workload_checker_status=$?
 
-  if [[ "${workload_status}" -eq 0 && "${checker_status}" -eq 0 ]]; then
+  local primary_checker_status=0
+  check_single_writable_primary "${case_dir}" || primary_checker_status=$?
+
+  if [[ "${workload_status}" -eq 0 && "${workload_checker_status}" -eq 0 && "${primary_checker_status}" -eq 0 ]]; then
     write_case_event "${case_dir}/history.edn" ":case" "ok" "workload" \
       "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\"}"
     cat "${case_dir}/history.edn" >>"${run_dir}/jepsen-history.edn"
     write_edn_event "${campaign_history}" "${workload}/${nemesis}" "ok" "\"${run_id}\""
-    record_case_result "${case_results}" "${workload}" "${nemesis}" "true" "checker passed"
+    record_case_result "${case_results}" "${workload}" "${nemesis}" "true" "checkers passed"
     return 0
   fi
 
   write_case_event "${case_dir}/history.edn" ":case" "fail" "workload" \
-    "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\" :workload-status ${workload_status} :checker-status ${checker_status}}"
+    "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\" :workload-status ${workload_status} :workload-checker-status ${workload_checker_status} :primary-checker-status ${primary_checker_status}}"
   cat "${case_dir}/history.edn" >>"${run_dir}/jepsen-history.edn"
   write_edn_event "${campaign_history}" "${workload}/${nemesis}" "fail" "\"${run_id}\""
-  record_case_result "${case_results}" "${workload}" "${nemesis}" "false" "workload_status=${workload_status} checker_status=${checker_status}"
+  record_case_result "${case_results}" "${workload}" "${nemesis}" "false" "workload_status=${workload_status} workload_checker_status=${workload_checker_status} primary_checker_status=${primary_checker_status}"
   return 1
 }
 

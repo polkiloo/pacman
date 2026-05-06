@@ -118,6 +118,8 @@ write_summary() {
         -name 'nemesis-schedule.edn' -o \
         -name 'case-results.jsonl' -o \
         -name 'checker.json' -o \
+        -name 'single-primary-checker.json' -o \
+        -name 'primary-observations.jsonl' -o \
         -name '*.log' -o \
         -name '*.json' \
       \) | sort
