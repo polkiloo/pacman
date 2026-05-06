@@ -103,7 +103,9 @@ EOF
 }
 
 bootstrap_lab() {
-  PACMAN_LAB_AUTO_PREPARE=false "${repo_root}/deploy/lab/scripts/bootstrap-cluster.sh"
+  PACMAN_LAB_AUTO_PREPARE=false \
+    PACMAN_LAB_WAIT_FOR_OBSERVABILITY=false \
+    "${repo_root}/deploy/lab/scripts/bootstrap-cluster.sh"
 }
 
 verify_lab() {

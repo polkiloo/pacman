@@ -32,6 +32,8 @@ tar \
   --exclude=.github \
   --exclude=bin \
   --exclude=coverage.out \
+  --exclude=deploy/lab/.local \
+  --exclude=jepsen/store \
   --transform="s,^\\.,pacman-${rpm_version}," \
   -czf "${source_tarball}" \
   -C "${workspace}" \

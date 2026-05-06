@@ -115,6 +115,13 @@ Useful host endpoints after bootstrap:
 - primary PostgreSQL: `127.0.0.1:5433`
 - replica PostgreSQL: `127.0.0.1:5434`
 
+For non-demo automation that only needs PACMAN/PostgreSQL health, skip waiting
+for Prometheus and Grafana readiness:
+
+```bash
+PACMAN_LAB_WAIT_FOR_OBSERVABILITY=false deploy/lab/scripts/bootstrap-cluster.sh
+```
+
 The Grafana container auto-loads the `PACMAN Demo Overview` dashboard. It is
 intended for live demos and includes:
 

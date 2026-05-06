@@ -16,6 +16,7 @@ grafana_internal_url="${PACMAN_LAB_GRAFANA_INTERNAL_URL:-http://grafana:3000/api
 grafana_url="${PACMAN_LAB_GRAFANA_URL:-http://127.0.0.1:3000}"
 grafana_admin_user="${PACMAN_LAB_GRAFANA_ADMIN_USER:-admin}"
 grafana_admin_password="${PACMAN_LAB_GRAFANA_ADMIN_PASSWORD:-pacman-demo}"
+wait_for_observability="${PACMAN_LAB_WAIT_FOR_OBSERVABILITY:-true}"
 
 export PACMAN_LAB_IMAGE="${lab_image}"
 
@@ -193,7 +194,7 @@ start_vip_manager() {
   local vip_manager_pattern='[v]ip-manager --config /etc/pacman/vip-manager.yml'
 
   compose_exec "${service}" /bin/sh -lc \
-    "pkill -f '/usr/local/bin/vip-manager --config /etc/pacman/vip-manager.yml' 2>/dev/null || true"
+    "pkill -f '${vip_manager_pattern}' 2>/dev/null || true"
   compose_exec "${service}" /bin/sh -lc \
     "deadline=\$(( \$(date +%s) + 20 )); while ps -ef | grep '${vip_manager_pattern}' >/dev/null 2>&1; do if [ \$(date +%s) -ge \${deadline} ]; then echo 'timed out waiting for vip-manager to stop' >&2; exit 1; fi; sleep 1; done"
 
@@ -230,16 +231,22 @@ main() {
   start_vip_manager pacman-primary
   start_vip_manager pacman-replica
   wait_for_postgres_vip
-  wait_for_internal_http "${prometheus_internal_url}" "Prometheus" prometheus
-  wait_for_internal_http "${grafana_internal_url}" "Grafana" grafana
+  if [[ "${wait_for_observability}" == "true" ]]; then
+    wait_for_internal_http "${prometheus_internal_url}" "Prometheus" prometheus
+    wait_for_internal_http "${grafana_internal_url}" "Grafana" grafana
+  fi
 
   printf 'PACMAN lab bootstrapped successfully.\n'
   printf 'Primary API: http://127.0.0.1:8081\n'
   printf 'Replica API: http://127.0.0.1:8082\n'
   printf 'etcd: http://127.0.0.1:2379\n'
   printf 'Writable PostgreSQL VIP: %s:5432\n' "${vip_address}"
-  printf 'Prometheus: %s\n' "${prometheus_url}"
-  printf 'Grafana: %s (login: %s / %s)\n' "${grafana_url}" "${grafana_admin_user}" "${grafana_admin_password}"
+  if [[ "${wait_for_observability}" == "true" ]]; then
+    printf 'Prometheus: %s\n' "${prometheus_url}"
+    printf 'Grafana: %s (login: %s / %s)\n' "${grafana_url}" "${grafana_admin_user}" "${grafana_admin_password}"
+  else
+    printf 'Prometheus/Grafana readiness skipped by PACMAN_LAB_WAIT_FOR_OBSERVABILITY=false\n'
+  fi
 }
 
 main "$@"
