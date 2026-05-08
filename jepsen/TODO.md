@@ -6,7 +6,7 @@ possible PostgreSQL HA chaos test.
 The goal is to prove PACMAN's core HA safety claims first:
 
 - [x] PACMAN never exposes two writable PostgreSQL primaries at the same time.
-- [ ] Acknowledged writes are preserved, or any async-mode loss is explicitly
+- [x] Acknowledged writes are preserved, or any async-mode loss is explicitly
       measured and reported as allowed data loss.
 - [ ] Failover promotes only eligible replicas.
 - [ ] A former primary rejoins safely and does not silently continue on a
@@ -41,12 +41,12 @@ Implement these before expanding the campaign matrix.
   - [x] Record node identity, writable state, timeline, and observation time.
   - [x] Fail if two nodes are writable during the same observation window.
 
-- [ ] Acknowledged write preservation checker.
-  - [ ] Insert globally unique operation IDs.
-  - [ ] Track only writes that returned a successful commit.
-  - [ ] Verify acknowledged operation IDs exist exactly once on the final
+- [x] Acknowledged write preservation checker.
+  - [x] Insert globally unique operation IDs.
+  - [x] Track only writes that returned a successful commit.
+  - [x] Verify acknowledged operation IDs exist exactly once on the final
         primary.
-  - [ ] Classify missing acknowledged writes as failure unless the run is an
+  - [x] Classify missing acknowledged writes as failure unless the run is an
         explicitly async-loss measurement profile.
 
 - [ ] Timeline checker.
@@ -177,7 +177,7 @@ MVP-1 is done when:
 - [ ] Every failed run produces enough logs and snapshots to explain the failure.
 - [ ] Checkers report:
   - [x] split-brain result;
-  - [ ] acknowledged write preservation result;
+  - [x] acknowledged write preservation result;
   - [ ] timeline convergence result;
   - [ ] failover/rejoin summary.
 - [ ] `append-smoke:none` is stable across repeated local runs.

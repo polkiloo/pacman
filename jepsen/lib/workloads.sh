@@ -12,6 +12,7 @@ jepsen_default_clients="${PACMAN_JEPSEN_WORKLOAD_CLIENTS:-3}"
 jepsen_default_keys="${PACMAN_JEPSEN_WORKLOAD_KEYS:-3}"
 jepsen_nemesis_hold_seconds="${PACMAN_JEPSEN_NEMESIS_HOLD_SECONDS:-8}"
 jepsen_primary_sample_interval="${PACMAN_JEPSEN_PRIMARY_SAMPLE_INTERVAL_SECONDS:-1}"
+jepsen_allow_async_loss="${PACMAN_JEPSEN_ALLOW_ASYNC_LOSS:-false}"
 jepsen_smoke_cases_default="append-smoke:none"
 jepsen_nightly_cases_default="append-smoke:none append-failover:kill single-key-register:packet read-committed-txn:slow-network serializable-txn:packet,kill append-failover:repeated-failure"
 
@@ -174,6 +175,21 @@ service_ip() {
   esac
 }
 
+workload_op_table() {
+  case "$1" in
+    append-smoke | append-failover) printf 'jepsen.append_values\n' ;;
+    single-key-register) printf 'jepsen.register_values\n' ;;
+    read-committed-txn | serializable-txn) printf 'jepsen.txn_ops\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+json_array_from_file() {
+  local path=$1
+
+  jq -Rsc 'split("\n") | map(select(length > 0))' "${path}"
+}
+
 sample_primary_state() {
   local sample_id=$1
   local observation_file=$2
@@ -307,6 +323,129 @@ EOF
   ' "${observation_file}" >"${checker_file}"
 
   jq -e '.valid == true and .samples > 0' "${checker_file}" >/dev/null
+}
+
+check_acknowledged_write_preservation() {
+  local workload=$1
+  local run_id=$2
+  local case_dir=$3
+  local checker_file="${case_dir}/acknowledged-write-checker.json"
+  local ack_file="${case_dir}/acknowledged-op-ids.txt"
+  local counts_file="${case_dir}/final-primary-op-counts.tsv"
+  local acknowledged_file="${case_dir}/acknowledged-op-ids.sorted"
+  local actual_file="${case_dir}/final-primary-op-ids.sorted"
+  local observed_once_file="${case_dir}/final-primary-observed-once-op-ids.sorted"
+  local duplicate_file="${case_dir}/final-primary-duplicate-op-ids.sorted"
+  local missing_file="${case_dir}/missing-acknowledged-op-ids.txt"
+  local duplicate_ack_file="${case_dir}/duplicate-acknowledged-op-ids.txt"
+  local unexpected_file="${case_dir}/unacknowledged-observed-op-ids.txt"
+  local table final_primary final_primary_service query_status
+
+  table=$(workload_op_table "${workload}") || {
+    cat >"${checker_file}" <<EOF
+{"checker":"acknowledged-write-preservation","valid":false,"error":"unsupported workload","workload":"${workload}"}
+EOF
+    return 2
+  }
+
+  touch "${ack_file}"
+  LC_ALL=C sort -u "${ack_file}" >"${acknowledged_file}"
+
+  final_primary=$(current_primary_name 2>/dev/null || true)
+  [[ -n "${final_primary}" ]] || final_primary="alpha-1"
+  final_primary_service=$(service_for_member "${final_primary}" 2>/dev/null || printf 'pacman-primary')
+
+  query_status=0
+  psql_service "${final_primary_service}" "
+SELECT op_id, count(*)::int
+FROM ${table}
+WHERE run_id = $(sql_literal "${run_id}")
+GROUP BY op_id
+ORDER BY op_id;
+" >"${counts_file}" 2>"${case_dir}/acknowledged-write-checker-query.log" || query_status=$?
+
+  if [[ "${query_status}" -ne 0 ]]; then
+    jq -n \
+      --arg workload "${workload}" \
+      --arg runId "${run_id}" \
+      --arg finalPrimary "${final_primary}" \
+      --arg finalPrimaryService "${final_primary_service}" \
+      --arg table "${table}" \
+      --arg error "$(cat "${case_dir}/acknowledged-write-checker-query.log")" \
+      '{
+        checker: "acknowledged-write-preservation",
+        valid: false,
+        workload: $workload,
+        runId: $runId,
+        finalPrimary: $finalPrimary,
+        finalPrimaryService: $finalPrimaryService,
+        table: $table,
+        error: $error
+      }' >"${checker_file}"
+    return 1
+  fi
+
+  awk -F $'\t' 'NF >= 2 {print $1}' "${counts_file}" | LC_ALL=C sort -u >"${actual_file}"
+  awk -F $'\t' 'NF >= 2 && $2 == 1 {print $1}' "${counts_file}" | LC_ALL=C sort -u >"${observed_once_file}"
+  awk -F $'\t' 'NF >= 2 && $2 != 1 {print $1}' "${counts_file}" | LC_ALL=C sort -u >"${duplicate_file}"
+  comm -23 "${acknowledged_file}" "${actual_file}" >"${missing_file}"
+  comm -12 "${acknowledged_file}" "${duplicate_file}" >"${duplicate_ack_file}"
+  comm -13 "${acknowledged_file}" "${actual_file}" >"${unexpected_file}"
+
+  local expected observed_once missing duplicate_ack unexpected async_loss_allowed valid
+  expected=$(wc -l <"${acknowledged_file}" | tr -d ' ')
+  observed_once=$(comm -12 "${acknowledged_file}" "${observed_once_file}" | wc -l | tr -d ' ')
+  missing=$(wc -l <"${missing_file}" | tr -d ' ')
+  duplicate_ack=$(wc -l <"${duplicate_ack_file}" | tr -d ' ')
+  unexpected=$(wc -l <"${unexpected_file}" | tr -d ' ')
+  async_loss_allowed=false
+  if [[ "${jepsen_allow_async_loss}" == "true" ]]; then
+    async_loss_allowed=true
+  fi
+
+  valid=false
+  if [[ "${expected}" -gt 0 && "${duplicate_ack}" -eq 0 ]]; then
+    if [[ "${missing}" -eq 0 || "${async_loss_allowed}" == "true" ]]; then
+      valid=true
+    fi
+  fi
+
+  jq -n \
+    --arg workload "${workload}" \
+    --arg runId "${run_id}" \
+    --arg finalPrimary "${final_primary}" \
+    --arg finalPrimaryService "${final_primary_service}" \
+    --arg table "${table}" \
+    --argjson valid "${valid}" \
+    --argjson asyncLossAllowed "${async_loss_allowed}" \
+    --argjson expectedAcknowledged "${expected}" \
+    --argjson observedExactlyOnce "${observed_once}" \
+    --argjson missingAcknowledged "${missing}" \
+    --argjson duplicateAcknowledged "${duplicate_ack}" \
+    --argjson unacknowledgedObserved "${unexpected}" \
+    --argjson missingOpIds "$(json_array_from_file "${missing_file}")" \
+    --argjson duplicateOpIds "$(json_array_from_file "${duplicate_ack_file}")" \
+    --argjson unacknowledgedObservedOpIds "$(json_array_from_file "${unexpected_file}")" \
+    '{
+      checker: "acknowledged-write-preservation",
+      valid: $valid,
+      workload: $workload,
+      runId: $runId,
+      finalPrimary: $finalPrimary,
+      finalPrimaryService: $finalPrimaryService,
+      table: $table,
+      asyncLossAllowed: $asyncLossAllowed,
+      expectedAcknowledged: $expectedAcknowledged,
+      observedExactlyOnce: $observedExactlyOnce,
+      missingAcknowledged: $missingAcknowledged,
+      duplicateAcknowledged: $duplicateAcknowledged,
+      unacknowledgedObserved: $unacknowledgedObserved,
+      missingOpIds: $missingOpIds,
+      duplicateOpIds: $duplicateOpIds,
+      unacknowledgedObservedOpIds: $unacknowledgedObservedOpIds
+    }' >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
 }
 
 ensure_workload_schema() {
@@ -795,7 +934,10 @@ run_jepsen_case() {
   local primary_checker_status=0
   check_single_writable_primary "${case_dir}" || primary_checker_status=$?
 
-  if [[ "${workload_status}" -eq 0 && "${workload_checker_status}" -eq 0 && "${primary_checker_status}" -eq 0 ]]; then
+  local acknowledged_checker_status=0
+  check_acknowledged_write_preservation "${workload}" "${run_id}" "${case_dir}" || acknowledged_checker_status=$?
+
+  if [[ "${workload_status}" -eq 0 && "${workload_checker_status}" -eq 0 && "${primary_checker_status}" -eq 0 && "${acknowledged_checker_status}" -eq 0 ]]; then
     write_case_event "${case_dir}/history.edn" ":case" "ok" "workload" \
       "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\"}"
     cat "${case_dir}/history.edn" >>"${run_dir}/jepsen-history.edn"
@@ -805,10 +947,10 @@ run_jepsen_case() {
   fi
 
   write_case_event "${case_dir}/history.edn" ":case" "fail" "workload" \
-    "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\" :workload-status ${workload_status} :workload-checker-status ${workload_checker_status} :primary-checker-status ${primary_checker_status}}"
+    "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\" :workload-status ${workload_status} :workload-checker-status ${workload_checker_status} :primary-checker-status ${primary_checker_status} :acknowledged-checker-status ${acknowledged_checker_status}}"
   cat "${case_dir}/history.edn" >>"${run_dir}/jepsen-history.edn"
   write_edn_event "${campaign_history}" "${workload}/${nemesis}" "fail" "\"${run_id}\""
-  record_case_result "${case_results}" "${workload}" "${nemesis}" "false" "workload_status=${workload_status} workload_checker_status=${workload_checker_status} primary_checker_status=${primary_checker_status}"
+  record_case_result "${case_results}" "${workload}" "${nemesis}" "false" "workload_status=${workload_status} workload_checker_status=${workload_checker_status} primary_checker_status=${primary_checker_status} acknowledged_checker_status=${acknowledged_checker_status}"
   return 1
 }
 

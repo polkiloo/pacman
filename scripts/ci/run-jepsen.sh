@@ -119,6 +119,7 @@ write_summary() {
         -name 'case-results.jsonl' -o \
         -name 'checker.json' -o \
         -name 'single-primary-checker.json' -o \
+        -name 'acknowledged-write-checker.json' -o \
         -name 'primary-observations.jsonl' -o \
         -name '*.log' -o \
         -name '*.json' \
