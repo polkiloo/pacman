@@ -842,6 +842,167 @@ func TestDaemonReconcileRejoin(t *testing.T) {
 	})
 }
 
+func TestDaemonReconcileReplicaFollowPrimary(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reconfigures surviving replica to follow promoted primary timeline", func(t *testing.T) {
+		t.Parallel()
+
+		daemon, logs, tracePath, dataDir := newReplicaFollowTestDaemon(t)
+		daemon.stateReader = replicaFollowReader()
+
+		daemon.reconcileReplicaFollowPrimary(context.Background(), replicaFollowPostgresStatus(1))
+
+		assertTraceLines(t, tracePath, []string{
+			"stop -D " + dataDir + " -w -m fast",
+			"status -D " + dataDir,
+			"start -D " + dataDir + " -W",
+		})
+		assertContains(t, readTestFile(t, filepath.Join(dataDir, postgres.PostgresAutoConfFileName)), "primary_conninfo = 'host=alpha-2 port=5432 application_name=alpha-3 user=replicator password=replicator-secret'")
+		assertContains(t, readTestFile(t, filepath.Join(dataDir, postgres.PostgresAutoConfFileName)), "recovery_target_timeline = 'latest'")
+		if _, err := os.Stat(filepath.Join(dataDir, postgres.StandbySignalFileName)); err != nil {
+			t.Fatalf("expected standby.signal to be written: %v", err)
+		}
+		assertContains(t, logs.String(), `"msg":"replica standby reconfigured to follow promoted primary"`)
+	})
+
+	t.Run("does not repeat successful reconfiguration for the same primary timeline", func(t *testing.T) {
+		t.Parallel()
+
+		daemon, _, tracePath, dataDir := newReplicaFollowTestDaemon(t)
+		daemon.stateReader = replicaFollowReader()
+
+		daemon.reconcileReplicaFollowPrimary(context.Background(), replicaFollowPostgresStatus(1))
+		daemon.reconcileReplicaFollowPrimary(context.Background(), replicaFollowPostgresStatus(1))
+
+		assertTraceLines(t, tracePath, []string{
+			"stop -D " + dataDir + " -w -m fast",
+			"status -D " + dataDir,
+			"start -D " + dataDir + " -W",
+		})
+	})
+
+	t.Run("leaves needs-rejoin members on the rejoin path", func(t *testing.T) {
+		t.Parallel()
+
+		daemon, _, tracePath, _ := newReplicaFollowTestDaemon(t)
+		reader := replicaFollowReader()
+		reader.clusterStatus.Members[1].NeedsRejoin = true
+		reader.clusterStatus.Members[1].State = cluster.MemberStateNeedsRejoin
+		daemon.stateReader = reader
+
+		daemon.reconcileReplicaFollowPrimary(context.Background(), replicaFollowPostgresStatus(1))
+
+		if _, err := os.Stat(tracePath); !os.IsNotExist(err) {
+			t.Fatalf("expected no pg_ctl restart trace, got err=%v", err)
+		}
+	})
+}
+
+func newReplicaFollowTestDaemon(t *testing.T) (*Daemon, *bytes.Buffer, string, string) {
+	t.Helper()
+
+	binDir, tracePath := writeTracingBinary(t, "pg_ctl", `#!/bin/sh
+trace=%q
+state="${trace}.state"
+printf '%%s\n' "$*" >> "$trace"
+case "$1" in
+  stop)
+    printf 'stopped\n' > "$state"
+    exit 0
+    ;;
+  status)
+    if [ "$(cat "$state" 2>/dev/null)" = "stopped" ]; then
+      exit 3
+    fi
+    exit 0
+    ;;
+  start)
+    printf 'running\n' > "$state"
+    exit 0
+    ;;
+esac
+exit 0
+`)
+	dataDir := t.TempDir()
+	var logs bytes.Buffer
+	daemon := &Daemon{
+		config: config.Config{
+			Node: config.NodeConfig{
+				Name: "alpha-3",
+				Role: cluster.NodeRoleData,
+			},
+			Postgres: &config.PostgresLocalConfig{
+				BinDir:              binDir,
+				DataDir:             dataDir,
+				Port:                5432,
+				ReplicationUser:     "replicator",
+				ReplicationPassword: "replicator-secret",
+			},
+		},
+		logger: logging.New("pacmand", &logs),
+		pgCtl: &postgres.PGCtl{
+			BinDir:  binDir,
+			DataDir: dataDir,
+		},
+	}
+
+	return daemon, &logs, tracePath, dataDir
+}
+
+func replicaFollowReader() stubNodeStatusReader {
+	return stubNodeStatusReader{
+		status: agentmodel.NodeStatus{
+			Postgres: agentmodel.PostgresStatus{
+				Address: "127.0.0.1:5432",
+			},
+		},
+		ok: true,
+		clusterStatus: failoverTestClusterStatus("alpha-2", nil,
+			cluster.MemberStatus{
+				Name:     "alpha-2",
+				Host:     "alpha-2",
+				Role:     cluster.MemberRolePrimary,
+				State:    cluster.MemberStateRunning,
+				Healthy:  true,
+				Timeline: 2,
+			},
+			cluster.MemberStatus{
+				Name:     "alpha-3",
+				Role:     cluster.MemberRoleReplica,
+				State:    cluster.MemberStateStreaming,
+				Healthy:  true,
+				Timeline: 1,
+			},
+		),
+		clusterStatusOK: true,
+	}
+}
+
+func replicaFollowPostgresStatus(timeline int64) agentmodel.PostgresStatus {
+	return agentmodel.PostgresStatus{
+		Managed:       true,
+		Up:            true,
+		Role:          cluster.MemberRoleReplica,
+		RecoveryKnown: true,
+		InRecovery:    true,
+		Details: agentmodel.PostgresDetails{
+			Timeline: timeline,
+		},
+	}
+}
+
+func readTestFile(t *testing.T, path string) string {
+	t.Helper()
+
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file %q: %v", path, err)
+	}
+
+	return string(payload)
+}
+
 func newSwitchoverTestDaemon(t *testing.T, publisher controlplane.NodeStatePublisher) (*Daemon, *bytes.Buffer) {
 	t.Helper()
 
@@ -913,6 +1074,7 @@ func writeTracingBinary(t *testing.T, binaryName, scriptTemplate string) (string
 	binDir := t.TempDir()
 	tracePath := filepath.Join(binDir, binaryName+".trace")
 	scriptPath := filepath.Join(binDir, binaryName)
+	tempPath := scriptPath + ".tmp"
 	script := []byte(strings.TrimSpace(
 		strings.ReplaceAll(
 			strings.ReplaceAll(scriptTemplate, "%q", `"`+tracePath+`"`),
@@ -920,9 +1082,13 @@ func writeTracingBinary(t *testing.T, binaryName, scriptTemplate string) (string
 		),
 	) + "\n")
 
-	if err := os.WriteFile(scriptPath, script, 0o755); err != nil {
+	if err := os.WriteFile(tempPath, script, 0o755); err != nil {
 		t.Fatalf("write %s script: %v", binaryName, err)
 	}
+	if err := os.Rename(tempPath, scriptPath); err != nil {
+		t.Fatalf("install %s script: %v", binaryName, err)
+	}
+	time.Sleep(10 * time.Millisecond)
 
 	return binDir, tracePath
 }

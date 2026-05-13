@@ -33,6 +33,7 @@ func (daemon *Daemon) recordHeartbeat(ctx context.Context) {
 	daemon.reconcileSwitchover(ctx)
 	daemon.reconcileFailover(ctx)
 	daemon.reconcileRejoin(ctx, postgres)
+	daemon.reconcileReplicaFollowPrimary(ctx, postgres)
 
 	daemon.mu.Lock()
 	previous := daemon.heartbeat
