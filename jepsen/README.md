@@ -83,9 +83,9 @@ bin/jepsen-ci/<campaign>/summary.md
 Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
 `case-results.jsonl`, per-case `history.edn`, workload `checker.json`,
 `primary-observations.jsonl`, `single-primary-checker.json`,
-`acknowledged-write-checker.json`, nemesis logs, PACMAN cluster/history
-snapshots, Docker logs, PostgreSQL logs, and a small `index.html` for operator
-review.
+`acknowledged-write-checker.json`, `timeline-checker.json`, nemesis logs,
+PACMAN cluster/history snapshots, Docker logs, PostgreSQL logs, and a small
+`index.html` for operator review.
 
 This harness deliberately uses the existing `deploy/lab` topology, which is
 three PACMAN data nodes plus external etcd. The broader Jepsen plan in

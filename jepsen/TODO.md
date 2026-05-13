@@ -11,7 +11,7 @@ The goal is to prove PACMAN's core HA safety claims first:
 - [ ] Failover promotes only eligible replicas.
 - [ ] A former primary rejoins safely and does not silently continue on a
       divergent timeline.
-- [ ] Surviving nodes converge to one PostgreSQL timeline after failover.
+- [x] Surviving nodes converge to one PostgreSQL timeline after failover.
 - [ ] Client write routing follows the current PACMAN primary.
 
 Patroni is useful as a calibration baseline, but PACMAN is the product under
@@ -49,12 +49,12 @@ Implement these before expanding the campaign matrix.
   - [x] Classify missing acknowledged writes as failure unless the run is an
         explicitly async-loss measurement profile.
 
-- [ ] Timeline checker.
-  - [ ] Record timeline before failover.
-  - [ ] Record timeline after failover.
-  - [ ] Verify promoted primary advances timeline.
-  - [ ] Verify replicas converge to the promoted timeline.
-  - [ ] Verify old primary requires safe rejoin or reinitialization if divergent.
+- [x] Timeline checker.
+  - [x] Record timeline before failover.
+  - [x] Record timeline after failover.
+  - [x] Verify promoted primary advances timeline.
+  - [x] Verify replicas converge to the promoted timeline.
+  - [x] Verify old primary requires safe rejoin or reinitialization if divergent.
 
 ### Cases
 
@@ -178,7 +178,7 @@ MVP-1 is done when:
 - [ ] Checkers report:
   - [x] split-brain result;
   - [x] acknowledged write preservation result;
-  - [ ] timeline convergence result;
+  - [x] timeline convergence result;
   - [ ] failover/rejoin summary.
 - [ ] `append-smoke:none` is stable across repeated local runs.
 - [ ] `append-failover:kill` is stable enough to run as a manual CI smoke.

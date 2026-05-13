@@ -266,8 +266,6 @@ start_primary_sampler() {
   local __pid_var=$2
   local observation_file="${case_dir}/primary-observations.jsonl"
 
-  : >"${observation_file}"
-
   (
     local sample_id=1
     while true; do
@@ -444,6 +442,133 @@ ORDER BY op_id;
       duplicateOpIds: $duplicateOpIds,
       unacknowledgedObservedOpIds: $unacknowledgedObservedOpIds
     }' >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
+}
+
+check_timeline_convergence() {
+  local case_dir=$1
+  local observation_file="${case_dir}/primary-observations.jsonl"
+  local checker_file="${case_dir}/timeline-checker.json"
+
+  if [[ ! -s "${observation_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"timeline-convergence","valid":false,"observations":0,"samples":0,"error":"missing primary observations"}
+EOF
+    return 1
+  fi
+
+  jq -s '
+    def samples:
+      sort_by(.sampleId)
+      | group_by(.sampleId)
+      | map({
+          sampleId: .[0].sampleId,
+          observedAt: .[0].observedAt,
+          observations: .
+        });
+    def writable_members($sample):
+      $sample.observations
+      | map(select(.reachable == true and .writable == true));
+    def primary_of($sample):
+      writable_members($sample) | sort_by(.member) | .[0] // null;
+    def summarize_member:
+      {
+        member,
+        service,
+        reachable,
+        writable,
+        inRecovery,
+        timeline,
+        lsn,
+        error
+      };
+
+    samples as $samples
+    | ($samples[0] // null) as $initialSample
+    | ($samples[-1] // null) as $finalSample
+    | (if $initialSample == null then [] else writable_members($initialSample) end) as $initialWritable
+    | (if $finalSample == null then [] else writable_members($finalSample) end) as $finalWritable
+    | (if $initialSample == null then null else primary_of($initialSample) end) as $initialPrimary
+    | (if $finalSample == null then null else primary_of($finalSample) end) as $finalPrimary
+    | (($initialPrimary != null) and ($finalPrimary != null)) as $hasPrimaries
+    | ($hasPrimaries and ($initialPrimary.member != $finalPrimary.member)) as $promotionObserved
+    | (
+        if ($hasPrimaries | not) then false
+        elif ($promotionObserved | not) then true
+        else (($finalPrimary.timeline // 0) > ($initialPrimary.timeline // 0))
+        end
+      ) as $timelineAdvanced
+    | (
+        if $finalPrimary == null then []
+        else
+          $finalSample.observations
+          | map(select(
+              .reachable == true
+              and .member != $finalPrimary.member
+              and (.timeline // 0) != ($finalPrimary.timeline // 0)
+            ))
+          | map(summarize_member)
+        end
+      ) as $replicaTimelineViolations
+    | (
+        if ($promotionObserved | not) then null
+        else
+          $finalSample.observations
+          | map(select(.member == $initialPrimary.member))
+          | .[0] // null
+        end
+      ) as $oldPrimaryFinalState
+    | (
+        if ($promotionObserved | not) then true
+        elif $oldPrimaryFinalState == null then false
+        else
+          (($oldPrimaryFinalState.reachable == false)
+          or (($oldPrimaryFinalState.writable == false)
+              and (($oldPrimaryFinalState.timeline // 0) == ($finalPrimary.timeline // 0))))
+        end
+      ) as $oldPrimarySafe
+    | (($initialWritable | length) == 1) as $singleInitialPrimary
+    | (($finalWritable | length) == 1) as $singleFinalPrimary
+    | (($replicaTimelineViolations | length) == 0) as $replicasConverged
+    | {
+        checker: "timeline-convergence",
+        valid: (
+          ($samples | length) > 0
+          and $singleInitialPrimary
+          and $singleFinalPrimary
+          and $timelineAdvanced
+          and $replicasConverged
+          and $oldPrimarySafe
+        ),
+        observations: length,
+        samples: ($samples | length),
+        initialSample: (
+          if $initialSample == null then null else {
+            sampleId: $initialSample.sampleId,
+            observedAt: $initialSample.observedAt,
+            primary: (if $initialPrimary == null then null else ($initialPrimary | summarize_member) end),
+            writableMembers: ($initialWritable | map(.member)),
+            members: ($initialSample.observations | map(summarize_member))
+          } end
+        ),
+        finalSample: (
+          if $finalSample == null then null else {
+            sampleId: $finalSample.sampleId,
+            observedAt: $finalSample.observedAt,
+            primary: (if $finalPrimary == null then null else ($finalPrimary | summarize_member) end),
+            writableMembers: ($finalWritable | map(.member)),
+            members: ($finalSample.observations | map(summarize_member))
+          } end
+        ),
+        promotionObserved: $promotionObserved,
+        timelineAdvanced: $timelineAdvanced,
+        replicasConverged: $replicasConverged,
+        oldPrimarySafe: $oldPrimarySafe,
+        replicaTimelineViolations: $replicaTimelineViolations,
+        oldPrimaryFinalState: (if $oldPrimaryFinalState == null then null else ($oldPrimaryFinalState | summarize_member) end)
+      }
+  ' "${observation_file}" >"${checker_file}"
 
   jq -e '.valid == true' "${checker_file}" >/dev/null
 }
@@ -912,10 +1037,13 @@ run_jepsen_case() {
   mkdir -p "${case_dir}"
   : >"${case_dir}/history.edn"
   : >"${case_dir}/nemesis.log"
+  : >"${case_dir}/primary-observations.jsonl"
 
   write_edn_event "${campaign_history}" "${workload}/${nemesis}" "invoke" "\"${run_id}\""
   write_case_event "${case_dir}/history.edn" ":case" "invoke" "workload" \
     "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\"}"
+
+  sample_primary_state 0 "${case_dir}/primary-observations.jsonl"
 
   local primary_sampler_pid=""
   start_primary_sampler "${case_dir}" primary_sampler_pid
@@ -927,6 +1055,7 @@ run_jepsen_case() {
   run_workload_profile "${workload}" "${run_id}" "${case_dir}" || workload_status=$?
   wait_for_nemesis "${nemesis_pid}"
   stop_primary_sampler "${primary_sampler_pid}"
+  sample_primary_state 1000000000 "${case_dir}/primary-observations.jsonl"
 
   local workload_checker_status=0
   check_workload_profile "${workload}" "${run_id}" "${case_dir}" || workload_checker_status=$?
@@ -937,7 +1066,10 @@ run_jepsen_case() {
   local acknowledged_checker_status=0
   check_acknowledged_write_preservation "${workload}" "${run_id}" "${case_dir}" || acknowledged_checker_status=$?
 
-  if [[ "${workload_status}" -eq 0 && "${workload_checker_status}" -eq 0 && "${primary_checker_status}" -eq 0 && "${acknowledged_checker_status}" -eq 0 ]]; then
+  local timeline_checker_status=0
+  check_timeline_convergence "${case_dir}" || timeline_checker_status=$?
+
+  if [[ "${workload_status}" -eq 0 && "${workload_checker_status}" -eq 0 && "${primary_checker_status}" -eq 0 && "${acknowledged_checker_status}" -eq 0 && "${timeline_checker_status}" -eq 0 ]]; then
     write_case_event "${case_dir}/history.edn" ":case" "ok" "workload" \
       "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\"}"
     cat "${case_dir}/history.edn" >>"${run_dir}/jepsen-history.edn"
@@ -947,10 +1079,10 @@ run_jepsen_case() {
   fi
 
   write_case_event "${case_dir}/history.edn" ":case" "fail" "workload" \
-    "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\" :workload-status ${workload_status} :workload-checker-status ${workload_checker_status} :primary-checker-status ${primary_checker_status} :acknowledged-checker-status ${acknowledged_checker_status}}"
+    "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\" :workload-status ${workload_status} :workload-checker-status ${workload_checker_status} :primary-checker-status ${primary_checker_status} :acknowledged-checker-status ${acknowledged_checker_status} :timeline-checker-status ${timeline_checker_status}}"
   cat "${case_dir}/history.edn" >>"${run_dir}/jepsen-history.edn"
   write_edn_event "${campaign_history}" "${workload}/${nemesis}" "fail" "\"${run_id}\""
-  record_case_result "${case_results}" "${workload}" "${nemesis}" "false" "workload_status=${workload_status} workload_checker_status=${workload_checker_status} primary_checker_status=${primary_checker_status} acknowledged_checker_status=${acknowledged_checker_status}"
+  record_case_result "${case_results}" "${workload}" "${nemesis}" "false" "workload_status=${workload_status} workload_checker_status=${workload_checker_status} primary_checker_status=${primary_checker_status} acknowledged_checker_status=${acknowledged_checker_status} timeline_checker_status=${timeline_checker_status}"
   return 1
 }
 

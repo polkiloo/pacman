@@ -120,6 +120,7 @@ write_summary() {
         -name 'checker.json' -o \
         -name 'single-primary-checker.json' -o \
         -name 'acknowledged-write-checker.json' -o \
+        -name 'timeline-checker.json' -o \
         -name 'primary-observations.jsonl' -o \
         -name '*.log' -o \
         -name '*.json' \

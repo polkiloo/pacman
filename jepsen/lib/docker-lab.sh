@@ -103,7 +103,7 @@ EOF
 <li><a href="nemesis-schedule.edn">nemesis-schedule.edn</a></li>
 <li><a href="pacman-cluster-after.json">pacman-cluster-after.json</a></li>
 <li><a href="pacman-history.json">pacman-history.json</a></li>
-<li>Per-case: primary-observations.jsonl, single-primary-checker.json, and acknowledged-write-checker.json</li>
+<li>Per-case: primary-observations.jsonl, single-primary-checker.json, acknowledged-write-checker.json, and timeline-checker.json</li>
 </ul>
 </body>
 </html>
