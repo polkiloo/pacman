@@ -11,6 +11,7 @@ jepsen_default_duration="${PACMAN_JEPSEN_WORKLOAD_DURATION_SECONDS:-20}"
 jepsen_default_clients="${PACMAN_JEPSEN_WORKLOAD_CLIENTS:-3}"
 jepsen_default_keys="${PACMAN_JEPSEN_WORKLOAD_KEYS:-3}"
 jepsen_nemesis_hold_seconds="${PACMAN_JEPSEN_NEMESIS_HOLD_SECONDS:-8}"
+jepsen_post_nemesis_settle_seconds="${PACMAN_JEPSEN_POST_NEMESIS_SETTLE_SECONDS:-10}"
 jepsen_primary_sample_interval="${PACMAN_JEPSEN_PRIMARY_SAMPLE_INTERVAL_SECONDS:-1}"
 jepsen_allow_async_loss="${PACMAN_JEPSEN_ALLOW_ASYNC_LOSS:-false}"
 jepsen_smoke_cases_default="append-smoke:none"
@@ -973,6 +974,19 @@ wait_for_nemesis() {
   fi
 }
 
+settle_after_nemesis() {
+  local profile=$1
+  local case_dir=$2
+
+  if [[ "${profile}" == "none" || "${jepsen_post_nemesis_settle_seconds}" -le 0 ]]; then
+    return 0
+  fi
+
+  printf 'settling for %s seconds after %s nemesis healed\n' \
+    "${jepsen_post_nemesis_settle_seconds}" "${profile}" >>"${case_dir}/nemesis.log"
+  sleep "${jepsen_post_nemesis_settle_seconds}"
+}
+
 run_workload_profile() {
   local workload=$1
   local run_id=$2
@@ -1054,6 +1068,7 @@ run_jepsen_case() {
   local workload_status=0
   run_workload_profile "${workload}" "${run_id}" "${case_dir}" || workload_status=$?
   wait_for_nemesis "${nemesis_pid}"
+  settle_after_nemesis "${nemesis}" "${case_dir}"
   stop_primary_sampler "${primary_sampler_pid}"
   sample_primary_state 1000000000 "${case_dir}/primary-observations.jsonl"
 

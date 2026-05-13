@@ -59,7 +59,7 @@ Implement these before expanding the campaign matrix.
 ### Cases
 
 - [x] `append-smoke:none`
-- [ ] `append-failover:kill`
+- [x] `append-failover:kill`
 - [ ] `append-failover:packet`
 - [ ] `append-failover:packet,kill`
 - [ ] old primary rejoin after failover
@@ -181,6 +181,6 @@ MVP-1 is done when:
   - [x] timeline convergence result;
   - [ ] failover/rejoin summary.
 - [ ] `append-smoke:none` is stable across repeated local runs.
-- [ ] `append-failover:kill` is stable enough to run as a manual CI smoke.
+- [x] `append-failover:kill` is stable enough to run as a manual CI smoke.
 - [ ] Known unsafe or unsupported configurations are documented separately from
       product regressions.

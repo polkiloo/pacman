@@ -73,6 +73,11 @@ runs start from a clean PostgreSQL and DCS state. Set
 `PACMAN_JEPSEN_RESET_LAB=false` only when preserving the lab for interactive
 debugging.
 
+Non-`none` nemesis cases wait `PACMAN_JEPSEN_POST_NEMESIS_SETTLE_SECONDS`
+seconds after the nemesis heals before final checker sampling. The default is
+`10`, which gives promoted timelines and restarted nodes time to settle while
+the primary sampler continues recording the transition.
+
 Artifacts are written under:
 
 ```text
