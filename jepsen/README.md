@@ -26,6 +26,11 @@ serializable-txn:packet,kill
 append-failover:repeated-failure
 ```
 
+After the nightly cases finish, the harness runs one manual switchover using
+the current cluster membership to select a healthy non-primary target. This
+keeps the post-campaign switchover valid even when an earlier nemesis case has
+already moved the primary.
+
 Run one case at a time by name:
 
 ```bash
