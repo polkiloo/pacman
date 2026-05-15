@@ -60,7 +60,7 @@ Implement these before expanding the campaign matrix.
 
 - [x] `append-smoke:none`
 - [x] `append-failover:kill`
-- [ ] `append-failover:packet`
+- [x] `append-failover:packet`
 - [ ] `append-failover:packet,kill`
 - [ ] old primary rejoin after failover
 

@@ -15,7 +15,7 @@ jepsen_post_nemesis_settle_seconds="${PACMAN_JEPSEN_POST_NEMESIS_SETTLE_SECONDS:
 jepsen_primary_sample_interval="${PACMAN_JEPSEN_PRIMARY_SAMPLE_INTERVAL_SECONDS:-1}"
 jepsen_allow_async_loss="${PACMAN_JEPSEN_ALLOW_ASYNC_LOSS:-false}"
 jepsen_smoke_cases_default="append-smoke:none"
-jepsen_nightly_cases_default="append-smoke:none append-failover:kill single-key-register:packet read-committed-txn:slow-network serializable-txn:packet,kill append-failover:repeated-failure"
+jepsen_nightly_cases_default="append-smoke:none append-failover:kill append-failover:packet single-key-register:packet read-committed-txn:slow-network serializable-txn:packet,kill append-failover:repeated-failure"
 
 jepsen_default_cases() {
   case "$1" in
@@ -41,6 +41,7 @@ list_jepsen_cases() {
   cat <<'EOF'
 append-smoke-none append-smoke:none Smoke append workload without nemesis.
 append-failover-kill append-failover:kill Append workload while killing current primary PostgreSQL.
+append-failover-packet append-failover:packet Append workload while partitioning the current primary.
 single-key-register-packet single-key-register:packet Register workload while partitioning the current primary.
 read-committed-txn-slow-network read-committed-txn:slow-network Read committed transaction workload under latency and loss.
 serializable-txn-packet-kill serializable-txn:packet,kill Serializable transaction workload under partition plus kill.
@@ -54,6 +55,7 @@ resolve_jepsen_case_spec() {
   case "${name}" in
     append-smoke-none | append-smoke:none) printf 'append-smoke:none\n' ;;
     append-failover-kill | append-failover:kill) printf 'append-failover:kill\n' ;;
+    append-failover-packet | append-failover:packet) printf 'append-failover:packet\n' ;;
     single-key-register-packet | single-key-register:packet) printf 'single-key-register:packet\n' ;;
     read-committed-txn-slow-network | read-committed-txn:slow-network) printf 'read-committed-txn:slow-network\n' ;;
     serializable-txn-packet-kill | serializable-txn:packet,kill) printf 'serializable-txn:packet,kill\n' ;;
