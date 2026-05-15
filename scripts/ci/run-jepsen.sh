@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_source="${PACMAN_JEPSEN_SCRIPT_SOURCE:-$0}"
+if [[ "${PACMAN_JEPSEN_SCRIPT_SNAPSHOT:-false}" != "true" ]]; then
+  snapshot_path="${TMPDIR:-/tmp}/pacman-run-jepsen-$PPID-$$.sh"
+  cp "${script_source}" "${snapshot_path}"
+  chmod +x "${snapshot_path}"
+  export PACMAN_JEPSEN_SCRIPT_SNAPSHOT=true
+  export PACMAN_JEPSEN_SCRIPT_SOURCE="${script_source}"
+  exec bash "${snapshot_path}" "$@"
+fi
+
 usage() {
-  echo "usage: $0 smoke|nightly" >&2
+  echo "usage: $0 smoke|nightly|case [case-name|workload:nemesis]" >&2
 }
 
 campaign="${1:-}"
 case "${campaign}" in
-  smoke | nightly)
+  smoke | nightly | case)
     ;;
   *)
     usage
@@ -15,7 +25,20 @@ case "${campaign}" in
     ;;
 esac
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if [[ "${campaign}" == "case" ]]; then
+  export PACMAN_JEPSEN_CASE="${2:-${PACMAN_JEPSEN_CASE:-}}"
+  if [[ -z "${PACMAN_JEPSEN_CASE}" ]]; then
+    usage
+    if [[ -x "./jepsen/bin/list-cases" ]]; then
+      echo >&2
+      echo "Supported cases:" >&2
+      ./jepsen/bin/list-cases >&2
+    fi
+    exit 2
+  fi
+fi
+
+repo_root="$(cd "$(dirname "${PACMAN_JEPSEN_SCRIPT_SOURCE}")/../.." && pwd)"
 jepsen_dir="${PACMAN_JEPSEN_DIR:-${repo_root}/jepsen}"
 artifact_dir="${PACMAN_JEPSEN_ARTIFACT_DIR:-${jepsen_dir}/store}"
 ci_artifact_dir="${PACMAN_JEPSEN_CI_ARTIFACT_DIR:-${repo_root}/bin/jepsen-ci/${campaign}}"
@@ -49,6 +72,9 @@ write_summary() {
     echo "# Jepsen ${campaign} ${status_label}"
     echo
     echo "- Campaign: \`${campaign}\`"
+    if [[ "${campaign}" == "case" ]]; then
+      echo "- Case: \`${PACMAN_JEPSEN_CASE}\`"
+    fi
     echo "- Status: \`${status_label}\`"
     echo "- Harness: \`${jepsen_dir}\`"
     echo "- Store: \`${artifact_dir}\`"
@@ -90,6 +116,12 @@ write_summary() {
         -name 'jepsen-history.edn' -o \
         -name 'results.edn' -o \
         -name 'nemesis-schedule.edn' -o \
+        -name 'case-results.jsonl' -o \
+        -name 'checker.json' -o \
+        -name 'single-primary-checker.json' -o \
+        -name 'acknowledged-write-checker.json' -o \
+        -name 'timeline-checker.json' -o \
+        -name 'primary-observations.jsonl' -o \
         -name '*.log' -o \
         -name '*.json' \
       \) | sort
@@ -140,6 +172,10 @@ export PACMAN_JEPSEN_SUMMARY_PATH="${summary_path}"
 
 cd "${jepsen_dir}"
 status=0
-"${runner}" || status=$?
+if [[ "${campaign}" == "case" ]]; then
+  "${runner}" "${PACMAN_JEPSEN_CASE}" || status=$?
+else
+  "${runner}" || status=$?
+fi
 write_summary "${status}"
 exit "${status}"

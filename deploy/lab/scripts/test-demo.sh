@@ -46,6 +46,7 @@ verify_output=$(run_and_capture "${demo_script}" --dry-run verify)
 assert_contains "${verify_output}" "docker compose"
 assert_contains "${verify_output}" "exec -T pacman-primary"
 assert_contains "${verify_output}" "exec -T pacman-replica"
+assert_contains "${verify_output}" "exec -T pacman-replica-2"
 assert_contains "${verify_output}" "pacmanctl cluster status"
 assert_contains "${verify_output}" "pacmanctl members list"
 assert_contains "${verify_output}" "vip-manager PostgreSQL VIP"

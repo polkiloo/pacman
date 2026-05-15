@@ -285,6 +285,56 @@ Artifact review checklist:
 - Confirm PostgreSQL logs from former primaries do not show accepted writes after demotion or isolation.
 - Preserve the full store path and seed in any issue filed from the run.
 
+## Local Docker Runner
+
+For laptop runs, use the Dockerized Jepsen control-node wrapper. It builds
+`deploy/jepsen/Dockerfile`, mounts the repository at the same absolute path
+inside the control container, mounts the host Docker socket when available, and
+executes the same campaign contract used by CI. Keeping the same absolute path is
+required on Docker Desktop because Docker Compose talks to the host daemon, and
+the host daemon must see bind-mount paths that exist on the host.
+
+Commands:
+
+```bash
+make jepsen-docker-smoke
+make jepsen-docker-nightly
+```
+
+Equivalent direct commands:
+
+```bash
+scripts/local/run-jepsen-docker.sh smoke
+scripts/local/run-jepsen-docker.sh nightly
+```
+
+The runner image includes JDK 21, Leiningen, Docker CLI/Compose, SSH client,
+PostgreSQL client tools, and common network/process debugging tools. It is a
+Jepsen control node, not a PACMAN data node. The Make targets build the PACMAN
+runtime RPM into `bin/ansible-install-rpm/` before starting the runner so the
+Docker lab can install the exact workspace build.
+
+The current harness lives in `jepsen/` and provides:
+
+```text
+jepsen/bin/ci-smoke
+jepsen/bin/ci-nightly
+```
+
+`ci-smoke` bootstraps the Docker Compose lab and runs the lab verification stage.
+`ci-nightly` bootstraps the same lab, verifies it, runs a planned switchover, and
+verifies it again. A missing `lein`, missing runner, checker failure, or lab
+bootstrap failure fails the command and preserves the same summary/artifact
+layout used by CI.
+
+Useful overrides:
+
+```bash
+PACMAN_JEPSEN_DOCKER_BUILD=false make jepsen-docker-smoke
+PACMAN_JEPSEN_DOCKER_IMAGE=pacman-jepsen-runner:dev make jepsen-docker-smoke
+PACMAN_JEPSEN_DOCKER_DRY_RUN=true make jepsen-docker-smoke
+```
+
 ## Automation Placement Decision
 
 Jepsen runs must execute outside the fast default PR pipeline. The default PR

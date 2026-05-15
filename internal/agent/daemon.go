@@ -29,27 +29,29 @@ const (
 
 // Daemon runs the node-local PACMAN agent.
 type Daemon struct {
-	config              config.Config
-	logger              *slog.Logger
-	now                 func() time.Time
-	heartbeatInterval   time.Duration
-	postgresProbe       postgresAvailabilityProbe
-	postgresStateProbe  postgresStateProbe
-	statePublisher      controlplane.NodeStatePublisher
-	stateReader         httpapi.NodeStatusReader
-	apiServer           httpServer
-	apiTLSConfig        *tls.Config
-	apiAuthorizer       httpapi.Authorizer
-	apiMiddlewares      []httpapi.MiddlewareFactory
-	apiServerDisabled   bool
-	peerServer          httpServer
-	peerServerTLSConfig *tls.Config
-	peerClientTLSConfig *tls.Config
-	probeTimeout        time.Duration
-	peerProbeTimeout    time.Duration
-	pgCtl               *postgres.PGCtl
-	adminToken          string
-	startedFlag         atomic.Bool
+	config                config.Config
+	logger                *slog.Logger
+	now                   func() time.Time
+	heartbeatInterval     time.Duration
+	postgresProbe         postgresAvailabilityProbe
+	postgresStateProbe    postgresStateProbe
+	statePublisher        controlplane.NodeStatePublisher
+	stateReader           httpapi.NodeStatusReader
+	apiServer             httpServer
+	apiTLSConfig          *tls.Config
+	apiAuthorizer         httpapi.Authorizer
+	apiMiddlewares        []httpapi.MiddlewareFactory
+	apiServerDisabled     bool
+	peerServer            httpServer
+	peerServerTLSConfig   *tls.Config
+	peerClientTLSConfig   *tls.Config
+	probeTimeout          time.Duration
+	peerProbeTimeout      time.Duration
+	pgCtl                 *postgres.PGCtl
+	adminToken            string
+	startedFlag           atomic.Bool
+	replicaFollowPrimary  string
+	replicaFollowTimeline int64
 
 	mu         sync.RWMutex
 	started    agentmodel.Startup

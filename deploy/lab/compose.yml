@@ -108,6 +108,41 @@ services:
     network_mode: "service:pacman-replica"
     pid: "service:pacman-replica"
 
+  pacman-replica-2:
+    image: ${PACMAN_LAB_IMAGE:-pacman-lab:local}
+    build:
+      context: ../..
+      dockerfile: test/docker/pacman-ansible-install.Dockerfile
+    container_name: pacman-lab-replica-2
+    hostname: pacman-replica-2
+    working_dir: /workspace
+    command: ["/bin/sh", "-lc", "sleep infinity"]
+    ports:
+      - "5435:5432"
+      - "8083:8080"
+      - "9094:9090"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ../..:/workspace:ro
+      - ../../bin/ansible-install-rpm:/artifacts:ro
+      - ./.local/alpha-3/etc/pacman:/etc/pacman
+      - ./.local/alpha-3/var/lib/pacman:/var/lib/pacman
+      - ./.local/alpha-3/var/lib/pgsql:/var/lib/pgsql
+      - ./.local/alpha-3/var/log:/var/log
+    networks:
+      pacman-lab-net:
+        ipv4_address: 172.28.0.13
+
+  pacman-replica-2-node-exporter:
+    <<: *node_exporter_common
+    container_name: pacman-lab-replica-2-node-exporter
+    depends_on:
+      - pacman-replica-2
+    network_mode: "service:pacman-replica-2"
+    pid: "service:pacman-replica-2"
+
   prometheus:
     image: ${PACMAN_LAB_PROMETHEUS_IMAGE:-prom/prometheus:v2.53.0}
     container_name: pacman-lab-prometheus
@@ -129,6 +164,8 @@ services:
       - pacman-primary-node-exporter
       - pacman-replica
       - pacman-replica-node-exporter
+      - pacman-replica-2
+      - pacman-replica-2-node-exporter
     networks:
       pacman-lab-net:
         ipv4_address: 172.28.0.20

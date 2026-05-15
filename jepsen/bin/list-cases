@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/workloads.sh
+source "${script_dir}/../lib/workloads.sh"
+
+list_jepsen_cases
