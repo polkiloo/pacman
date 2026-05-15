@@ -123,6 +123,9 @@ write_summary() {
         -name 'timeline-checker.json' -o \
         -name 'old-primary-rejoin-checker.json' -o \
         -name 'primary-observations.jsonl' -o \
+        -name 'pacman-cluster-snapshots.jsonl' -o \
+        -name 'pg-stat-wal-receiver.jsonl' -o \
+        -name 'pg-stat-replication.json' -o \
         -name '*.log' -o \
         -name '*.json' \
       \) | sort

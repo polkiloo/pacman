@@ -75,10 +75,10 @@ Collect these for every MVP-1 run:
 - [x] PostgreSQL logs.
 - [x] PACMAN logs.
 - [x] DCS logs.
-- [ ] PACMAN cluster snapshot before, during, and after each nemesis window.
+- [x] PACMAN cluster snapshot before, during, and after each nemesis window.
 - [x] PostgreSQL role/timeline/LSN snapshot from every data node.
-- [ ] `pg_stat_replication` from the current primary.
-- [ ] `pg_stat_wal_receiver` from replicas.
+- [x] `pg_stat_replication` from the current primary.
+- [x] `pg_stat_wal_receiver` from replicas.
 
 ## MVP-2: Strong HA Behavior
 
