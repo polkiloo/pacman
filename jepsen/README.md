@@ -21,6 +21,7 @@ the broader implemented matrix:
 append-smoke:none
 append-failover:kill
 append-failover:packet
+append-failover:packet,kill
 single-key-register:packet
 read-committed-txn:slow-network
 serializable-txn:packet,kill
@@ -38,6 +39,7 @@ Run one case at a time by name:
 make jepsen-docker-case-append-smoke-none
 make jepsen-docker-case-append-failover-kill
 make jepsen-docker-case-append-failover-packet
+make jepsen-docker-case-append-failover-packet-kill
 make jepsen-docker-case-single-key-register-packet
 make jepsen-docker-case-read-committed-txn-slow-network
 make jepsen-docker-case-serializable-txn-packet-kill
