@@ -87,8 +87,8 @@ Implement after MVP-1 is stable and repeatable.
 - [x] Manual switchover under append workload.
 - [x] Primary-alone network partition.
 - [x] Isolate primary from DCS while client traffic remains available.
-- [ ] DCS traffic blocked while replication stays healthy.
-- [ ] Replication traffic blocked while DCS stays healthy.
+- [x] DCS traffic blocked while replication stays healthy.
+- [x] Replication traffic blocked while DCS stays healthy.
 - [ ] Repeated failover chain across all three data nodes.
 - [ ] Open transaction during failover.
 - [ ] Router sends writes only to current PACMAN primary, if a router is part of
