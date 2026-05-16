@@ -182,5 +182,5 @@ MVP-1 is done when:
   - [ ] failover/rejoin summary.
 - [ ] `append-smoke:none` is stable across repeated local runs.
 - [x] `append-failover:kill` is stable enough to run as a manual CI smoke.
-- [ ] Known unsafe or unsupported configurations are documented separately from
+- [ ] Unsupported configurations are documented separately from
       product regressions.

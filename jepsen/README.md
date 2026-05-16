@@ -14,8 +14,9 @@ make jepsen-docker-nightly
 ```
 
 The smoke campaign bootstraps the Docker lab, verifies it, runs
-`append-smoke:none`, and verifies the lab again. The nightly campaign defaults to
-the broader implemented matrix:
+`append-smoke:none`, and verifies the lab again. The default nightly campaign
+runs the full implemented matrix. Each case starts from a fresh Docker lab so
+destructive profiles cannot poison later cases:
 
 ```text
 append-smoke:none
@@ -30,10 +31,12 @@ append-failover:repeated-failure
 ```
 
 The `append-switchover:switchover` case issues a manual PACMAN switchover while
-append writes are in flight. After the nightly cases finish, the harness also
-runs one post-campaign manual switchover using the current cluster membership to
-select a healthy non-primary target. This keeps the final switchover valid even
-when an earlier nemesis case has already moved the primary.
+append writes are in flight. Nightly records the real checker result for every
+case in `case-results.jsonl`; a failed destructive profile remains a failed
+nightly case, but the runner continues through the rest of the matrix. After the
+matrix finishes, the harness bootstraps a fresh lab and runs one post-campaign
+manual switchover using the current cluster membership to select a healthy
+non-primary target.
 
 Run one case at a time by name:
 

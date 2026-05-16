@@ -792,8 +792,16 @@ EOF
 
 check_old_primary_rejoin_after_failover() {
   local case_dir=$1
+  local nemesis=${2:-}
   local observation_file="${case_dir}/primary-observations.jsonl"
   local checker_file="${case_dir}/old-primary-rejoin-checker.json"
+
+  if [[ "${nemesis}" == "switchover" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"old-primary-rejoin-after-failover","valid":true,"applicable":false,"observations":0,"samples":0,"reason":"manual switchover is covered by the manual switchover checker"}
+EOF
+    return 0
+  fi
 
   if [[ ! -s "${observation_file}" ]]; then
     cat >"${checker_file}" <<'EOF'
@@ -1531,7 +1539,7 @@ run_jepsen_case() {
   check_timeline_convergence "${case_dir}" || timeline_checker_status=$?
 
   local old_primary_rejoin_checker_status=0
-  check_old_primary_rejoin_after_failover "${case_dir}" || old_primary_rejoin_checker_status=$?
+  check_old_primary_rejoin_after_failover "${case_dir}" "${nemesis}" || old_primary_rejoin_checker_status=$?
 
   local manual_switchover_checker_status=0
   check_manual_switchover "${nemesis}" "${case_dir}" || manual_switchover_checker_status=$?
@@ -1545,11 +1553,13 @@ run_jepsen_case() {
     return 0
   fi
 
+  local failure_details="workload_status=${workload_status} workload_checker_status=${workload_checker_status} primary_checker_status=${primary_checker_status} acknowledged_checker_status=${acknowledged_checker_status} timeline_checker_status=${timeline_checker_status} old_primary_rejoin_checker_status=${old_primary_rejoin_checker_status} manual_switchover_checker_status=${manual_switchover_checker_status}"
+
   write_case_event "${case_dir}/history.edn" ":case" "fail" "workload" \
     "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\" :workload-status ${workload_status} :workload-checker-status ${workload_checker_status} :primary-checker-status ${primary_checker_status} :acknowledged-checker-status ${acknowledged_checker_status} :timeline-checker-status ${timeline_checker_status} :old-primary-rejoin-checker-status ${old_primary_rejoin_checker_status} :manual-switchover-checker-status ${manual_switchover_checker_status}}"
   cat "${case_dir}/history.edn" >>"${run_dir}/jepsen-history.edn"
   write_edn_event "${campaign_history}" "${workload}/${nemesis}" "fail" "\"${run_id}\""
-  record_case_result "${case_results}" "${workload}" "${nemesis}" "false" "workload_status=${workload_status} workload_checker_status=${workload_checker_status} primary_checker_status=${primary_checker_status} acknowledged_checker_status=${acknowledged_checker_status} timeline_checker_status=${timeline_checker_status} old_primary_rejoin_checker_status=${old_primary_rejoin_checker_status} manual_switchover_checker_status=${manual_switchover_checker_status}"
+  record_case_result "${case_results}" "${workload}" "${nemesis}" "false" "${failure_details}"
   return 1
 }
 

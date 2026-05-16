@@ -38,27 +38,87 @@ finish() {
 trap finish EXIT
 
 : >"${run_dir}/nemesis-schedule.edn"
+mkdir -p "${run_dir}/cases"
+: >"${run_dir}/case-results.jsonl"
 
-write_edn_event "${history_file}" "bootstrap" "invoke" "\"docker-lab\""
-bootstrap_lab
-write_edn_event "${history_file}" "bootstrap" "ok" "\"docker-lab\""
-
-compose_exec pacman-primary /bin/sh -lc \
-  "PACMANCTL_API_URL=http://pacman-primary:8080 PACMANCTL_API_TOKEN=lab-admin-token pacmanctl cluster status -o json" \
-  >"${run_dir}/pacman-cluster-before.json"
-
-write_edn_event "${history_file}" "verify" "invoke" "\"demo-verify-before\""
-verify_lab
-write_edn_event "${history_file}" "verify" "ok" "\"demo-verify-before\""
+failed=0
 
 write_edn_event "${history_file}" "cases" "invoke" "\"${cases}\""
-run_jepsen_cases "${cases}" "${run_dir}" "${history_file}" "${run_dir}/nemesis-schedule.edn"
-write_edn_event "${history_file}" "cases" "ok" "\"${cases}\""
 
-write_edn_event "${history_file}" "switchover" "invoke" "\"auto\""
-"${repo_root}/deploy/lab/scripts/demo.sh" switchover
-write_edn_event "${history_file}" "switchover" "ok" "\"auto\""
+for spec in ${cases}; do
+  workload=${spec%%:*}
+  nemesis=${spec#*:}
+  if [[ "${workload}" == "${nemesis}" ]]; then
+    nemesis="none"
+  fi
 
-write_edn_event "${history_file}" "verify" "invoke" "\"demo-verify-after\""
-verify_lab
-write_edn_event "${history_file}" "verify" "ok" "\"demo-verify-after\""
+  slug="$(case_slug "${workload}__${nemesis}")"
+
+  write_edn_event "${history_file}" "bootstrap" "invoke" "\"docker-lab:${workload}:${nemesis}\""
+  if bootstrap_lab; then
+    write_edn_event "${history_file}" "bootstrap" "ok" "\"docker-lab:${workload}:${nemesis}\""
+  else
+    write_edn_event "${history_file}" "bootstrap" "fail" "\"docker-lab:${workload}:${nemesis}\""
+    failed=1
+    continue
+  fi
+
+  compose_exec pacman-primary /bin/sh -lc \
+    "PACMANCTL_API_URL=http://pacman-primary:8080 PACMANCTL_API_TOKEN=lab-admin-token pacmanctl cluster status -o json" \
+    >"${run_dir}/pacman-cluster-before-${slug}.json" 2>&1 || true
+
+  write_edn_event "${history_file}" "verify" "invoke" "\"demo-verify-before:${workload}:${nemesis}\""
+  if verify_lab; then
+    write_edn_event "${history_file}" "verify" "ok" "\"demo-verify-before:${workload}:${nemesis}\""
+  else
+    write_edn_event "${history_file}" "verify" "fail" "\"demo-verify-before:${workload}:${nemesis}\""
+    failed=1
+    continue
+  fi
+
+  ensure_workload_schema
+
+  if ! run_jepsen_case "${workload}" "${nemesis}" "${run_dir}" "${history_file}" "${run_dir}/nemesis-schedule.edn" "${run_dir}/case-results.jsonl"; then
+    failed=1
+  fi
+
+  write_edn_event "${history_file}" "verify" "invoke" "\"demo-verify-after:${workload}:${nemesis}\""
+  if verify_lab; then
+    write_edn_event "${history_file}" "verify" "ok" "\"demo-verify-after:${workload}:${nemesis}\""
+  else
+    write_edn_event "${history_file}" "verify" "fail" "\"demo-verify-after:${workload}:${nemesis}\""
+    failed=1
+  fi
+done
+
+if [[ "${failed}" -eq 0 ]]; then
+  write_edn_event "${history_file}" "cases" "ok" "\"${cases}\""
+else
+  write_edn_event "${history_file}" "cases" "fail" "\"${cases}\""
+fi
+
+write_edn_event "${history_file}" "bootstrap" "invoke" "\"docker-lab:post-campaign\""
+if bootstrap_lab; then
+  write_edn_event "${history_file}" "bootstrap" "ok" "\"docker-lab:post-campaign\""
+
+  write_edn_event "${history_file}" "switchover" "invoke" "\"auto\""
+  if "${repo_root}/deploy/lab/scripts/demo.sh" switchover; then
+    write_edn_event "${history_file}" "switchover" "ok" "\"auto\""
+  else
+    write_edn_event "${history_file}" "switchover" "fail" "\"auto\""
+    failed=1
+  fi
+
+  write_edn_event "${history_file}" "verify" "invoke" "\"demo-verify-after\""
+  if verify_lab; then
+    write_edn_event "${history_file}" "verify" "ok" "\"demo-verify-after\""
+  else
+    write_edn_event "${history_file}" "verify" "fail" "\"demo-verify-after\""
+    failed=1
+  fi
+else
+  write_edn_event "${history_file}" "bootstrap" "fail" "\"docker-lab:post-campaign\""
+  failed=1
+fi
+
+exit "${failed}"
