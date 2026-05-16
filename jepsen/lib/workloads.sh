@@ -14,8 +14,9 @@ jepsen_nemesis_hold_seconds="${PACMAN_JEPSEN_NEMESIS_HOLD_SECONDS:-8}"
 jepsen_post_nemesis_settle_seconds="${PACMAN_JEPSEN_POST_NEMESIS_SETTLE_SECONDS:-10}"
 jepsen_primary_sample_interval="${PACMAN_JEPSEN_PRIMARY_SAMPLE_INTERVAL_SECONDS:-1}"
 jepsen_allow_async_loss="${PACMAN_JEPSEN_ALLOW_ASYNC_LOSS:-false}"
+jepsen_append_switchover_op_delay="${PACMAN_JEPSEN_APPEND_SWITCHOVER_OP_DELAY_SECONDS:-1}"
 jepsen_smoke_cases_default="append-smoke:none"
-jepsen_nightly_cases_default="append-smoke:none append-failover:kill append-failover:packet single-key-register:packet read-committed-txn:slow-network serializable-txn:packet,kill append-failover:repeated-failure"
+jepsen_nightly_cases_default="append-smoke:none append-switchover:switchover append-failover:kill append-failover:packet append-failover:packet,kill single-key-register:packet read-committed-txn:slow-network serializable-txn:packet,kill append-failover:repeated-failure"
 
 jepsen_default_cases() {
   case "$1" in
@@ -40,8 +41,10 @@ jepsen_cases_for_campaign() {
 list_jepsen_cases() {
   cat <<'EOF'
 append-smoke-none append-smoke:none Smoke append workload without nemesis.
+append-switchover-switchover append-switchover:switchover Append workload while requesting a manual PACMAN switchover.
 append-failover-kill append-failover:kill Append workload while killing current primary PostgreSQL.
 append-failover-packet append-failover:packet Append workload while partitioning the current primary.
+append-failover-packet-kill append-failover:packet,kill Append workload while partitioning and killing the current primary.
 single-key-register-packet single-key-register:packet Register workload while partitioning the current primary.
 read-committed-txn-slow-network read-committed-txn:slow-network Read committed transaction workload under latency and loss.
 serializable-txn-packet-kill serializable-txn:packet,kill Serializable transaction workload under partition plus kill.
@@ -54,8 +57,10 @@ resolve_jepsen_case_spec() {
 
   case "${name}" in
     append-smoke-none | append-smoke:none) printf 'append-smoke:none\n' ;;
+    append-switchover-switchover | append-switchover:switchover) printf 'append-switchover:switchover\n' ;;
     append-failover-kill | append-failover:kill) printf 'append-failover:kill\n' ;;
     append-failover-packet | append-failover:packet) printf 'append-failover:packet\n' ;;
+    append-failover-packet-kill | append-failover:packet,kill) printf 'append-failover:packet,kill\n' ;;
     single-key-register-packet | single-key-register:packet) printf 'single-key-register:packet\n' ;;
     read-committed-txn-slow-network | read-committed-txn:slow-network) printf 'read-committed-txn:slow-network\n' ;;
     serializable-txn-packet-kill | serializable-txn:packet,kill) printf 'serializable-txn:packet,kill\n' ;;
@@ -122,6 +127,186 @@ psql_service() {
       -Atq <<<"${sql}"
 }
 
+capture_pacman_cluster_snapshot() {
+  local case_dir=$1
+  local phase=$2
+  local nemesis=$3
+  local target=${4:-}
+  local service=${5:-pacman-primary}
+  local snapshot_file="${case_dir}/pacman-cluster-snapshots.jsonl"
+  local observed_at output snapshot_status cluster_json
+
+  observed_at="$(timestamp_utc)"
+  snapshot_status=0
+  output=$(compose_exec "${service}" /bin/sh -lc \
+    "PACMANCTL_API_URL=http://${service}:8080 PACMANCTL_API_TOKEN=lab-admin-token pacmanctl cluster status -o json" 2>&1) || snapshot_status=$?
+
+  if [[ "${snapshot_status}" -eq 0 ]] && cluster_json=$(printf '%s\n' "${output}" | jq -sc 'map(select(type == "object" and has("clusterName"))) | last // empty' 2>/dev/null) && [[ -n "${cluster_json}" ]]; then
+    append_jsonl "${snapshot_file}" \
+      observedAt "$(json_escape "${observed_at}")" \
+      phase "$(json_escape "${phase}")" \
+      nemesis "$(json_escape "${nemesis}")" \
+      target "$(json_escape "${target}")" \
+      service "$(json_escape "${service}")" \
+      ok true \
+      cluster "${cluster_json}" \
+      error "$(json_escape "")"
+    return 0
+  fi
+
+  append_jsonl "${snapshot_file}" \
+    observedAt "$(json_escape "${observed_at}")" \
+    phase "$(json_escape "${phase}")" \
+    nemesis "$(json_escape "${nemesis}")" \
+    target "$(json_escape "${target}")" \
+    service "$(json_escape "${service}")" \
+    ok false \
+    cluster null \
+    error "$(json_escape "${output}")"
+  return 1
+}
+
+capture_pg_stat_replication() {
+  local case_dir=$1
+  local phase=${2:-final}
+  local output query_status rows_json primary service
+  local snapshot_file="${case_dir}/pg-stat-replication.json"
+
+  primary=$(current_primary_name 2>/dev/null || true)
+  [[ -n "${primary}" ]] || primary="unknown"
+  service=$(service_for_member "${primary}" 2>/dev/null || printf 'pacman-primary')
+
+  query_status=0
+  output=$(psql_service "${service}" "
+SELECT coalesce(json_agg(json_build_object(
+  'pid', pid,
+  'usesysid', usesysid,
+  'usename', usename,
+  'applicationName', application_name,
+  'clientAddr', client_addr::text,
+  'clientHostname', client_hostname,
+  'clientPort', client_port,
+  'backendStart', backend_start,
+  'backendXmin', backend_xmin,
+  'state', state,
+  'sentLsn', sent_lsn::text,
+  'writeLsn', write_lsn::text,
+  'flushLsn', flush_lsn::text,
+  'replayLsn', replay_lsn::text,
+  'writeLag', write_lag::text,
+  'flushLag', flush_lag::text,
+  'replayLag', replay_lag::text,
+  'syncPriority', sync_priority,
+  'syncState', sync_state,
+  'replyTime', reply_time
+) ORDER BY application_name), '[]'::json)
+FROM pg_stat_replication;
+" 2>&1) || query_status=$?
+
+  if [[ "${query_status}" -eq 0 ]] && rows_json=$(printf '%s\n' "${output}" | jq -c . 2>/dev/null); then
+    jq -n \
+      --arg observedAt "$(timestamp_utc)" \
+      --arg phase "${phase}" \
+      --arg currentPrimary "${primary}" \
+      --arg service "${service}" \
+      --argjson rows "${rows_json}" \
+      '{
+        observedAt: $observedAt,
+        phase: $phase,
+        currentPrimary: $currentPrimary,
+        service: $service,
+        ok: true,
+        rows: $rows,
+        error: ""
+      }' >"${snapshot_file}"
+    return 0
+  fi
+
+  jq -n \
+    --arg observedAt "$(timestamp_utc)" \
+    --arg phase "${phase}" \
+    --arg currentPrimary "${primary}" \
+    --arg service "${service}" \
+    --arg error "${output}" \
+    '{
+      observedAt: $observedAt,
+      phase: $phase,
+      currentPrimary: $currentPrimary,
+      service: $service,
+      ok: false,
+      rows: [],
+      error: $error
+    }' >"${snapshot_file}"
+  return 1
+}
+
+capture_pg_stat_wal_receiver() {
+  local case_dir=$1
+  local phase=${2:-final}
+  local snapshot_file="${case_dir}/pg-stat-wal-receiver.jsonl"
+  local observed_at member service output query_status rows_json
+
+  : >"${snapshot_file}"
+  observed_at="$(timestamp_utc)"
+  for member in alpha-1 alpha-2 alpha-3; do
+    service=$(service_for_member "${member}")
+    query_status=0
+    output=$(psql_service "${service}" "
+SELECT coalesce(json_agg(json_build_object(
+  'pid', pid,
+  'status', status,
+  'receiveStartLsn', receive_start_lsn::text,
+  'receiveStartTli', receive_start_tli,
+  'writtenLsn', written_lsn::text,
+  'flushedLsn', flushed_lsn::text,
+  'receivedTli', received_tli,
+  'lastMsgSendTime', last_msg_send_time,
+  'lastMsgReceiptTime', last_msg_receipt_time,
+  'latestEndLsn', latest_end_lsn::text,
+  'latestEndTime', latest_end_time,
+  'slotName', slot_name,
+  'senderHost', sender_host,
+  'senderPort', sender_port,
+  'conninfo', conninfo
+)), '[]'::json)
+FROM pg_stat_wal_receiver;
+" 2>&1) || query_status=$?
+
+    if [[ "${query_status}" -eq 0 ]] && rows_json=$(printf '%s\n' "${output}" | jq -c . 2>/dev/null); then
+      append_jsonl "${snapshot_file}" \
+        observedAt "$(json_escape "${observed_at}")" \
+        phase "$(json_escape "${phase}")" \
+        member "$(json_escape "${member}")" \
+        service "$(json_escape "${service}")" \
+        ok true \
+        rows "${rows_json}" \
+        error "$(json_escape "")"
+      continue
+    fi
+
+    append_jsonl "${snapshot_file}" \
+      observedAt "$(json_escape "${observed_at}")" \
+      phase "$(json_escape "${phase}")" \
+      member "$(json_escape "${member}")" \
+      service "$(json_escape "${service}")" \
+      ok false \
+      rows "[]" \
+      error "$(json_escape "${output}")"
+  done
+}
+
+pacman_cluster_status_json() {
+  local service=${1:-pacman-primary}
+  local output
+
+  output=$(compose_exec "${service}" env \
+    "PACMANCTL_API_URL=http://${service}:8080" \
+    "PACMANCTL_API_TOKEN=lab-admin-token" \
+    pacmanctl cluster status -o json 2>&1) || return $?
+
+  printf '%s\n' "${output}" | jq -sc 'map(select(type == "object" and has("clusterName"))) | last // empty'
+}
+
 append_jsonl() {
   local path=$1
   shift
@@ -145,9 +330,38 @@ append_jsonl() {
 }
 
 current_primary_name() {
-  compose_exec pacman-primary /bin/sh -lc \
-    "PACMANCTL_API_URL=http://pacman-primary:8080 PACMANCTL_API_TOKEN=lab-admin-token pacmanctl cluster status -o json" |
+  pacman_cluster_status_json pacman-primary |
     jq -r '.currentPrimary // .current_primary // ""'
+}
+
+switchover_candidate_name() {
+  pacman_cluster_status_json pacman-primary |
+    jq -r '
+      (.currentPrimary // .current_primary // "") as $primary
+      | [
+          .members[]
+          | select((.name // "") != $primary)
+          | select(.healthy == true)
+          | select(((.needsRejoin // false) | not))
+          | select(((.role // "") == "replica") or ((.role // "") == "standby"))
+          | select(((.state // "") == "streaming") or ((.state // "") == "running"))
+          | .name
+        ][0] // ""
+    '
+}
+
+request_manual_switchover() {
+  local candidate=$1
+  local service=${2:-pacman-primary}
+
+  compose_exec "${service}" env \
+    "PACMANCTL_API_URL=http://${service}:8080" \
+    "PACMANCTL_API_TOKEN=lab-admin-token" \
+    pacmanctl cluster switchover \
+      -candidate "${candidate}" \
+      -reason "jepsen-manual-switchover" \
+      -requested-by "jepsen" \
+      -force
 }
 
 service_for_member() {
@@ -180,7 +394,7 @@ service_ip() {
 
 workload_op_table() {
   case "$1" in
-    append-smoke | append-failover) printf 'jepsen.append_values\n' ;;
+    append-smoke | append-failover | append-switchover) printf 'jepsen.append_values\n' ;;
     single-key-register) printf 'jepsen.register_values\n' ;;
     read-committed-txn | serializable-txn) printf 'jepsen.txn_ops\n' ;;
     *) return 1 ;;
@@ -576,6 +790,165 @@ EOF
   jq -e '.valid == true' "${checker_file}" >/dev/null
 }
 
+check_old_primary_rejoin_after_failover() {
+  local case_dir=$1
+  local observation_file="${case_dir}/primary-observations.jsonl"
+  local checker_file="${case_dir}/old-primary-rejoin-checker.json"
+
+  if [[ ! -s "${observation_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"old-primary-rejoin-after-failover","valid":false,"applicable":false,"observations":0,"samples":0,"error":"missing primary observations"}
+EOF
+    return 1
+  fi
+
+  jq -s '
+    def samples:
+      sort_by(.sampleId)
+      | group_by(.sampleId)
+      | map({
+          sampleId: .[0].sampleId,
+          observedAt: .[0].observedAt,
+          observations: .
+        });
+    def writable_members($sample):
+      $sample.observations
+      | map(select(.reachable == true and .writable == true));
+    def primary_of($sample):
+      writable_members($sample) | sort_by(.member) | .[0] // null;
+    def summarize_member:
+      {
+        member,
+        service,
+        reachable,
+        writable,
+        inRecovery,
+        timeline,
+        lsn,
+        error
+      };
+
+    samples as $samples
+    | ($samples[0] // null) as $initialSample
+    | ($samples[-1] // null) as $finalSample
+    | (if $initialSample == null then null else primary_of($initialSample) end) as $initialPrimary
+    | (if $finalSample == null then null else primary_of($finalSample) end) as $finalPrimary
+    | (($initialPrimary != null) and ($finalPrimary != null) and ($initialPrimary.member != $finalPrimary.member)) as $promotionObserved
+    | (
+        if ($promotionObserved | not) then null
+        else
+          $finalSample.observations
+          | map(select(.member == $initialPrimary.member))
+          | .[0] // null
+        end
+      ) as $oldPrimaryFinalState
+    | (
+        if ($promotionObserved | not) then true
+        elif $oldPrimaryFinalState == null then false
+        else
+          ($oldPrimaryFinalState.reachable == true)
+          and ($oldPrimaryFinalState.writable == false)
+          and ($oldPrimaryFinalState.inRecovery == true)
+          and (($oldPrimaryFinalState.timeline // 0) == ($finalPrimary.timeline // 0))
+        end
+      ) as $oldPrimaryRejoined
+    | {
+        checker: "old-primary-rejoin-after-failover",
+        valid: (
+          ($samples | length) > 0
+          and (
+            ($promotionObserved | not)
+            or $oldPrimaryRejoined
+          )
+        ),
+        applicable: $promotionObserved,
+        observations: length,
+        samples: ($samples | length),
+        promotionObserved: $promotionObserved,
+        initialPrimary: (if $initialPrimary == null then null else ($initialPrimary | summarize_member) end),
+        finalPrimary: (if $finalPrimary == null then null else ($finalPrimary | summarize_member) end),
+        oldPrimaryRejoined: $oldPrimaryRejoined,
+        oldPrimaryFinalState: (if $oldPrimaryFinalState == null then null else ($oldPrimaryFinalState | summarize_member) end)
+      }
+  ' "${observation_file}" >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
+}
+
+check_manual_switchover() {
+  local nemesis=$1
+  local case_dir=$2
+  local checker_file="${case_dir}/manual-switchover-checker.json"
+  local operation_file="${case_dir}/manual-switchover.json"
+  local observation_file="${case_dir}/primary-observations.jsonl"
+
+  if [[ "${nemesis}" != "switchover" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"manual-switchover","valid":true,"applicable":false}
+EOF
+    return 0
+  fi
+
+  if [[ ! -s "${operation_file}" || ! -s "${observation_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"manual-switchover","valid":false,"applicable":true,"error":"missing switchover operation metadata or primary observations"}
+EOF
+    return 1
+  fi
+
+  jq -n \
+    --slurpfile operation "${operation_file}" \
+    --slurpfile observations "${observation_file}" '
+      def samples:
+        $observations
+        | sort_by(.sampleId)
+        | group_by(.sampleId)
+        | map({
+            sampleId: .[0].sampleId,
+            observedAt: .[0].observedAt,
+            observations: .
+          });
+      def writable_members($sample):
+        $sample.observations
+        | map(select(.reachable == true and .writable == true));
+      def primary_of($sample):
+        writable_members($sample) | sort_by(.member) | .[0] // null;
+      def summarize_member:
+        {
+          member,
+          service,
+          reachable,
+          writable,
+          inRecovery,
+          timeline,
+          lsn,
+          error
+        };
+
+      ($operation[0] // {}) as $op
+      | samples as $samples
+      | ($samples[-1] // null) as $finalSample
+      | (if $finalSample == null then null else primary_of($finalSample) end) as $finalPrimary
+      | (($op.candidate // "") != "") as $hasCandidate
+      | (($op.exitStatus // 1) == 0) as $requestAccepted
+      | ($hasCandidate and $requestAccepted and $finalPrimary != null and ($finalPrimary.member == $op.candidate)) as $valid
+      | {
+          checker: "manual-switchover",
+          valid: $valid,
+          applicable: true,
+          requestedAt: ($op.requestedAt // null),
+          candidate: ($op.candidate // ""),
+          controlService: ($op.controlService // ""),
+          exitStatus: ($op.exitStatus // null),
+          requestAccepted: $requestAccepted,
+          finalPrimary: (if $finalPrimary == null then null else ($finalPrimary | summarize_member) end),
+          output: ($op.output // "")
+        }
+    ' >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
+}
+
 ensure_workload_schema() {
   psql_vip "
 CREATE SCHEMA IF NOT EXISTS jepsen;
@@ -649,6 +1022,7 @@ run_append_workload() {
   local isolation=${3:-read committed}
   local ops=${4:-${jepsen_default_ops}}
   local keys=${5:-${jepsen_default_keys}}
+  local op_delay=${6:-0}
   local history="${case_dir}/history.edn"
   local ack_file="${case_dir}/acknowledged-op-ids.txt"
   local failures="${case_dir}/failures.log"
@@ -681,6 +1055,10 @@ COMMIT;
     else
       write_case_event "${history}" "${client}" "fail" "append" \
         "{:op-id \"${op_id}\" :key ${key} :value \"${value}\" :primary \"${observed_primary}\"}"
+    fi
+
+    if [[ "${op}" -lt "${ops}" && "${op_delay}" != "0" ]]; then
+      sleep "${op_delay}"
     fi
   done
 }
@@ -902,7 +1280,9 @@ run_nemesis_profile() {
   case "${profile}" in
     none)
       printf '{:time "%s" :nemesis :none :action :start}\n' "$(timestamp_utc)" >>"${schedule_file}"
+      capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "" || true
       printf '{:time "%s" :nemesis :none :action :stop}\n' "$(timestamp_utc)" >>"${schedule_file}"
+      capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "" || true
       printf -v "${__pid_var}" '%s' ''
       return 0
       ;;
@@ -919,45 +1299,101 @@ run_nemesis_profile() {
       kill)
         printf '{:time "%s" :nemesis :kill :action :start :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
         stop_postgres "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         sleep "${jepsen_nemesis_hold_seconds}"
         start_postgres "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
         printf '{:time "%s" :nemesis :kill :action :stop :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
+        capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
+        ;;
+      switchover)
+        local candidate candidate_service output switchover_status requested_at
+        candidate=$(switchover_candidate_name 2>/dev/null || true)
+        candidate_service=$(service_for_member "${candidate}" 2>/dev/null || printf '')
+        requested_at="$(timestamp_utc)"
+        switchover_status=0
+
+        printf '{:time "%s" :nemesis :switchover :action :start :source "%s" :target "%s"}\n' \
+          "${requested_at}" "${member:-unknown}" "${candidate:-unknown}" >>"${schedule_file}"
+
+        if [[ -z "${candidate}" ]]; then
+          switchover_status=2
+          output="no healthy non-primary switchover candidate found"
+        else
+          output=$(request_manual_switchover "${candidate}" "${service}" 2>&1) || switchover_status=$?
+        fi
+
+        printf '%s\n' "${output}" >>"${run_dir}/nemesis.log"
+        jq -n \
+          --arg requestedAt "${requested_at}" \
+          --arg source "${member:-unknown}" \
+          --arg sourceService "${service}" \
+          --arg candidate "${candidate}" \
+          --arg candidateService "${candidate_service}" \
+          --arg controlService "${service}" \
+          --arg output "${output}" \
+          --argjson exitStatus "${switchover_status}" \
+          '{
+            requestedAt: $requestedAt,
+            source: $source,
+            sourceService: $sourceService,
+            candidate: $candidate,
+            candidateService: $candidateService,
+            controlService: $controlService,
+            exitStatus: $exitStatus,
+            output: $output
+          }' >"${run_dir}/manual-switchover.json"
+
+        capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "${candidate:-unknown}" "${service}" || true
+        sleep "${jepsen_nemesis_hold_seconds}"
+        printf '{:time "%s" :nemesis :switchover :action :stop :source "%s" :target "%s" :exit-status %s}\n' \
+          "$(timestamp_utc)" "${member:-unknown}" "${candidate:-unknown}" "${switchover_status}" >>"${schedule_file}"
+        capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${candidate:-unknown}" "${candidate_service:-${service}}" || true
         ;;
       packet)
         printf '{:time "%s" :nemesis :packet :action :start :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
         iptables_partition "${service}" ${peer_services} >>"${run_dir}/nemesis.log" 2>&1 || true
+        capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         sleep "${jepsen_nemesis_hold_seconds}"
         iptables_heal "${service}" ${peer_services} >>"${run_dir}/nemesis.log" 2>&1 || true
         printf '{:time "%s" :nemesis :packet :action :stop :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
+        capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         ;;
       packet,kill)
         printf '{:time "%s" :nemesis :packet-kill :action :start :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
         iptables_partition "${service}" ${peer_services} >>"${run_dir}/nemesis.log" 2>&1 || true
         stop_postgres "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         sleep "${jepsen_nemesis_hold_seconds}"
         start_postgres "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
         iptables_heal "${service}" ${peer_services} >>"${run_dir}/nemesis.log" 2>&1 || true
         printf '{:time "%s" :nemesis :packet-kill :action :stop :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
+        capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         ;;
       slow-network)
         printf '{:time "%s" :nemesis :slow-network :action :start :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
         slow_network_on "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         sleep "${jepsen_nemesis_hold_seconds}"
         slow_network_off "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
         printf '{:time "%s" :nemesis :slow-network :action :stop :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
+        capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         ;;
       repeated-failure)
         printf '{:time "%s" :nemesis :repeated-failure :action :start :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
         slow_network_on "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "slow-network" "${member:-unknown}" "${service}" || true
         sleep 3
         slow_network_off "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
         iptables_partition "${service}" ${peer_services} >>"${run_dir}/nemesis.log" 2>&1 || true
+        capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "packet" "${member:-unknown}" "${service}" || true
         sleep 3
         iptables_heal "${service}" ${peer_services} >>"${run_dir}/nemesis.log" 2>&1 || true
         stop_postgres "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "kill" "${member:-unknown}" "${service}" || true
         sleep "${jepsen_nemesis_hold_seconds}"
         start_postgres "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
         printf '{:time "%s" :nemesis :repeated-failure :action :stop :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
+        capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         ;;
       *)
         printf 'unsupported nemesis profile: %s\n' "${profile}" >>"${run_dir}/nemesis.log"
@@ -998,6 +1434,9 @@ run_workload_profile() {
     append-smoke | append-failover)
       run_append_workload "${run_id}" "${case_dir}" "read committed"
       ;;
+    append-switchover)
+      run_append_workload "${run_id}" "${case_dir}" "read committed" "${jepsen_default_ops}" "${jepsen_default_keys}" "${jepsen_append_switchover_op_delay}"
+      ;;
     single-key-register)
       run_register_workload "${run_id}" "${case_dir}" "read committed"
       ;;
@@ -1020,7 +1459,7 @@ check_workload_profile() {
   local case_dir=$3
 
   case "${workload}" in
-    append-smoke | append-failover)
+    append-smoke | append-failover | append-switchover)
       check_append_workload "${run_id}" "${case_dir}"
       ;;
     single-key-register)
@@ -1054,11 +1493,13 @@ run_jepsen_case() {
   : >"${case_dir}/history.edn"
   : >"${case_dir}/nemesis.log"
   : >"${case_dir}/primary-observations.jsonl"
+  : >"${case_dir}/pacman-cluster-snapshots.jsonl"
 
   write_edn_event "${campaign_history}" "${workload}/${nemesis}" "invoke" "\"${run_id}\""
   write_case_event "${case_dir}/history.edn" ":case" "invoke" "workload" \
     "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\"}"
 
+  capture_pacman_cluster_snapshot "${case_dir}" "before-nemesis" "${nemesis}" "" || true
   sample_primary_state 0 "${case_dir}/primary-observations.jsonl"
 
   local primary_sampler_pid=""
@@ -1072,7 +1513,10 @@ run_jepsen_case() {
   wait_for_nemesis "${nemesis_pid}"
   settle_after_nemesis "${nemesis}" "${case_dir}"
   stop_primary_sampler "${primary_sampler_pid}"
+  capture_pacman_cluster_snapshot "${case_dir}" "after-settle" "${nemesis}" "" || true
   sample_primary_state 1000000000 "${case_dir}/primary-observations.jsonl"
+  capture_pg_stat_replication "${case_dir}" "final" || true
+  capture_pg_stat_wal_receiver "${case_dir}" "final" || true
 
   local workload_checker_status=0
   check_workload_profile "${workload}" "${run_id}" "${case_dir}" || workload_checker_status=$?
@@ -1086,7 +1530,13 @@ run_jepsen_case() {
   local timeline_checker_status=0
   check_timeline_convergence "${case_dir}" || timeline_checker_status=$?
 
-  if [[ "${workload_status}" -eq 0 && "${workload_checker_status}" -eq 0 && "${primary_checker_status}" -eq 0 && "${acknowledged_checker_status}" -eq 0 && "${timeline_checker_status}" -eq 0 ]]; then
+  local old_primary_rejoin_checker_status=0
+  check_old_primary_rejoin_after_failover "${case_dir}" || old_primary_rejoin_checker_status=$?
+
+  local manual_switchover_checker_status=0
+  check_manual_switchover "${nemesis}" "${case_dir}" || manual_switchover_checker_status=$?
+
+  if [[ "${workload_status}" -eq 0 && "${workload_checker_status}" -eq 0 && "${primary_checker_status}" -eq 0 && "${acknowledged_checker_status}" -eq 0 && "${timeline_checker_status}" -eq 0 && "${old_primary_rejoin_checker_status}" -eq 0 && "${manual_switchover_checker_status}" -eq 0 ]]; then
     write_case_event "${case_dir}/history.edn" ":case" "ok" "workload" \
       "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\"}"
     cat "${case_dir}/history.edn" >>"${run_dir}/jepsen-history.edn"
@@ -1096,10 +1546,10 @@ run_jepsen_case() {
   fi
 
   write_case_event "${case_dir}/history.edn" ":case" "fail" "workload" \
-    "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\" :workload-status ${workload_status} :workload-checker-status ${workload_checker_status} :primary-checker-status ${primary_checker_status} :acknowledged-checker-status ${acknowledged_checker_status} :timeline-checker-status ${timeline_checker_status}}"
+    "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\" :workload-status ${workload_status} :workload-checker-status ${workload_checker_status} :primary-checker-status ${primary_checker_status} :acknowledged-checker-status ${acknowledged_checker_status} :timeline-checker-status ${timeline_checker_status} :old-primary-rejoin-checker-status ${old_primary_rejoin_checker_status} :manual-switchover-checker-status ${manual_switchover_checker_status}}"
   cat "${case_dir}/history.edn" >>"${run_dir}/jepsen-history.edn"
   write_edn_event "${campaign_history}" "${workload}/${nemesis}" "fail" "\"${run_id}\""
-  record_case_result "${case_results}" "${workload}" "${nemesis}" "false" "workload_status=${workload_status} workload_checker_status=${workload_checker_status} primary_checker_status=${primary_checker_status} acknowledged_checker_status=${acknowledged_checker_status} timeline_checker_status=${timeline_checker_status}"
+  record_case_result "${case_results}" "${workload}" "${nemesis}" "false" "workload_status=${workload_status} workload_checker_status=${workload_checker_status} primary_checker_status=${primary_checker_status} acknowledged_checker_status=${acknowledged_checker_status} timeline_checker_status=${timeline_checker_status} old_primary_rejoin_checker_status=${old_primary_rejoin_checker_status} manual_switchover_checker_status=${manual_switchover_checker_status}"
   return 1
 }
 

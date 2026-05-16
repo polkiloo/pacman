@@ -61,8 +61,8 @@ Implement these before expanding the campaign matrix.
 - [x] `append-smoke:none`
 - [x] `append-failover:kill`
 - [x] `append-failover:packet`
-- [ ] `append-failover:packet,kill`
-- [ ] old primary rejoin after failover
+- [x] `append-failover:packet,kill`
+- [x] old primary rejoin after failover
 
 ### Observability
 
@@ -75,16 +75,16 @@ Collect these for every MVP-1 run:
 - [x] PostgreSQL logs.
 - [x] PACMAN logs.
 - [x] DCS logs.
-- [ ] PACMAN cluster snapshot before, during, and after each nemesis window.
+- [x] PACMAN cluster snapshot before, during, and after each nemesis window.
 - [x] PostgreSQL role/timeline/LSN snapshot from every data node.
-- [ ] `pg_stat_replication` from the current primary.
-- [ ] `pg_stat_wal_receiver` from replicas.
+- [x] `pg_stat_replication` from the current primary.
+- [x] `pg_stat_wal_receiver` from replicas.
 
 ## MVP-2: Strong HA Behavior
 
 Implement after MVP-1 is stable and repeatable.
 
-- [ ] Manual switchover under append workload.
+- [x] Manual switchover under append workload.
 - [ ] Primary-alone network partition.
 - [ ] Isolate primary from DCS while client traffic remains available.
 - [ ] DCS traffic blocked while replication stays healthy.
