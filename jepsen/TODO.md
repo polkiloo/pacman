@@ -84,7 +84,7 @@ Collect these for every MVP-1 run:
 
 Implement after MVP-1 is stable and repeatable.
 
-- [ ] Manual switchover under append workload.
+- [x] Manual switchover under append workload.
 - [ ] Primary-alone network partition.
 - [ ] Isolate primary from DCS while client traffic remains available.
 - [ ] DCS traffic blocked while replication stays healthy.

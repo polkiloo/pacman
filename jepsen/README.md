@@ -19,6 +19,7 @@ the broader implemented matrix:
 
 ```text
 append-smoke:none
+append-switchover:switchover
 append-failover:kill
 append-failover:packet
 append-failover:packet,kill
@@ -28,15 +29,17 @@ serializable-txn:packet,kill
 append-failover:repeated-failure
 ```
 
-After the nightly cases finish, the harness runs one manual switchover using
-the current cluster membership to select a healthy non-primary target. This
-keeps the post-campaign switchover valid even when an earlier nemesis case has
-already moved the primary.
+The `append-switchover:switchover` case issues a manual PACMAN switchover while
+append writes are in flight. After the nightly cases finish, the harness also
+runs one post-campaign manual switchover using the current cluster membership to
+select a healthy non-primary target. This keeps the final switchover valid even
+when an earlier nemesis case has already moved the primary.
 
 Run one case at a time by name:
 
 ```bash
 make jepsen-docker-case-append-smoke-none
+make jepsen-docker-case-append-switchover-switchover
 make jepsen-docker-case-append-failover-kill
 make jepsen-docker-case-append-failover-packet
 make jepsen-docker-case-append-failover-packet-kill
@@ -63,6 +66,7 @@ PACMAN_JEPSEN_CASES="single-key-register:packet read-committed-txn:slow-network"
 Implemented workload profiles:
 
 - `append-smoke`
+- `append-switchover`
 - `append-failover`
 - `single-key-register`
 - `read-committed-txn`
@@ -71,6 +75,7 @@ Implemented workload profiles:
 Implemented nemesis profiles:
 
 - `none`
+- `switchover`
 - `kill`
 - `packet`
 - `packet,kill`
@@ -98,10 +103,10 @@ Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
 `case-results.jsonl`, per-case `history.edn`, workload `checker.json`,
 `primary-observations.jsonl`, `single-primary-checker.json`,
 `acknowledged-write-checker.json`, `timeline-checker.json`,
-`old-primary-rejoin-checker.json`, `pacman-cluster-snapshots.jsonl`,
-`pg-stat-replication.json`, `pg-stat-wal-receiver.jsonl`, nemesis logs, PACMAN
-cluster/history snapshots, Docker logs, PostgreSQL logs, and a small `index.html`
-for operator review.
+`old-primary-rejoin-checker.json`, `manual-switchover-checker.json`,
+`pacman-cluster-snapshots.jsonl`, `pg-stat-replication.json`,
+`pg-stat-wal-receiver.jsonl`, nemesis logs, PACMAN cluster/history snapshots,
+Docker logs, PostgreSQL logs, and a small `index.html` for operator review.
 
 This harness deliberately uses the existing `deploy/lab` topology, which is
 three PACMAN data nodes plus external etcd. The broader Jepsen plan in

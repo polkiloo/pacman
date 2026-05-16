@@ -122,6 +122,7 @@ write_summary() {
         -name 'acknowledged-write-checker.json' -o \
         -name 'timeline-checker.json' -o \
         -name 'old-primary-rejoin-checker.json' -o \
+        -name 'manual-switchover-checker.json' -o \
         -name 'primary-observations.jsonl' -o \
         -name 'pacman-cluster-snapshots.jsonl' -o \
         -name 'pg-stat-wal-receiver.jsonl' -o \
