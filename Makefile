@@ -64,7 +64,7 @@ LDFLAGS := -X github.com/polkiloo/pacman/internal/version.Version=$(VERSION) \
 	-X github.com/polkiloo/pacman/internal/version.Commit=$(COMMIT) \
 	-X github.com/polkiloo/pacman/internal/version.BuildDate=$(BUILD_DATE)
 
-.PHONY: fmt test test-dcs-conformance test-integration test-integration-control-plane test-integration-patroni test-integration-postgres test-integration-ha test-integration-install jepsen-ci-check jepsen-list-cases jepsen-smoke jepsen-nightly jepsen-case jepsen-case-append-smoke-none jepsen-case-append-switchover-switchover jepsen-case-append-failover-kill jepsen-case-append-failover-packet jepsen-case-append-failover-packet-kill jepsen-case-single-key-register-packet jepsen-case-read-committed-txn-slow-network jepsen-case-serializable-txn-packet-kill jepsen-case-append-failover-repeated-failure jepsen-docker-smoke jepsen-docker-nightly jepsen-docker-case jepsen-docker-case-append-smoke-none jepsen-docker-case-append-switchover-switchover jepsen-docker-case-append-failover-kill jepsen-docker-case-append-failover-packet jepsen-docker-case-append-failover-packet-kill jepsen-docker-case-single-key-register-packet jepsen-docker-case-read-committed-txn-slow-network jepsen-docker-case-serializable-txn-packet-kill jepsen-docker-case-append-failover-repeated-failure docker-build-test-image docker-build-pgext-image docker-build-ansible-install-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl build-pg-extension package-pg-extension install-pg-extension clean-pg-extension tidy clean openapi-codegen-check rpm rpm-builder-image rpm-validate ansible-validate
+.PHONY: fmt test test-dcs-conformance test-integration test-integration-control-plane test-integration-patroni test-integration-postgres test-integration-ha test-integration-install jepsen-ci-check jepsen-list-cases jepsen-smoke jepsen-nightly jepsen-case jepsen-case-append-smoke-none jepsen-case-append-switchover-switchover jepsen-case-append-failover-kill jepsen-case-append-failover-packet jepsen-case-append-failover-packet-kill jepsen-case-append-failover-primary-dcs-partition jepsen-case-single-key-register-packet jepsen-case-read-committed-txn-slow-network jepsen-case-serializable-txn-packet-kill jepsen-case-append-failover-repeated-failure jepsen-docker-smoke jepsen-docker-nightly jepsen-docker-case jepsen-docker-case-append-smoke-none jepsen-docker-case-append-switchover-switchover jepsen-docker-case-append-failover-kill jepsen-docker-case-append-failover-packet jepsen-docker-case-append-failover-packet-kill jepsen-docker-case-append-failover-primary-dcs-partition jepsen-docker-case-single-key-register-packet jepsen-docker-case-read-committed-txn-slow-network jepsen-docker-case-serializable-txn-packet-kill jepsen-docker-case-append-failover-repeated-failure docker-build-test-image docker-build-pgext-image docker-build-ansible-install-image coverage coverage-check lint lint-install build build-pacmand build-pacmanctl build-pg-extension package-pg-extension install-pg-extension clean-pg-extension tidy clean openapi-codegen-check rpm rpm-builder-image rpm-validate ansible-validate
 
 fmt:
 	$(GO) fmt ./...
@@ -132,12 +132,15 @@ jepsen-list-cases:
 	./jepsen/bin/list-cases
 
 jepsen-smoke:
+	$(MAKE) rpm RPM_OUTPUT_DIR=$(PACMAN_ANSIBLE_INSTALL_RPM_DIR)
 	$(JEPSEN_CI_SCRIPT) smoke
 
 jepsen-nightly:
+	$(MAKE) rpm RPM_OUTPUT_DIR=$(PACMAN_ANSIBLE_INSTALL_RPM_DIR)
 	$(JEPSEN_CI_SCRIPT) nightly
 
 jepsen-case:
+	$(MAKE) rpm RPM_OUTPUT_DIR=$(PACMAN_ANSIBLE_INSTALL_RPM_DIR)
 	$(JEPSEN_CI_SCRIPT) case $(PACMAN_JEPSEN_CASE)
 
 jepsen-case-append-smoke-none:
@@ -154,6 +157,9 @@ jepsen-case-append-failover-packet:
 
 jepsen-case-append-failover-packet-kill:
 	$(MAKE) jepsen-case PACMAN_JEPSEN_CASE=append-failover-packet-kill
+
+jepsen-case-append-failover-primary-dcs-partition:
+	$(MAKE) jepsen-case PACMAN_JEPSEN_CASE=append-failover-primary-dcs-partition
 
 jepsen-case-single-key-register-packet:
 	$(MAKE) jepsen-case PACMAN_JEPSEN_CASE=single-key-register-packet
@@ -193,6 +199,9 @@ jepsen-docker-case-append-failover-packet:
 
 jepsen-docker-case-append-failover-packet-kill:
 	$(MAKE) jepsen-docker-case PACMAN_JEPSEN_CASE=append-failover-packet-kill
+
+jepsen-docker-case-append-failover-primary-dcs-partition:
+	$(MAKE) jepsen-docker-case PACMAN_JEPSEN_CASE=append-failover-primary-dcs-partition
 
 jepsen-docker-case-single-key-register-packet:
 	$(MAKE) jepsen-docker-case PACMAN_JEPSEN_CASE=single-key-register-packet

@@ -103,7 +103,7 @@ EOF
 <li><a href="nemesis-schedule.edn">nemesis-schedule.edn</a></li>
 <li><a href="pacman-cluster-after.json">pacman-cluster-after.json</a></li>
 <li><a href="pacman-history.json">pacman-history.json</a></li>
-<li>Per-case: primary-observations.jsonl, pacman-cluster-snapshots.jsonl, pg-stat-replication.json, pg-stat-wal-receiver.jsonl, single-primary-checker.json, acknowledged-write-checker.json, timeline-checker.json, old-primary-rejoin-checker.json, and manual-switchover-checker.json</li>
+<li>Per-case: primary-observations.jsonl, pacman-cluster-snapshots.jsonl, pg-stat-replication.json, pg-stat-wal-receiver.jsonl, single-primary-checker.json, acknowledged-write-checker.json, timeline-checker.json, old-primary-rejoin-checker.json, manual-switchover-checker.json, and client-traffic-during-nemesis-checker.json</li>
 </ul>
 </body>
 </html>
@@ -115,7 +115,7 @@ bootstrap_lab() {
     "${repo_root}/deploy/lab/scripts/reset-state.sh"
   fi
 
-  PACMAN_LAB_AUTO_PREPARE=false \
+  PACMAN_LAB_AUTO_PREPARE="${PACMAN_LAB_AUTO_PREPARE:-false}" \
     PACMAN_LAB_WAIT_FOR_OBSERVABILITY=false \
     "${repo_root}/deploy/lab/scripts/bootstrap-cluster.sh"
 }

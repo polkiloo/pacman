@@ -24,6 +24,10 @@ find_runtime_rpm() {
   local candidate name
   local candidates=()
 
+  if [[ ! -d "${rpm_dir}" ]]; then
+    return 1
+  fi
+
   while IFS= read -r candidate; do
     candidates+=("${candidate}")
   done < <(find "${rpm_dir}" -maxdepth 1 -type f -name 'pacman-*.rpm' ! -name 'pacman-postgresql17-agent-*' ! -name '*.src.rpm' -print | sort)

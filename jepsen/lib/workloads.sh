@@ -16,7 +16,7 @@ jepsen_primary_sample_interval="${PACMAN_JEPSEN_PRIMARY_SAMPLE_INTERVAL_SECONDS:
 jepsen_allow_async_loss="${PACMAN_JEPSEN_ALLOW_ASYNC_LOSS:-false}"
 jepsen_append_switchover_op_delay="${PACMAN_JEPSEN_APPEND_SWITCHOVER_OP_DELAY_SECONDS:-1}"
 jepsen_smoke_cases_default="append-smoke:none"
-jepsen_nightly_cases_default="append-smoke:none append-switchover:switchover append-failover:kill append-failover:packet append-failover:packet,kill single-key-register:packet read-committed-txn:slow-network serializable-txn:packet,kill append-failover:repeated-failure"
+jepsen_nightly_cases_default="append-smoke:none append-switchover:switchover append-failover:kill append-failover:packet append-failover:packet,kill append-failover:primary-dcs-partition single-key-register:packet read-committed-txn:slow-network serializable-txn:packet,kill append-failover:repeated-failure"
 
 jepsen_default_cases() {
   case "$1" in
@@ -45,6 +45,7 @@ append-switchover-switchover append-switchover:switchover Append workload while 
 append-failover-kill append-failover:kill Append workload while killing current primary PostgreSQL.
 append-failover-packet append-failover:packet Append workload while partitioning the current primary.
 append-failover-packet-kill append-failover:packet,kill Append workload while partitioning and killing the current primary.
+append-failover-primary-dcs-partition append-failover:primary-dcs-partition Append workload while isolating the current primary from DCS only.
 single-key-register-packet single-key-register:packet Register workload while partitioning the current primary.
 read-committed-txn-slow-network read-committed-txn:slow-network Read committed transaction workload under latency and loss.
 serializable-txn-packet-kill serializable-txn:packet,kill Serializable transaction workload under partition plus kill.
@@ -61,6 +62,7 @@ resolve_jepsen_case_spec() {
     append-failover-kill | append-failover:kill) printf 'append-failover:kill\n' ;;
     append-failover-packet | append-failover:packet) printf 'append-failover:packet\n' ;;
     append-failover-packet-kill | append-failover:packet,kill) printf 'append-failover:packet,kill\n' ;;
+    append-failover-primary-dcs-partition | append-failover:primary-dcs-partition) printf 'append-failover:primary-dcs-partition\n' ;;
     single-key-register-packet | single-key-register:packet) printf 'single-key-register:packet\n' ;;
     read-committed-txn-slow-network | read-committed-txn:slow-network) printf 'read-committed-txn:slow-network\n' ;;
     serializable-txn-packet-kill | serializable-txn:packet,kill) printf 'serializable-txn:packet,kill\n' ;;
@@ -957,6 +959,41 @@ EOF
   jq -e '.valid == true' "${checker_file}" >/dev/null
 }
 
+check_client_traffic_during_nemesis() {
+  local nemesis=$1
+  local case_dir=$2
+  local checker_file="${case_dir}/client-traffic-during-nemesis-checker.json"
+  local sample_file="${case_dir}/client-traffic-during-nemesis.jsonl"
+
+  if [[ "${nemesis}" != "primary-dcs-partition" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"client-traffic-during-nemesis","valid":true,"applicable":false}
+EOF
+    return 0
+  fi
+
+  if [[ ! -s "${sample_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"client-traffic-during-nemesis","valid":false,"applicable":true,"error":"missing client traffic probe samples"}
+EOF
+    return 1
+  fi
+
+  jq -s '
+    {
+      checker: "client-traffic-during-nemesis",
+      valid: (map(select(.ok == true)) | length > 0),
+      applicable: true,
+      samples: length,
+      successfulSamples: (map(select(.ok == true)) | length),
+      failedSamples: (map(select(.ok != true)) | length),
+      observations: .
+    }
+  ' "${sample_file}" >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
+}
+
 ensure_workload_schema() {
   psql_vip "
 CREATE SCHEMA IF NOT EXISTS jepsen;
@@ -995,6 +1032,11 @@ CREATE TABLE IF NOT EXISTS jepsen.txn_ops (
   observed_primary text NOT NULL,
   isolation text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS jepsen.client_availability_probes (
+  probe_id text PRIMARY KEY,
+  nemesis text NOT NULL,
+  observed_at timestamptz NOT NULL DEFAULT now()
 );
 " >/dev/null
 }
@@ -1250,6 +1292,40 @@ iptables_heal() {
   done
 }
 
+record_client_traffic_probe() {
+  local case_dir=$1
+  local nemesis=$2
+  local probe_id=$3
+  local sample_file="${case_dir}/client-traffic-during-nemesis.jsonl"
+  local observed_at output status
+
+  observed_at="$(timestamp_utc)"
+  status=0
+  output=$(psql_vip "
+INSERT INTO jepsen.client_availability_probes(probe_id, nemesis)
+VALUES ($(sql_literal "${probe_id}"), $(sql_literal "${nemesis}"))
+ON CONFLICT (probe_id) DO NOTHING;
+" 2>&1) || status=$?
+
+  if [[ "${status}" -eq 0 ]]; then
+    append_jsonl "${sample_file}" \
+      observedAt "$(json_escape "${observed_at}")" \
+      nemesis "$(json_escape "${nemesis}")" \
+      probeId "$(json_escape "${probe_id}")" \
+      ok true \
+      error "$(json_escape "")"
+    return 0
+  fi
+
+  append_jsonl "${sample_file}" \
+    observedAt "$(json_escape "${observed_at}")" \
+    nemesis "$(json_escape "${nemesis}")" \
+    probeId "$(json_escape "${probe_id}")" \
+    ok false \
+    error "$(json_escape "${output}")"
+  return 1
+}
+
 slow_network_on() {
   local service=$1
 
@@ -1375,6 +1451,16 @@ run_nemesis_profile() {
         start_postgres "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
         iptables_heal "${service}" ${peer_services} >>"${run_dir}/nemesis.log" 2>&1 || true
         printf '{:time "%s" :nemesis :packet-kill :action :stop :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
+        capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
+        ;;
+      primary-dcs-partition)
+        printf '{:time "%s" :nemesis :primary-dcs-partition :action :start :target "%s" :dcs "alpha-dcs"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
+        iptables_partition "${service}" pacman-dcs >>"${run_dir}/nemesis.log" 2>&1 || true
+        record_client_traffic_probe "${run_dir}" "${profile}" "${member:-unknown}-dcs-isolated" >>"${run_dir}/nemesis.log" 2>&1 || true
+        capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
+        sleep "${jepsen_nemesis_hold_seconds}"
+        iptables_heal "${service}" pacman-dcs >>"${run_dir}/nemesis.log" 2>&1 || true
+        printf '{:time "%s" :nemesis :primary-dcs-partition :action :stop :target "%s" :dcs "alpha-dcs"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         ;;
       slow-network)
@@ -1544,7 +1630,10 @@ run_jepsen_case() {
   local manual_switchover_checker_status=0
   check_manual_switchover "${nemesis}" "${case_dir}" || manual_switchover_checker_status=$?
 
-  if [[ "${workload_status}" -eq 0 && "${workload_checker_status}" -eq 0 && "${primary_checker_status}" -eq 0 && "${acknowledged_checker_status}" -eq 0 && "${timeline_checker_status}" -eq 0 && "${old_primary_rejoin_checker_status}" -eq 0 && "${manual_switchover_checker_status}" -eq 0 ]]; then
+  local client_traffic_checker_status=0
+  check_client_traffic_during_nemesis "${nemesis}" "${case_dir}" || client_traffic_checker_status=$?
+
+  if [[ "${workload_status}" -eq 0 && "${workload_checker_status}" -eq 0 && "${primary_checker_status}" -eq 0 && "${acknowledged_checker_status}" -eq 0 && "${timeline_checker_status}" -eq 0 && "${old_primary_rejoin_checker_status}" -eq 0 && "${manual_switchover_checker_status}" -eq 0 && "${client_traffic_checker_status}" -eq 0 ]]; then
     write_case_event "${case_dir}/history.edn" ":case" "ok" "workload" \
       "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\"}"
     cat "${case_dir}/history.edn" >>"${run_dir}/jepsen-history.edn"
@@ -1553,10 +1642,10 @@ run_jepsen_case() {
     return 0
   fi
 
-  local failure_details="workload_status=${workload_status} workload_checker_status=${workload_checker_status} primary_checker_status=${primary_checker_status} acknowledged_checker_status=${acknowledged_checker_status} timeline_checker_status=${timeline_checker_status} old_primary_rejoin_checker_status=${old_primary_rejoin_checker_status} manual_switchover_checker_status=${manual_switchover_checker_status}"
+  local failure_details="workload_status=${workload_status} workload_checker_status=${workload_checker_status} primary_checker_status=${primary_checker_status} acknowledged_checker_status=${acknowledged_checker_status} timeline_checker_status=${timeline_checker_status} old_primary_rejoin_checker_status=${old_primary_rejoin_checker_status} manual_switchover_checker_status=${manual_switchover_checker_status} client_traffic_checker_status=${client_traffic_checker_status}"
 
   write_case_event "${case_dir}/history.edn" ":case" "fail" "workload" \
-    "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\" :workload-status ${workload_status} :workload-checker-status ${workload_checker_status} :primary-checker-status ${primary_checker_status} :acknowledged-checker-status ${acknowledged_checker_status} :timeline-checker-status ${timeline_checker_status} :old-primary-rejoin-checker-status ${old_primary_rejoin_checker_status} :manual-switchover-checker-status ${manual_switchover_checker_status}}"
+    "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\" :workload-status ${workload_status} :workload-checker-status ${workload_checker_status} :primary-checker-status ${primary_checker_status} :acknowledged-checker-status ${acknowledged_checker_status} :timeline-checker-status ${timeline_checker_status} :old-primary-rejoin-checker-status ${old_primary_rejoin_checker_status} :manual-switchover-checker-status ${manual_switchover_checker_status} :client-traffic-checker-status ${client_traffic_checker_status}}"
   cat "${case_dir}/history.edn" >>"${run_dir}/jepsen-history.edn"
   write_edn_event "${campaign_history}" "${workload}/${nemesis}" "fail" "\"${run_id}\""
   record_case_result "${case_results}" "${workload}" "${nemesis}" "false" "${failure_details}"

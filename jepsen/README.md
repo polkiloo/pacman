@@ -24,6 +24,7 @@ append-switchover:switchover
 append-failover:kill
 append-failover:packet
 append-failover:packet,kill
+append-failover:primary-dcs-partition
 single-key-register:packet
 read-committed-txn:slow-network
 serializable-txn:packet,kill
@@ -46,6 +47,7 @@ make jepsen-docker-case-append-switchover-switchover
 make jepsen-docker-case-append-failover-kill
 make jepsen-docker-case-append-failover-packet
 make jepsen-docker-case-append-failover-packet-kill
+make jepsen-docker-case-append-failover-primary-dcs-partition
 make jepsen-docker-case-single-key-register-packet
 make jepsen-docker-case-read-committed-txn-slow-network
 make jepsen-docker-case-serializable-txn-packet-kill
@@ -82,6 +84,7 @@ Implemented nemesis profiles:
 - `kill`
 - `packet`
 - `packet,kill`
+- `primary-dcs-partition`
 - `slow-network`
 - `repeated-failure`
 
@@ -107,6 +110,7 @@ Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
 `primary-observations.jsonl`, `single-primary-checker.json`,
 `acknowledged-write-checker.json`, `timeline-checker.json`,
 `old-primary-rejoin-checker.json`, `manual-switchover-checker.json`,
+`client-traffic-during-nemesis-checker.json`,
 `pacman-cluster-snapshots.jsonl`, `pg-stat-replication.json`,
 `pg-stat-wal-receiver.jsonl`, nemesis logs, PACMAN cluster/history snapshots,
 Docker logs, PostgreSQL logs, and a small `index.html` for operator review.
