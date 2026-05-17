@@ -554,3 +554,179 @@ EOF
 
   jq -e '.valid == true' "${checker_file}" >/dev/null
 }
+
+check_failover_chain() {
+  local nemesis=$1
+  local case_dir=$2
+  local checker_file="${case_dir}/failover-chain-checker.json"
+  local chain_file="${case_dir}/failover-chain.jsonl"
+  local observation_file="${case_dir}/primary-observations.jsonl"
+
+  if [[ "${nemesis}" != "failover-chain" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"failover-chain","valid":true,"applicable":false}
+EOF
+    return 0
+  fi
+
+  if [[ ! -s "${chain_file}" || ! -s "${observation_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"failover-chain","valid":false,"applicable":true,"error":"missing failover chain metadata or primary observations"}
+EOF
+    return 1
+  fi
+
+  jq -n \
+    --slurpfile steps "${chain_file}" \
+    --slurpfile observations "${observation_file}" '
+      def writable_members:
+        map(select(.reachable == true and .writable == true) | .member)
+        | unique
+        | sort;
+      ($steps | map(select((.exitStatus // 1) == 0))) as $successfulSteps
+      | ($observations | writable_members) as $writableMembers
+      | {
+          checker: "failover-chain",
+          valid: (
+            ($steps | length) >= 2
+            and ($successfulSteps | length) == ($steps | length)
+            and (["alpha-1", "alpha-2", "alpha-3"] - $writableMembers | length) == 0
+          ),
+          applicable: true,
+          steps: ($steps | length),
+          successfulSteps: ($successfulSteps | length),
+          writablePrimaryMembers: $writableMembers,
+          chain: $steps
+        }
+    ' >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
+}
+
+check_open_transaction_during_failover() {
+  local workload=$1
+  local case_dir=$2
+  local checker_file="${case_dir}/open-transaction-checker.json"
+  local metadata_file="${case_dir}/open-transaction.json"
+  local ack_file="${case_dir}/acknowledged-op-ids.txt"
+
+  if [[ "${workload}" != "open-transaction-failover" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"open-transaction-during-failover","valid":true,"applicable":false}
+EOF
+    return 0
+  fi
+
+  if [[ ! -s "${metadata_file}" || ! -s "${ack_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"open-transaction-during-failover","valid":false,"applicable":true,"error":"missing open transaction metadata or acknowledged writes"}
+EOF
+    return 1
+  fi
+
+  jq -n \
+    --slurpfile metadata "${metadata_file}" \
+    --argjson acknowledged "$(json_array_from_file "${ack_file}")" '
+      ($metadata[0] // {}) as $meta
+      | ($acknowledged | index($meta.preOpId // "")) as $preAcked
+      | ($acknowledged | index($meta.openOpId // "")) as $openAcked
+      | ($acknowledged | index($meta.postOpId // "")) as $postAcked
+      | (($meta.openExitStatus // 1) == 0) as $openCommitted
+      | {
+          checker: "open-transaction-during-failover",
+          valid: (
+            ($preAcked != null)
+            and ($postAcked != null)
+            and (
+              ($openCommitted and ($openAcked != null))
+              or (($openCommitted | not) and ($openAcked == null))
+            )
+          ),
+          applicable: true,
+          preAcked: ($preAcked != null),
+          openCommitted: $openCommitted,
+          openAcked: ($openAcked != null),
+          postAcked: ($postAcked != null),
+          metadata: $meta
+        }
+    ' >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
+}
+
+check_vip_write_routing() {
+  local workload=$1
+  local nemesis=$2
+  local case_dir=$3
+  local checker_file="${case_dir}/vip-routing-checker.json"
+  local route_file="${case_dir}/vip-routing.jsonl"
+
+  if [[ "${workload}" != "vip-routing" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"vip-write-routing","valid":true,"applicable":false}
+EOF
+    return 0
+  fi
+
+  if [[ ! -s "${route_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"vip-write-routing","valid":false,"applicable":true,"error":"missing VIP routing samples"}
+EOF
+    return 1
+  fi
+
+  jq -s --arg nemesis "${nemesis}" '
+    def known($value): (($value // "") != "" and ($value // "") != "unknown");
+    def stable:
+      known(.pacmanPrimaryBefore)
+      and known(.pacmanPrimaryAfter)
+      and known(.vipHolderBefore)
+      and known(.vipHolderAfter)
+      and .pacmanPrimaryBefore == .pacmanPrimaryAfter
+      and .vipHolderBefore == .vipHolderAfter;
+    def successful_stable_matches:
+      map(select(
+        .ok == true
+        and (.inRecovery == false)
+        and stable
+        and .pacmanPrimaryBefore == .vipHolderBefore
+      ));
+    def routed_to_replica_violations:
+      map(select(.ok == true and .inRecovery == true));
+    def stable_primary_mismatch_violations:
+      map(select(
+        .ok == true
+        and stable
+        and .pacmanPrimaryBefore != .vipHolderBefore
+      ));
+
+    successful_stable_matches as $matches
+    | routed_to_replica_violations as $replicaViolations
+    | stable_primary_mismatch_violations as $mismatchViolations
+    | ($matches | map(.pacmanPrimaryBefore) | unique | sort) as $matchedPrimaries
+    | {
+        checker: "vip-write-routing",
+        valid: (
+          (map(select(.ok == true)) | length) > 0
+          and ($replicaViolations | length) == 0
+          and ($mismatchViolations | length) == 0
+          and (
+            if $nemesis == "switchover"
+            then ($matchedPrimaries | length) >= 2
+            else ($matchedPrimaries | length) >= 1
+            end
+          )
+        ),
+        applicable: true,
+        samples: length,
+        successfulWrites: (map(select(.ok == true)) | length),
+        failedWrites: (map(select(.ok != true)) | length),
+        matchedPrimaryMembers: $matchedPrimaries,
+        routedToReplicaViolations: $replicaViolations,
+        stablePrimaryMismatchViolations: $mismatchViolations,
+        observations: .
+      }
+  ' "${route_file}" >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
+}

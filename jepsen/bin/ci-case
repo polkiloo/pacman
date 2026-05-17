@@ -55,22 +55,30 @@ trap finish EXIT
 
 : >"${run_dir}/nemesis-schedule.edn"
 
-write_edn_event "${history_file}" "bootstrap" "invoke" "\"docker-lab\""
-bootstrap_lab
-write_edn_event "${history_file}" "bootstrap" "ok" "\"docker-lab\""
+if [[ "${PACMAN_JEPSEN_BOOTSTRAP_LAB:-true}" == "true" ]]; then
+  write_edn_event "${history_file}" "bootstrap" "invoke" "\"docker-lab\""
+  bootstrap_lab_with_retries "case:${case_spec}"
+  write_edn_event "${history_file}" "bootstrap" "ok" "\"docker-lab\""
+else
+  write_edn_event "${history_file}" "bootstrap" "ok" "\"existing-docker-lab\""
+fi
 
 compose_exec pacman-primary /bin/sh -lc \
   "PACMANCTL_API_URL=http://pacman-primary:8080 PACMANCTL_API_TOKEN=lab-admin-token pacmanctl cluster status -o json" \
   >"${run_dir}/pacman-cluster-before.json"
 
-write_edn_event "${history_file}" "verify" "invoke" "\"demo-verify-before\""
-verify_lab
-write_edn_event "${history_file}" "verify" "ok" "\"demo-verify-before\""
+if [[ "${PACMAN_JEPSEN_VERIFY_LAB:-true}" == "true" ]]; then
+  write_edn_event "${history_file}" "verify" "invoke" "\"demo-verify-before\""
+  verify_lab
+  write_edn_event "${history_file}" "verify" "ok" "\"demo-verify-before\""
+fi
 
 write_edn_event "${history_file}" "case" "invoke" "\"${case_spec}\""
 run_jepsen_cases "${case_spec}" "${run_dir}" "${history_file}" "${run_dir}/nemesis-schedule.edn"
 write_edn_event "${history_file}" "case" "ok" "\"${case_spec}\""
 
-write_edn_event "${history_file}" "verify" "invoke" "\"demo-verify-after-case\""
-verify_lab
-write_edn_event "${history_file}" "verify" "ok" "\"demo-verify-after-case\""
+if [[ "${PACMAN_JEPSEN_VERIFY_LAB:-true}" == "true" ]]; then
+  write_edn_event "${history_file}" "verify" "invoke" "\"demo-verify-after-case\""
+  verify_lab
+  write_edn_event "${history_file}" "verify" "ok" "\"demo-verify-after-case\""
+fi

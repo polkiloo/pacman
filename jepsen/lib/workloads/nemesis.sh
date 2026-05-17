@@ -307,6 +307,59 @@ run_nemesis_profile() {
         printf '{:time "%s" :nemesis :primary-replication-partition :action :stop :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         ;;
+      failover-chain)
+        local target target_service source source_service output chain_status requested_at step
+        step=0
+        : >"${run_dir}/failover-chain.jsonl"
+        printf '{:time "%s" :nemesis :failover-chain :action :start :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
+
+        for target in alpha-2 alpha-3 alpha-1; do
+          source=$(current_primary_name 2>/dev/null || true)
+          if [[ -z "${source}" || "${source}" == "${target}" ]]; then
+            continue
+          fi
+
+          step=$((step + 1))
+          target_service=$(service_for_member "${target}" 2>/dev/null || printf '')
+          source_service=$(service_for_member "${source}" 2>/dev/null || printf 'pacman-primary')
+          requested_at="$(timestamp_utc)"
+          chain_status=0
+
+          if ! wait_for_switchover_candidate "${target}" 75; then
+            chain_status=2
+            output="target ${target} did not become an eligible switchover candidate"
+          else
+            output=$(request_manual_switchover "${target}" "${source_service}" 2>&1) || chain_status=$?
+            if [[ "${chain_status}" -eq 0 ]]; then
+              wait_for_current_primary "${target}" 75 >>"${run_dir}/nemesis.log" 2>&1 || chain_status=$?
+            fi
+          fi
+
+          printf '%s\n' "${output}" >>"${run_dir}/nemesis.log"
+          append_jsonl "${run_dir}/failover-chain.jsonl" \
+            step "${step}" \
+            requestedAt "$(json_escape "${requested_at}")" \
+            source "$(json_escape "${source}")" \
+            sourceService "$(json_escape "${source_service}")" \
+            target "$(json_escape "${target}")" \
+            targetService "$(json_escape "${target_service}")" \
+            exitStatus "${chain_status}" \
+            output "$(json_escape "${output}")"
+
+          printf '{:time "%s" :nemesis :failover-chain :action :step :source "%s" :target "%s" :exit-status %s}\n' \
+            "$(timestamp_utc)" "${source}" "${target}" "${chain_status}" >>"${schedule_file}"
+          capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "${target}" "${target_service:-${source_service}}" || true
+
+          if [[ "${chain_status}" -ne 0 ]]; then
+            break
+          fi
+          sleep 2
+        done
+
+        sleep "${jepsen_nemesis_hold_seconds}"
+        printf '{:time "%s" :nemesis :failover-chain :action :stop :target "%s"}\n' "$(timestamp_utc)" "$(current_primary_name 2>/dev/null || printf unknown)" >>"${schedule_file}"
+        capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "$(current_primary_name 2>/dev/null || printf unknown)" "" || true
+        ;;
       slow-network)
         printf '{:time "%s" :nemesis :slow-network :action :start :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
         slow_network_on "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true

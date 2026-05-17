@@ -12,7 +12,7 @@ The goal is to prove PACMAN's core HA safety claims first:
 - [ ] A former primary rejoins safely and does not silently continue on a
       divergent timeline.
 - [x] Surviving nodes converge to one PostgreSQL timeline after failover.
-- [ ] Client write routing follows the current PACMAN primary.
+- [x] Client write routing follows the current PACMAN primary.
 
 Patroni is useful as a calibration baseline, but PACMAN is the product under
 test. Patroni-specific features belong in the baseline track unless PACMAN has
@@ -89,10 +89,11 @@ Implement after MVP-1 is stable and repeatable.
 - [x] Isolate primary from DCS while client traffic remains available.
 - [x] DCS traffic blocked while replication stays healthy.
 - [x] Replication traffic blocked while DCS stays healthy.
-- [ ] Repeated failover chain across all three data nodes.
-- [ ] Open transaction during failover.
-- [ ] Router sends writes only to current PACMAN primary, if a router is part of
+- [x] Repeated failover chain across all three data nodes.
+- [x] Open transaction during failover.
+- [x] Router sends writes only to current PACMAN primary, if a router is part of
       the supported deployment.
+  - [x] Covered through the supported `vip-manager` PostgreSQL VIP route.
 
 ## MVP-3: DCS Quorum Campaigns
 

@@ -19,6 +19,7 @@ export PACMAN_JEPSEN_CAMPAIGN="${campaign}"
 
 mkdir -p "${run_dir}"
 : >"${history_file}"
+: >"${run_dir}/nightly-failures.txt"
 
 finish() {
   local exit_status=$?
@@ -42,6 +43,7 @@ mkdir -p "${run_dir}/cases"
 : >"${run_dir}/case-results.jsonl"
 
 failed=0
+failed_cases=()
 
 write_edn_event "${history_file}" "cases" "invoke" "\"${cases}\""
 
@@ -55,10 +57,12 @@ for spec in ${cases}; do
   slug="$(case_slug "${workload}__${nemesis}")"
 
   write_edn_event "${history_file}" "bootstrap" "invoke" "\"docker-lab:${workload}:${nemesis}\""
-  if bootstrap_lab; then
+  if bootstrap_lab_with_retries "${workload}:${nemesis}"; then
     write_edn_event "${history_file}" "bootstrap" "ok" "\"docker-lab:${workload}:${nemesis}\""
   else
     write_edn_event "${history_file}" "bootstrap" "fail" "\"docker-lab:${workload}:${nemesis}\""
+    printf '%s:%s bootstrap failed\n' "${workload}" "${nemesis}" >>"${run_dir}/nightly-failures.txt"
+    failed_cases+=("${workload}:${nemesis}:bootstrap")
     failed=1
     continue
   fi
@@ -72,6 +76,8 @@ for spec in ${cases}; do
     write_edn_event "${history_file}" "verify" "ok" "\"demo-verify-before:${workload}:${nemesis}\""
   else
     write_edn_event "${history_file}" "verify" "fail" "\"demo-verify-before:${workload}:${nemesis}\""
+    printf '%s:%s verify-before failed\n' "${workload}" "${nemesis}" >>"${run_dir}/nightly-failures.txt"
+    failed_cases+=("${workload}:${nemesis}:verify-before")
     failed=1
     continue
   fi
@@ -79,6 +85,8 @@ for spec in ${cases}; do
   ensure_workload_schema
 
   if ! run_jepsen_case "${workload}" "${nemesis}" "${run_dir}" "${history_file}" "${run_dir}/nemesis-schedule.edn" "${run_dir}/case-results.jsonl"; then
+    printf '%s:%s case failed\n' "${workload}" "${nemesis}" >>"${run_dir}/nightly-failures.txt"
+    failed_cases+=("${workload}:${nemesis}:case")
     failed=1
   fi
 
@@ -87,6 +95,8 @@ for spec in ${cases}; do
     write_edn_event "${history_file}" "verify" "ok" "\"demo-verify-after:${workload}:${nemesis}\""
   else
     write_edn_event "${history_file}" "verify" "fail" "\"demo-verify-after:${workload}:${nemesis}\""
+    printf '%s:%s verify-after failed\n' "${workload}" "${nemesis}" >>"${run_dir}/nightly-failures.txt"
+    failed_cases+=("${workload}:${nemesis}:verify-after")
     failed=1
   fi
 done
@@ -98,7 +108,7 @@ else
 fi
 
 write_edn_event "${history_file}" "bootstrap" "invoke" "\"docker-lab:post-campaign\""
-if bootstrap_lab; then
+if bootstrap_lab_with_retries "post-campaign"; then
   write_edn_event "${history_file}" "bootstrap" "ok" "\"docker-lab:post-campaign\""
 
   write_edn_event "${history_file}" "switchover" "invoke" "\"auto\""
@@ -106,6 +116,8 @@ if bootstrap_lab; then
     write_edn_event "${history_file}" "switchover" "ok" "\"auto\""
   else
     write_edn_event "${history_file}" "switchover" "fail" "\"auto\""
+    printf 'post-campaign switchover failed\n' >>"${run_dir}/nightly-failures.txt"
+    failed_cases+=("post-campaign:switchover")
     failed=1
   fi
 
@@ -114,11 +126,25 @@ if bootstrap_lab; then
     write_edn_event "${history_file}" "verify" "ok" "\"demo-verify-after\""
   else
     write_edn_event "${history_file}" "verify" "fail" "\"demo-verify-after\""
+    printf 'post-campaign verify failed\n' >>"${run_dir}/nightly-failures.txt"
+    failed_cases+=("post-campaign:verify")
     failed=1
   fi
 else
   write_edn_event "${history_file}" "bootstrap" "fail" "\"docker-lab:post-campaign\""
+  printf 'post-campaign bootstrap failed\n' >>"${run_dir}/nightly-failures.txt"
+  failed_cases+=("post-campaign:bootstrap")
   failed=1
+fi
+
+if [[ "${failed}" -ne 0 ]]; then
+  printf 'PACMAN Jepsen nightly failed. Failure summary:\n' >&2
+  if [[ "${#failed_cases[@]}" -gt 0 ]]; then
+    printf '  - %s\n' "${failed_cases[@]}" >&2
+  else
+    printf '  - unknown failure; inspect %s\n' "${run_dir}" >&2
+  fi
+  printf 'Artifacts: %s\n' "${run_dir}" >&2
 fi
 
 exit "${failed}"
