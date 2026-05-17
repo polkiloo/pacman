@@ -1,0 +1,556 @@
+check_single_writable_primary() {
+  local case_dir=$1
+  local observation_file="${case_dir}/primary-observations.jsonl"
+  local checker_file="${case_dir}/single-primary-checker.json"
+
+  if [[ ! -s "${observation_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"single-writable-primary","valid":false,"observations":0,"samples":0,"writableObservations":0,"violationSamples":[]}
+EOF
+    return 1
+  fi
+
+  jq -s '
+    def writable: map(select(.reachable == true and .writable == true));
+    def violation_samples:
+      writable
+      | group_by(.sampleId)
+      | map(select(length > 1))
+      | map({
+          sampleId: .[0].sampleId,
+          observedAt: .[0].observedAt,
+          writableMembers: map(.member),
+          timelines: map(.timeline)
+        });
+    {
+      checker: "single-writable-primary",
+      valid: ((violation_samples | length) == 0),
+      observations: length,
+      samples: ([.[].sampleId] | unique | length),
+      writableObservations: (writable | length),
+      violationSamples: violation_samples
+    }
+  ' "${observation_file}" >"${checker_file}"
+
+  jq -e '.valid == true and .samples > 0' "${checker_file}" >/dev/null
+}
+
+check_acknowledged_write_preservation() {
+  local workload=$1
+  local run_id=$2
+  local case_dir=$3
+  local checker_file="${case_dir}/acknowledged-write-checker.json"
+  local ack_file="${case_dir}/acknowledged-op-ids.txt"
+  local counts_file="${case_dir}/final-primary-op-counts.tsv"
+  local acknowledged_file="${case_dir}/acknowledged-op-ids.sorted"
+  local actual_file="${case_dir}/final-primary-op-ids.sorted"
+  local observed_once_file="${case_dir}/final-primary-observed-once-op-ids.sorted"
+  local duplicate_file="${case_dir}/final-primary-duplicate-op-ids.sorted"
+  local missing_file="${case_dir}/missing-acknowledged-op-ids.txt"
+  local duplicate_ack_file="${case_dir}/duplicate-acknowledged-op-ids.txt"
+  local unexpected_file="${case_dir}/unacknowledged-observed-op-ids.txt"
+  local table final_primary final_primary_service query_status
+
+  table=$(workload_op_table "${workload}") || {
+    cat >"${checker_file}" <<EOF
+{"checker":"acknowledged-write-preservation","valid":false,"error":"unsupported workload","workload":"${workload}"}
+EOF
+    return 2
+  }
+
+  touch "${ack_file}"
+  LC_ALL=C sort -u "${ack_file}" >"${acknowledged_file}"
+
+  final_primary=$(current_primary_name 2>/dev/null || true)
+  [[ -n "${final_primary}" ]] || final_primary="alpha-1"
+  final_primary_service=$(service_for_member "${final_primary}" 2>/dev/null || printf 'pacman-primary')
+
+  query_status=0
+  psql_service "${final_primary_service}" "
+SELECT op_id, count(*)::int
+FROM ${table}
+WHERE run_id = $(sql_literal "${run_id}")
+GROUP BY op_id
+ORDER BY op_id;
+" >"${counts_file}" 2>"${case_dir}/acknowledged-write-checker-query.log" || query_status=$?
+
+  if [[ "${query_status}" -ne 0 ]]; then
+    jq -n \
+      --arg workload "${workload}" \
+      --arg runId "${run_id}" \
+      --arg finalPrimary "${final_primary}" \
+      --arg finalPrimaryService "${final_primary_service}" \
+      --arg table "${table}" \
+      --arg error "$(cat "${case_dir}/acknowledged-write-checker-query.log")" \
+      '{
+        checker: "acknowledged-write-preservation",
+        valid: false,
+        workload: $workload,
+        runId: $runId,
+        finalPrimary: $finalPrimary,
+        finalPrimaryService: $finalPrimaryService,
+        table: $table,
+        error: $error
+      }' >"${checker_file}"
+    return 1
+  fi
+
+  awk -F $'\t' 'NF >= 2 {print $1}' "${counts_file}" | LC_ALL=C sort -u >"${actual_file}"
+  awk -F $'\t' 'NF >= 2 && $2 == 1 {print $1}' "${counts_file}" | LC_ALL=C sort -u >"${observed_once_file}"
+  awk -F $'\t' 'NF >= 2 && $2 != 1 {print $1}' "${counts_file}" | LC_ALL=C sort -u >"${duplicate_file}"
+  comm -23 "${acknowledged_file}" "${actual_file}" >"${missing_file}"
+  comm -12 "${acknowledged_file}" "${duplicate_file}" >"${duplicate_ack_file}"
+  comm -13 "${acknowledged_file}" "${actual_file}" >"${unexpected_file}"
+
+  local expected observed_once missing duplicate_ack unexpected async_loss_allowed valid
+  expected=$(wc -l <"${acknowledged_file}" | tr -d ' ')
+  observed_once=$(comm -12 "${acknowledged_file}" "${observed_once_file}" | wc -l | tr -d ' ')
+  missing=$(wc -l <"${missing_file}" | tr -d ' ')
+  duplicate_ack=$(wc -l <"${duplicate_ack_file}" | tr -d ' ')
+  unexpected=$(wc -l <"${unexpected_file}" | tr -d ' ')
+  async_loss_allowed=false
+  if [[ "${jepsen_allow_async_loss}" == "true" ]]; then
+    async_loss_allowed=true
+  fi
+
+  valid=false
+  if [[ "${expected}" -gt 0 && "${duplicate_ack}" -eq 0 ]]; then
+    if [[ "${missing}" -eq 0 || "${async_loss_allowed}" == "true" ]]; then
+      valid=true
+    fi
+  fi
+
+  jq -n \
+    --arg workload "${workload}" \
+    --arg runId "${run_id}" \
+    --arg finalPrimary "${final_primary}" \
+    --arg finalPrimaryService "${final_primary_service}" \
+    --arg table "${table}" \
+    --argjson valid "${valid}" \
+    --argjson asyncLossAllowed "${async_loss_allowed}" \
+    --argjson expectedAcknowledged "${expected}" \
+    --argjson observedExactlyOnce "${observed_once}" \
+    --argjson missingAcknowledged "${missing}" \
+    --argjson duplicateAcknowledged "${duplicate_ack}" \
+    --argjson unacknowledgedObserved "${unexpected}" \
+    --argjson missingOpIds "$(json_array_from_file "${missing_file}")" \
+    --argjson duplicateOpIds "$(json_array_from_file "${duplicate_ack_file}")" \
+    --argjson unacknowledgedObservedOpIds "$(json_array_from_file "${unexpected_file}")" \
+    '{
+      checker: "acknowledged-write-preservation",
+      valid: $valid,
+      workload: $workload,
+      runId: $runId,
+      finalPrimary: $finalPrimary,
+      finalPrimaryService: $finalPrimaryService,
+      table: $table,
+      asyncLossAllowed: $asyncLossAllowed,
+      expectedAcknowledged: $expectedAcknowledged,
+      observedExactlyOnce: $observedExactlyOnce,
+      missingAcknowledged: $missingAcknowledged,
+      duplicateAcknowledged: $duplicateAcknowledged,
+      unacknowledgedObserved: $unacknowledgedObserved,
+      missingOpIds: $missingOpIds,
+      duplicateOpIds: $duplicateOpIds,
+      unacknowledgedObservedOpIds: $unacknowledgedObservedOpIds
+    }' >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
+}
+
+check_timeline_convergence() {
+  local case_dir=$1
+  local observation_file="${case_dir}/primary-observations.jsonl"
+  local checker_file="${case_dir}/timeline-checker.json"
+
+  if [[ ! -s "${observation_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"timeline-convergence","valid":false,"observations":0,"samples":0,"error":"missing primary observations"}
+EOF
+    return 1
+  fi
+
+  jq -s '
+    def samples:
+      sort_by(.sampleId)
+      | group_by(.sampleId)
+      | map({
+          sampleId: .[0].sampleId,
+          observedAt: .[0].observedAt,
+          observations: .
+        });
+    def writable_members($sample):
+      $sample.observations
+      | map(select(.reachable == true and .writable == true));
+    def primary_of($sample):
+      writable_members($sample) | sort_by(.member) | .[0] // null;
+    def summarize_member:
+      {
+        member,
+        service,
+        reachable,
+        writable,
+        inRecovery,
+        timeline,
+        lsn,
+        error
+      };
+
+    samples as $samples
+    | ($samples[0] // null) as $initialSample
+    | ($samples[-1] // null) as $finalSample
+    | (if $initialSample == null then [] else writable_members($initialSample) end) as $initialWritable
+    | (if $finalSample == null then [] else writable_members($finalSample) end) as $finalWritable
+    | (if $initialSample == null then null else primary_of($initialSample) end) as $initialPrimary
+    | (if $finalSample == null then null else primary_of($finalSample) end) as $finalPrimary
+    | (($initialPrimary != null) and ($finalPrimary != null)) as $hasPrimaries
+    | ($hasPrimaries and ($initialPrimary.member != $finalPrimary.member)) as $promotionObserved
+    | (
+        if ($hasPrimaries | not) then false
+        elif ($promotionObserved | not) then true
+        else (($finalPrimary.timeline // 0) > ($initialPrimary.timeline // 0))
+        end
+      ) as $timelineAdvanced
+    | (
+        if $finalPrimary == null then []
+        else
+          $finalSample.observations
+          | map(select(
+              .reachable == true
+              and .member != $finalPrimary.member
+              and (.timeline // 0) != ($finalPrimary.timeline // 0)
+            ))
+          | map(summarize_member)
+        end
+      ) as $replicaTimelineViolations
+    | (
+        if ($promotionObserved | not) then null
+        else
+          $finalSample.observations
+          | map(select(.member == $initialPrimary.member))
+          | .[0] // null
+        end
+      ) as $oldPrimaryFinalState
+    | (
+        if ($promotionObserved | not) then true
+        elif $oldPrimaryFinalState == null then false
+        else
+          (($oldPrimaryFinalState.reachable == false)
+          or (($oldPrimaryFinalState.writable == false)
+              and (($oldPrimaryFinalState.timeline // 0) == ($finalPrimary.timeline // 0))))
+        end
+      ) as $oldPrimarySafe
+    | (($initialWritable | length) == 1) as $singleInitialPrimary
+    | (($finalWritable | length) == 1) as $singleFinalPrimary
+    | (($replicaTimelineViolations | length) == 0) as $replicasConverged
+    | {
+        checker: "timeline-convergence",
+        valid: (
+          ($samples | length) > 0
+          and $singleInitialPrimary
+          and $singleFinalPrimary
+          and $timelineAdvanced
+          and $replicasConverged
+          and $oldPrimarySafe
+        ),
+        observations: length,
+        samples: ($samples | length),
+        initialSample: (
+          if $initialSample == null then null else {
+            sampleId: $initialSample.sampleId,
+            observedAt: $initialSample.observedAt,
+            primary: (if $initialPrimary == null then null else ($initialPrimary | summarize_member) end),
+            writableMembers: ($initialWritable | map(.member)),
+            members: ($initialSample.observations | map(summarize_member))
+          } end
+        ),
+        finalSample: (
+          if $finalSample == null then null else {
+            sampleId: $finalSample.sampleId,
+            observedAt: $finalSample.observedAt,
+            primary: (if $finalPrimary == null then null else ($finalPrimary | summarize_member) end),
+            writableMembers: ($finalWritable | map(.member)),
+            members: ($finalSample.observations | map(summarize_member))
+          } end
+        ),
+        promotionObserved: $promotionObserved,
+        timelineAdvanced: $timelineAdvanced,
+        replicasConverged: $replicasConverged,
+        oldPrimarySafe: $oldPrimarySafe,
+        replicaTimelineViolations: $replicaTimelineViolations,
+        oldPrimaryFinalState: (if $oldPrimaryFinalState == null then null else ($oldPrimaryFinalState | summarize_member) end)
+      }
+  ' "${observation_file}" >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
+}
+
+check_old_primary_rejoin_after_failover() {
+  local case_dir=$1
+  local nemesis=${2:-}
+  local observation_file="${case_dir}/primary-observations.jsonl"
+  local checker_file="${case_dir}/old-primary-rejoin-checker.json"
+
+  if [[ "${nemesis}" == "switchover" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"old-primary-rejoin-after-failover","valid":true,"applicable":false,"observations":0,"samples":0,"reason":"manual switchover is covered by the manual switchover checker"}
+EOF
+    return 0
+  fi
+
+  if [[ ! -s "${observation_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"old-primary-rejoin-after-failover","valid":false,"applicable":false,"observations":0,"samples":0,"error":"missing primary observations"}
+EOF
+    return 1
+  fi
+
+  jq -s '
+    def samples:
+      sort_by(.sampleId)
+      | group_by(.sampleId)
+      | map({
+          sampleId: .[0].sampleId,
+          observedAt: .[0].observedAt,
+          observations: .
+        });
+    def writable_members($sample):
+      $sample.observations
+      | map(select(.reachable == true and .writable == true));
+    def primary_of($sample):
+      writable_members($sample) | sort_by(.member) | .[0] // null;
+    def summarize_member:
+      {
+        member,
+        service,
+        reachable,
+        writable,
+        inRecovery,
+        timeline,
+        lsn,
+        error
+      };
+
+    samples as $samples
+    | ($samples[0] // null) as $initialSample
+    | ($samples[-1] // null) as $finalSample
+    | (if $initialSample == null then null else primary_of($initialSample) end) as $initialPrimary
+    | (if $finalSample == null then null else primary_of($finalSample) end) as $finalPrimary
+    | (($initialPrimary != null) and ($finalPrimary != null) and ($initialPrimary.member != $finalPrimary.member)) as $promotionObserved
+    | (
+        if ($promotionObserved | not) then null
+        else
+          $finalSample.observations
+          | map(select(.member == $initialPrimary.member))
+          | .[0] // null
+        end
+      ) as $oldPrimaryFinalState
+    | (
+        if ($promotionObserved | not) then true
+        elif $oldPrimaryFinalState == null then false
+        else
+          ($oldPrimaryFinalState.reachable == true)
+          and ($oldPrimaryFinalState.writable == false)
+          and ($oldPrimaryFinalState.inRecovery == true)
+          and (($oldPrimaryFinalState.timeline // 0) == ($finalPrimary.timeline // 0))
+        end
+      ) as $oldPrimaryRejoined
+    | {
+        checker: "old-primary-rejoin-after-failover",
+        valid: (
+          ($samples | length) > 0
+          and (
+            ($promotionObserved | not)
+            or $oldPrimaryRejoined
+          )
+        ),
+        applicable: $promotionObserved,
+        observations: length,
+        samples: ($samples | length),
+        promotionObserved: $promotionObserved,
+        initialPrimary: (if $initialPrimary == null then null else ($initialPrimary | summarize_member) end),
+        finalPrimary: (if $finalPrimary == null then null else ($finalPrimary | summarize_member) end),
+        oldPrimaryRejoined: $oldPrimaryRejoined,
+        oldPrimaryFinalState: (if $oldPrimaryFinalState == null then null else ($oldPrimaryFinalState | summarize_member) end)
+      }
+  ' "${observation_file}" >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
+}
+
+check_manual_switchover() {
+  local nemesis=$1
+  local case_dir=$2
+  local checker_file="${case_dir}/manual-switchover-checker.json"
+  local operation_file="${case_dir}/manual-switchover.json"
+  local observation_file="${case_dir}/primary-observations.jsonl"
+
+  if [[ "${nemesis}" != "switchover" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"manual-switchover","valid":true,"applicable":false}
+EOF
+    return 0
+  fi
+
+  if [[ ! -s "${operation_file}" || ! -s "${observation_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"manual-switchover","valid":false,"applicable":true,"error":"missing switchover operation metadata or primary observations"}
+EOF
+    return 1
+  fi
+
+  jq -n \
+    --slurpfile operation "${operation_file}" \
+    --slurpfile observations "${observation_file}" '
+      def samples:
+        $observations
+        | sort_by(.sampleId)
+        | group_by(.sampleId)
+        | map({
+            sampleId: .[0].sampleId,
+            observedAt: .[0].observedAt,
+            observations: .
+          });
+      def writable_members($sample):
+        $sample.observations
+        | map(select(.reachable == true and .writable == true));
+      def primary_of($sample):
+        writable_members($sample) | sort_by(.member) | .[0] // null;
+      def summarize_member:
+        {
+          member,
+          service,
+          reachable,
+          writable,
+          inRecovery,
+          timeline,
+          lsn,
+          error
+        };
+
+      ($operation[0] // {}) as $op
+      | samples as $samples
+      | ($samples[-1] // null) as $finalSample
+      | (if $finalSample == null then null else primary_of($finalSample) end) as $finalPrimary
+      | (($op.candidate // "") != "") as $hasCandidate
+      | (($op.exitStatus // 1) == 0) as $requestAccepted
+      | ($hasCandidate and $requestAccepted and $finalPrimary != null and ($finalPrimary.member == $op.candidate)) as $valid
+      | {
+          checker: "manual-switchover",
+          valid: $valid,
+          applicable: true,
+          requestedAt: ($op.requestedAt // null),
+          candidate: ($op.candidate // ""),
+          controlService: ($op.controlService // ""),
+          exitStatus: ($op.exitStatus // null),
+          requestAccepted: $requestAccepted,
+          finalPrimary: (if $finalPrimary == null then null else ($finalPrimary | summarize_member) end),
+          output: ($op.output // "")
+        }
+    ' >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
+}
+
+check_client_traffic_during_nemesis() {
+  local nemesis=$1
+  local case_dir=$2
+  local checker_file="${case_dir}/client-traffic-during-nemesis-checker.json"
+  local sample_file="${case_dir}/client-traffic-during-nemesis.jsonl"
+
+  if [[ "${nemesis}" != "primary-dcs-partition" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"client-traffic-during-nemesis","valid":true,"applicable":false}
+EOF
+    return 0
+  fi
+
+  if [[ ! -s "${sample_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"client-traffic-during-nemesis","valid":false,"applicable":true,"error":"missing client traffic probe samples"}
+EOF
+    return 1
+  fi
+
+  jq -s '
+    {
+      checker: "client-traffic-during-nemesis",
+      valid: (map(select(.ok == true)) | length > 0),
+      applicable: true,
+      samples: length,
+      successfulSamples: (map(select(.ok == true)) | length),
+      failedSamples: (map(select(.ok != true)) | length),
+      observations: .
+    }
+  ' "${sample_file}" >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
+}
+
+check_replication_traffic_during_nemesis() {
+  local nemesis=$1
+  local case_dir=$2
+  local checker_file="${case_dir}/replication-traffic-during-nemesis-checker.json"
+  local sample_file="${case_dir}/replication-traffic-during-nemesis.jsonl"
+
+  if [[ "${nemesis}" != "primary-dcs-partition" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"replication-traffic-during-nemesis","valid":true,"applicable":false}
+EOF
+    return 0
+  fi
+
+  if [[ ! -s "${sample_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"replication-traffic-during-nemesis","valid":false,"applicable":true,"error":"missing replication health probe samples"}
+EOF
+    return 1
+  fi
+
+  jq -s '
+    {
+      checker: "replication-traffic-during-nemesis",
+      valid: (map(select(.ok == true and (.streamingReplicas // 0) >= 2)) | length > 0),
+      applicable: true,
+      samples: length,
+      healthySamples: (map(select(.ok == true and (.streamingReplicas // 0) >= 2)) | length),
+      observations: .
+    }
+  ' "${sample_file}" >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
+}
+
+check_dcs_traffic_during_nemesis() {
+  local nemesis=$1
+  local case_dir=$2
+  local checker_file="${case_dir}/dcs-traffic-during-nemesis-checker.json"
+  local sample_file="${case_dir}/dcs-traffic-during-nemesis.jsonl"
+
+  if [[ "${nemesis}" != "primary-replication-partition" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"dcs-traffic-during-nemesis","valid":true,"applicable":false}
+EOF
+    return 0
+  fi
+
+  if [[ ! -s "${sample_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"dcs-traffic-during-nemesis","valid":false,"applicable":true,"error":"missing DCS health probe samples"}
+EOF
+    return 1
+  fi
+
+  jq -s '
+    {
+      checker: "dcs-traffic-during-nemesis",
+      valid: (map(select(.ok == true)) | length > 0),
+      applicable: true,
+      samples: length,
+      healthySamples: (map(select(.ok == true)) | length),
+      observations: .
+    }
+  ' "${sample_file}" >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
+}

@@ -123,6 +123,12 @@ write_summary() {
         -name 'timeline-checker.json' -o \
         -name 'old-primary-rejoin-checker.json' -o \
         -name 'manual-switchover-checker.json' -o \
+        -name 'client-traffic-during-nemesis-checker.json' -o \
+        -name 'client-traffic-during-nemesis.jsonl' -o \
+        -name 'replication-traffic-during-nemesis-checker.json' -o \
+        -name 'replication-traffic-during-nemesis.jsonl' -o \
+        -name 'dcs-traffic-during-nemesis-checker.json' -o \
+        -name 'dcs-traffic-during-nemesis.jsonl' -o \
         -name 'primary-observations.jsonl' -o \
         -name 'pacman-cluster-snapshots.jsonl' -o \
         -name 'pg-stat-wal-receiver.jsonl' -o \

@@ -1000,6 +1000,7 @@ func TestDaemonStartRejectsConcurrentSecondStart(t *testing.T) {
 		validDataConfig(),
 		logging.New("pacmand", &bytes.Buffer{}),
 		withHeartbeatInterval(time.Hour),
+		WithNoAPIServer(),
 		withPostgresProbe(func(context.Context, string) error { return nil }),
 		withPostgresStateProbe(func(context.Context, string) (postgres.Observation, error) {
 			return postgres.Observation{

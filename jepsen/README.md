@@ -14,8 +14,9 @@ make jepsen-docker-nightly
 ```
 
 The smoke campaign bootstraps the Docker lab, verifies it, runs
-`append-smoke:none`, and verifies the lab again. The nightly campaign defaults to
-the broader implemented matrix:
+`append-smoke:none`, and verifies the lab again. The default nightly campaign
+runs the full implemented matrix. Each case starts from a fresh Docker lab so
+destructive profiles cannot poison later cases:
 
 ```text
 append-smoke:none
@@ -23,6 +24,8 @@ append-switchover:switchover
 append-failover:kill
 append-failover:packet
 append-failover:packet,kill
+append-failover:primary-dcs-partition
+append-failover:primary-replication-partition
 single-key-register:packet
 read-committed-txn:slow-network
 serializable-txn:packet,kill
@@ -30,10 +33,12 @@ append-failover:repeated-failure
 ```
 
 The `append-switchover:switchover` case issues a manual PACMAN switchover while
-append writes are in flight. After the nightly cases finish, the harness also
-runs one post-campaign manual switchover using the current cluster membership to
-select a healthy non-primary target. This keeps the final switchover valid even
-when an earlier nemesis case has already moved the primary.
+append writes are in flight. Nightly records the real checker result for every
+case in `case-results.jsonl`; a failed destructive profile remains a failed
+nightly case, but the runner continues through the rest of the matrix. After the
+matrix finishes, the harness bootstraps a fresh lab and runs one post-campaign
+manual switchover using the current cluster membership to select a healthy
+non-primary target.
 
 Run one case at a time by name:
 
@@ -43,6 +48,8 @@ make jepsen-docker-case-append-switchover-switchover
 make jepsen-docker-case-append-failover-kill
 make jepsen-docker-case-append-failover-packet
 make jepsen-docker-case-append-failover-packet-kill
+make jepsen-docker-case-append-failover-primary-dcs-partition
+make jepsen-docker-case-append-failover-primary-replication-partition
 make jepsen-docker-case-single-key-register-packet
 make jepsen-docker-case-read-committed-txn-slow-network
 make jepsen-docker-case-serializable-txn-packet-kill
@@ -79,6 +86,8 @@ Implemented nemesis profiles:
 - `kill`
 - `packet`
 - `packet,kill`
+- `primary-dcs-partition`
+- `primary-replication-partition`
 - `slow-network`
 - `repeated-failure`
 
@@ -104,6 +113,9 @@ Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
 `primary-observations.jsonl`, `single-primary-checker.json`,
 `acknowledged-write-checker.json`, `timeline-checker.json`,
 `old-primary-rejoin-checker.json`, `manual-switchover-checker.json`,
+`client-traffic-during-nemesis-checker.json`,
+`replication-traffic-during-nemesis-checker.json`,
+`dcs-traffic-during-nemesis-checker.json`,
 `pacman-cluster-snapshots.jsonl`, `pg-stat-replication.json`,
 `pg-stat-wal-receiver.jsonl`, nemesis logs, PACMAN cluster/history snapshots,
 Docker logs, PostgreSQL logs, and a small `index.html` for operator review.

@@ -85,10 +85,10 @@ Collect these for every MVP-1 run:
 Implement after MVP-1 is stable and repeatable.
 
 - [x] Manual switchover under append workload.
-- [ ] Primary-alone network partition.
-- [ ] Isolate primary from DCS while client traffic remains available.
-- [ ] DCS traffic blocked while replication stays healthy.
-- [ ] Replication traffic blocked while DCS stays healthy.
+- [x] Primary-alone network partition.
+- [x] Isolate primary from DCS while client traffic remains available.
+- [x] DCS traffic blocked while replication stays healthy.
+- [x] Replication traffic blocked while DCS stays healthy.
 - [ ] Repeated failover chain across all three data nodes.
 - [ ] Open transaction during failover.
 - [ ] Router sends writes only to current PACMAN primary, if a router is part of
@@ -182,5 +182,5 @@ MVP-1 is done when:
   - [ ] failover/rejoin summary.
 - [ ] `append-smoke:none` is stable across repeated local runs.
 - [x] `append-failover:kill` is stable enough to run as a manual CI smoke.
-- [ ] Known unsafe or unsupported configurations are documented separately from
+- [ ] Unsupported configurations are documented separately from
       product regressions.
