@@ -89,8 +89,8 @@ Implement after MVP-1 is stable and repeatable.
 - [x] Isolate primary from DCS while client traffic remains available.
 - [x] DCS traffic blocked while replication stays healthy.
 - [x] Replication traffic blocked while DCS stays healthy.
-- [ ] Repeated failover chain across all three data nodes.
-- [ ] Open transaction during failover.
+- [x] Repeated failover chain across all three data nodes.
+- [x] Open transaction during failover.
 - [ ] Router sends writes only to current PACMAN primary, if a router is part of
       the supported deployment.
 

@@ -120,6 +120,28 @@ bootstrap_lab() {
     "${repo_root}/deploy/lab/scripts/bootstrap-cluster.sh"
 }
 
+bootstrap_lab_with_retries() {
+  local label=${1:-docker-lab}
+  local attempts=${PACMAN_JEPSEN_BOOTSTRAP_ATTEMPTS:-3}
+  local delay=${PACMAN_JEPSEN_BOOTSTRAP_RETRY_DELAY_SECONDS:-5}
+  local attempt
+
+  for ((attempt=1; attempt<=attempts; attempt++)); do
+    if bootstrap_lab; then
+      return 0
+    fi
+
+    printf 'bootstrap failed for %s on attempt %s/%s\n' \
+      "${label}" "${attempt}" "${attempts}" >&2
+
+    if [[ "${attempt}" -lt "${attempts}" ]]; then
+      sleep "${delay}"
+    fi
+  done
+
+  return 1
+}
+
 verify_lab() {
   "${repo_root}/deploy/lab/scripts/demo.sh" verify
 }

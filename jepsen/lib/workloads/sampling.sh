@@ -1,6 +1,6 @@
 workload_op_table() {
   case "$1" in
-    append-smoke | append-failover | append-switchover) printf 'jepsen.append_values\n' ;;
+    append-smoke | append-failover | append-switchover | open-transaction-failover) printf 'jepsen.append_values\n' ;;
     single-key-register) printf 'jepsen.register_values\n' ;;
     read-committed-txn | serializable-txn) printf 'jepsen.txn_ops\n' ;;
     *) return 1 ;;

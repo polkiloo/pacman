@@ -19,6 +19,56 @@ switchover_candidate_name() {
     '
 }
 
+member_switchover_candidate_ready() {
+  local member=$1
+
+  pacman_cluster_status_json pacman-primary |
+    jq -e --arg member "${member}" '
+      (.currentPrimary // .current_primary // "") as $primary
+      | any(
+          .members[];
+          (.name // "") == $member
+          and (.name // "") != $primary
+          and .healthy == true
+          and (((.needsRejoin // false) | not))
+          and (((.role // "") == "replica") or ((.role // "") == "standby"))
+          and (((.state // "") == "streaming") or ((.state // "") == "running"))
+        )
+    ' >/dev/null
+}
+
+wait_for_switchover_candidate() {
+  local member=$1
+  local timeout=${2:-60}
+  local deadline=$((SECONDS + timeout))
+
+  while [[ "${SECONDS}" -lt "${deadline}" ]]; do
+    if member_switchover_candidate_ready "${member}"; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
+wait_for_current_primary() {
+  local member=$1
+  local timeout=${2:-60}
+  local deadline=$((SECONDS + timeout))
+  local current
+
+  while [[ "${SECONDS}" -lt "${deadline}" ]]; do
+    current=$(current_primary_name 2>/dev/null || true)
+    if [[ "${current}" == "${member}" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
 request_manual_switchover() {
   local candidate=$1
   local service=${2:-pacman-primary}

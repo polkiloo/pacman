@@ -117,6 +117,7 @@ write_summary() {
         -name 'results.edn' -o \
         -name 'nemesis-schedule.edn' -o \
         -name 'case-results.jsonl' -o \
+        -name 'nightly-failures.txt' -o \
         -name 'checker.json' -o \
         -name 'single-primary-checker.json' -o \
         -name 'acknowledged-write-checker.json' -o \
@@ -129,6 +130,10 @@ write_summary() {
         -name 'replication-traffic-during-nemesis.jsonl' -o \
         -name 'dcs-traffic-during-nemesis-checker.json' -o \
         -name 'dcs-traffic-during-nemesis.jsonl' -o \
+        -name 'failover-chain-checker.json' -o \
+        -name 'failover-chain.jsonl' -o \
+        -name 'open-transaction-checker.json' -o \
+        -name 'open-transaction.json' -o \
         -name 'primary-observations.jsonl' -o \
         -name 'pacman-cluster-snapshots.jsonl' -o \
         -name 'pg-stat-wal-receiver.jsonl' -o \

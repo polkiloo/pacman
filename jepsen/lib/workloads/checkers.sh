@@ -554,3 +554,102 @@ EOF
 
   jq -e '.valid == true' "${checker_file}" >/dev/null
 }
+
+check_failover_chain() {
+  local nemesis=$1
+  local case_dir=$2
+  local checker_file="${case_dir}/failover-chain-checker.json"
+  local chain_file="${case_dir}/failover-chain.jsonl"
+  local observation_file="${case_dir}/primary-observations.jsonl"
+
+  if [[ "${nemesis}" != "failover-chain" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"failover-chain","valid":true,"applicable":false}
+EOF
+    return 0
+  fi
+
+  if [[ ! -s "${chain_file}" || ! -s "${observation_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"failover-chain","valid":false,"applicable":true,"error":"missing failover chain metadata or primary observations"}
+EOF
+    return 1
+  fi
+
+  jq -n \
+    --slurpfile steps "${chain_file}" \
+    --slurpfile observations "${observation_file}" '
+      def writable_members:
+        map(select(.reachable == true and .writable == true) | .member)
+        | unique
+        | sort;
+      ($steps | map(select((.exitStatus // 1) == 0))) as $successfulSteps
+      | ($observations | writable_members) as $writableMembers
+      | {
+          checker: "failover-chain",
+          valid: (
+            ($steps | length) >= 2
+            and ($successfulSteps | length) == ($steps | length)
+            and (["alpha-1", "alpha-2", "alpha-3"] - $writableMembers | length) == 0
+          ),
+          applicable: true,
+          steps: ($steps | length),
+          successfulSteps: ($successfulSteps | length),
+          writablePrimaryMembers: $writableMembers,
+          chain: $steps
+        }
+    ' >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
+}
+
+check_open_transaction_during_failover() {
+  local workload=$1
+  local case_dir=$2
+  local checker_file="${case_dir}/open-transaction-checker.json"
+  local metadata_file="${case_dir}/open-transaction.json"
+  local ack_file="${case_dir}/acknowledged-op-ids.txt"
+
+  if [[ "${workload}" != "open-transaction-failover" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"open-transaction-during-failover","valid":true,"applicable":false}
+EOF
+    return 0
+  fi
+
+  if [[ ! -s "${metadata_file}" || ! -s "${ack_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"open-transaction-during-failover","valid":false,"applicable":true,"error":"missing open transaction metadata or acknowledged writes"}
+EOF
+    return 1
+  fi
+
+  jq -n \
+    --slurpfile metadata "${metadata_file}" \
+    --argjson acknowledged "$(json_array_from_file "${ack_file}")" '
+      ($metadata[0] // {}) as $meta
+      | ($acknowledged | index($meta.preOpId // "")) as $preAcked
+      | ($acknowledged | index($meta.openOpId // "")) as $openAcked
+      | ($acknowledged | index($meta.postOpId // "")) as $postAcked
+      | (($meta.openExitStatus // 1) == 0) as $openCommitted
+      | {
+          checker: "open-transaction-during-failover",
+          valid: (
+            ($preAcked != null)
+            and ($postAcked != null)
+            and (
+              ($openCommitted and ($openAcked != null))
+              or (($openCommitted | not) and ($openAcked == null))
+            )
+          ),
+          applicable: true,
+          preAcked: ($preAcked != null),
+          openCommitted: $openCommitted,
+          openAcked: ($openAcked != null),
+          postAcked: ($postAcked != null),
+          metadata: $meta
+        }
+    ' >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
+}

@@ -117,6 +117,121 @@ COMMIT;
   done
 }
 
+run_open_transaction_failover_workload() {
+  local run_id=$1
+  local case_dir=$2
+  local isolation=${3:-read committed}
+  local history="${case_dir}/history.edn"
+  local ack_file="${case_dir}/acknowledged-op-ids.txt"
+  local failures="${case_dir}/failures.log"
+  local metadata_file="${case_dir}/open-transaction.json"
+  local open_sleep=$(( jepsen_nemesis_hold_seconds + (jepsen_default_duration / 3) + 4 ))
+  local pre_op_id="${run_id}-open-txn-pre"
+  local open_op_id="${run_id}-open-txn-held"
+  local post_op_id="${run_id}-open-txn-post"
+  local observed_primary open_started_at open_finished_at post_primary output status post_status
+
+  : >"${ack_file}"
+  : >"${failures}"
+
+  observed_primary=$(current_primary_name 2>/dev/null || true)
+  [[ -n "${observed_primary}" ]] || observed_primary="unknown"
+
+  write_case_event "${history}" 0 "invoke" "append" \
+    "{:op-id \"${pre_op_id}\" :key 0 :value \"pre\" :primary \"${observed_primary}\"}"
+  if psql_vip "
+BEGIN ISOLATION LEVEL ${isolation};
+INSERT INTO jepsen.append_values(run_id, op_id, key_id, value, client_id, observed_primary, isolation)
+VALUES ($(sql_literal "${run_id}"), $(sql_literal "${pre_op_id}"), 0, 'pre', 0, $(sql_literal "${observed_primary}"), $(sql_literal "${isolation}"));
+COMMIT;
+" >/dev/null 2>>"${failures}"; then
+    printf '%s\n' "${pre_op_id}" >>"${ack_file}"
+    write_case_event "${history}" 0 "ok" "append" \
+      "{:op-id \"${pre_op_id}\" :key 0 :value \"pre\" :primary \"${observed_primary}\"}"
+  else
+    write_case_event "${history}" 0 "fail" "append" \
+      "{:op-id \"${pre_op_id}\" :key 0 :value \"pre\" :primary \"${observed_primary}\"}"
+  fi
+
+  open_started_at="$(timestamp_utc)"
+  write_case_event "${history}" 1 "invoke" "open-txn" \
+    "{:op-id \"${open_op_id}\" :key 1 :value \"held\" :primary \"${observed_primary}\" :sleep-seconds ${open_sleep}}"
+
+  status=0
+  output=$(psql_vip "
+BEGIN ISOLATION LEVEL ${isolation};
+INSERT INTO jepsen.append_values(run_id, op_id, key_id, value, client_id, observed_primary, isolation)
+VALUES ($(sql_literal "${run_id}"), $(sql_literal "${open_op_id}"), 1, 'held', 1, $(sql_literal "${observed_primary}"), $(sql_literal "${isolation}"));
+SELECT pg_sleep(${open_sleep});
+COMMIT;
+" 2>&1) || status=$?
+  open_finished_at="$(timestamp_utc)"
+
+  if [[ "${status}" -eq 0 ]]; then
+    printf '%s\n' "${open_op_id}" >>"${ack_file}"
+    write_case_event "${history}" 1 "ok" "open-txn" \
+      "{:op-id \"${open_op_id}\" :key 1 :value \"held\" :primary \"${observed_primary}\" :sleep-seconds ${open_sleep}}"
+  else
+    printf '%s\n' "${output}" >>"${failures}"
+    write_case_event "${history}" 1 "fail" "open-txn" \
+      "{:op-id \"${open_op_id}\" :key 1 :value \"held\" :primary \"${observed_primary}\" :sleep-seconds ${open_sleep}}"
+  fi
+
+  post_primary=$(current_primary_name 2>/dev/null || true)
+  [[ -n "${post_primary}" ]] || post_primary="unknown"
+
+  write_case_event "${history}" 2 "invoke" "append" \
+    "{:op-id \"${post_op_id}\" :key 2 :value \"post\" :primary \"${post_primary}\"}"
+  post_status=0
+  if psql_vip "
+BEGIN ISOLATION LEVEL ${isolation};
+INSERT INTO jepsen.append_values(run_id, op_id, key_id, value, client_id, observed_primary, isolation)
+VALUES ($(sql_literal "${run_id}"), $(sql_literal "${post_op_id}"), 2, 'post', 2, $(sql_literal "${post_primary}"), $(sql_literal "${isolation}"));
+COMMIT;
+" >/dev/null 2>>"${failures}"; then
+    printf '%s\n' "${post_op_id}" >>"${ack_file}"
+    write_case_event "${history}" 2 "ok" "append" \
+      "{:op-id \"${post_op_id}\" :key 2 :value \"post\" :primary \"${post_primary}\"}"
+  else
+    post_status=$?
+    write_case_event "${history}" 2 "fail" "append" \
+      "{:op-id \"${post_op_id}\" :key 2 :value \"post\" :primary \"${post_primary}\"}"
+  fi
+
+  jq -n \
+    --arg runId "${run_id}" \
+    --arg isolation "${isolation}" \
+    --arg initialPrimary "${observed_primary}" \
+    --arg finalPrimary "${post_primary}" \
+    --arg openOpId "${open_op_id}" \
+    --arg preOpId "${pre_op_id}" \
+    --arg postOpId "${post_op_id}" \
+    --arg startedAt "${open_started_at}" \
+    --arg finishedAt "${open_finished_at}" \
+    --arg output "${output}" \
+    --argjson sleepSeconds "${open_sleep}" \
+    --argjson openExitStatus "${status}" \
+    --argjson postExitStatus "${post_status}" \
+    '{
+      workload: "open-transaction-failover",
+      runId: $runId,
+      isolation: $isolation,
+      initialPrimary: $initialPrimary,
+      finalPrimary: $finalPrimary,
+      preOpId: $preOpId,
+      openOpId: $openOpId,
+      postOpId: $postOpId,
+      openStartedAt: $startedAt,
+      openFinishedAt: $finishedAt,
+      openSleepSeconds: $sleepSeconds,
+      openExitStatus: $openExitStatus,
+      postExitStatus: $postExitStatus,
+      output: $output
+    }' >"${metadata_file}"
+
+  [[ "${post_status}" -eq 0 ]]
+}
+
 check_append_workload() {
   local run_id=$1
   local case_dir=$2

@@ -14,7 +14,7 @@ jepsen_primary_sample_interval="${PACMAN_JEPSEN_PRIMARY_SAMPLE_INTERVAL_SECONDS:
 jepsen_allow_async_loss="${PACMAN_JEPSEN_ALLOW_ASYNC_LOSS:-false}"
 jepsen_append_switchover_op_delay="${PACMAN_JEPSEN_APPEND_SWITCHOVER_OP_DELAY_SECONDS:-1}"
 jepsen_smoke_cases_default="append-smoke:none"
-jepsen_nightly_cases_default="append-smoke:none append-switchover:switchover append-failover:kill append-failover:packet append-failover:packet,kill append-failover:primary-dcs-partition append-failover:primary-replication-partition single-key-register:packet read-committed-txn:slow-network serializable-txn:packet,kill append-failover:repeated-failure"
+jepsen_nightly_cases_default="append-smoke:none append-switchover:switchover append-failover:kill append-failover:packet append-failover:packet,kill append-failover:primary-dcs-partition append-failover:primary-replication-partition append-failover:failover-chain open-transaction-failover:kill single-key-register:packet read-committed-txn:slow-network serializable-txn:packet,kill append-failover:repeated-failure"
 
 jepsen_default_cases() {
   case "$1" in
@@ -45,6 +45,8 @@ append-failover-packet append-failover:packet Append workload while partitioning
 append-failover-packet-kill append-failover:packet,kill Append workload while partitioning and killing the current primary.
 append-failover-primary-dcs-partition append-failover:primary-dcs-partition Append workload while isolating the current primary from DCS only.
 append-failover-primary-replication-partition append-failover:primary-replication-partition Append workload while blocking primary replication traffic only.
+append-failover-failover-chain append-failover:failover-chain Append workload while chaining manual failovers across all three data nodes.
+open-transaction-failover-kill open-transaction-failover:kill Hold a transaction open while killing the current primary.
 single-key-register-packet single-key-register:packet Register workload while partitioning the current primary.
 read-committed-txn-slow-network read-committed-txn:slow-network Read committed transaction workload under latency and loss.
 serializable-txn-packet-kill serializable-txn:packet,kill Serializable transaction workload under partition plus kill.
@@ -63,6 +65,8 @@ resolve_jepsen_case_spec() {
     append-failover-packet-kill | append-failover:packet,kill) printf 'append-failover:packet,kill\n' ;;
     append-failover-primary-dcs-partition | append-failover:primary-dcs-partition) printf 'append-failover:primary-dcs-partition\n' ;;
     append-failover-primary-replication-partition | append-failover:primary-replication-partition) printf 'append-failover:primary-replication-partition\n' ;;
+    append-failover-failover-chain | append-failover:failover-chain) printf 'append-failover:failover-chain\n' ;;
+    open-transaction-failover-kill | open-transaction-failover:kill) printf 'open-transaction-failover:kill\n' ;;
     single-key-register-packet | single-key-register:packet) printf 'single-key-register:packet\n' ;;
     read-committed-txn-slow-network | read-committed-txn:slow-network) printf 'read-committed-txn:slow-network\n' ;;
     serializable-txn-packet-kill | serializable-txn:packet,kill) printf 'serializable-txn:packet,kill\n' ;;
