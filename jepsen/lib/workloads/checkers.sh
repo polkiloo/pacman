@@ -653,3 +653,80 @@ EOF
 
   jq -e '.valid == true' "${checker_file}" >/dev/null
 }
+
+check_vip_write_routing() {
+  local workload=$1
+  local nemesis=$2
+  local case_dir=$3
+  local checker_file="${case_dir}/vip-routing-checker.json"
+  local route_file="${case_dir}/vip-routing.jsonl"
+
+  if [[ "${workload}" != "vip-routing" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"vip-write-routing","valid":true,"applicable":false}
+EOF
+    return 0
+  fi
+
+  if [[ ! -s "${route_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"vip-write-routing","valid":false,"applicable":true,"error":"missing VIP routing samples"}
+EOF
+    return 1
+  fi
+
+  jq -s --arg nemesis "${nemesis}" '
+    def known($value): (($value // "") != "" and ($value // "") != "unknown");
+    def stable:
+      known(.pacmanPrimaryBefore)
+      and known(.pacmanPrimaryAfter)
+      and known(.vipHolderBefore)
+      and known(.vipHolderAfter)
+      and .pacmanPrimaryBefore == .pacmanPrimaryAfter
+      and .vipHolderBefore == .vipHolderAfter;
+    def successful_stable_matches:
+      map(select(
+        .ok == true
+        and (.inRecovery == false)
+        and stable
+        and .pacmanPrimaryBefore == .vipHolderBefore
+      ));
+    def routed_to_replica_violations:
+      map(select(.ok == true and .inRecovery == true));
+    def stable_primary_mismatch_violations:
+      map(select(
+        .ok == true
+        and stable
+        and .pacmanPrimaryBefore != .vipHolderBefore
+      ));
+
+    successful_stable_matches as $matches
+    | routed_to_replica_violations as $replicaViolations
+    | stable_primary_mismatch_violations as $mismatchViolations
+    | ($matches | map(.pacmanPrimaryBefore) | unique | sort) as $matchedPrimaries
+    | {
+        checker: "vip-write-routing",
+        valid: (
+          (map(select(.ok == true)) | length) > 0
+          and ($replicaViolations | length) == 0
+          and ($mismatchViolations | length) == 0
+          and (
+            if $nemesis == "switchover"
+            then ($matchedPrimaries | length) >= 2
+            else ($matchedPrimaries | length) >= 1
+            end
+          )
+        ),
+        applicable: true,
+        samples: length,
+        successfulWrites: (map(select(.ok == true)) | length),
+        failedWrites: (map(select(.ok != true)) | length),
+        matchedPrimaryMembers: $matchedPrimaries,
+        routedToReplicaViolations: $replicaViolations,
+        stablePrimaryMismatchViolations: $mismatchViolations,
+        observations: .
+      }
+  ' "${route_file}" >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
+}

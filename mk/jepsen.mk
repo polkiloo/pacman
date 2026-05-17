@@ -1,4 +1,4 @@
-.PHONY: jepsen-ci-check jepsen-list-cases jepsen-smoke jepsen-nightly jepsen-case jepsen-case-append-smoke-none jepsen-case-append-switchover-switchover jepsen-case-append-failover-kill jepsen-case-append-failover-packet jepsen-case-append-failover-packet-kill jepsen-case-append-failover-primary-dcs-partition jepsen-case-append-failover-primary-replication-partition jepsen-case-append-failover-failover-chain jepsen-case-open-transaction-failover-kill jepsen-case-single-key-register-packet jepsen-case-read-committed-txn-slow-network jepsen-case-serializable-txn-packet-kill jepsen-case-append-failover-repeated-failure jepsen-docker-smoke jepsen-docker-nightly jepsen-docker-case jepsen-docker-case-append-smoke-none jepsen-docker-case-append-switchover-switchover jepsen-docker-case-append-failover-kill jepsen-docker-case-append-failover-packet jepsen-docker-case-append-failover-packet-kill jepsen-docker-case-append-failover-primary-dcs-partition jepsen-docker-case-append-failover-primary-replication-partition jepsen-docker-case-append-failover-failover-chain jepsen-docker-case-open-transaction-failover-kill jepsen-docker-case-single-key-register-packet jepsen-docker-case-read-committed-txn-slow-network jepsen-docker-case-serializable-txn-packet-kill jepsen-docker-case-append-failover-repeated-failure
+.PHONY: jepsen-ci-check jepsen-list-cases jepsen-smoke jepsen-nightly jepsen-case jepsen-case-append-smoke-none jepsen-case-append-switchover-switchover jepsen-case-append-failover-kill jepsen-case-append-failover-packet jepsen-case-append-failover-packet-kill jepsen-case-append-failover-primary-dcs-partition jepsen-case-append-failover-primary-replication-partition jepsen-case-append-failover-failover-chain jepsen-case-open-transaction-failover-kill jepsen-case-vip-routing-switchover jepsen-case-single-key-register-packet jepsen-case-read-committed-txn-slow-network jepsen-case-serializable-txn-packet-kill jepsen-case-append-failover-repeated-failure jepsen-docker-smoke jepsen-docker-nightly jepsen-docker-case jepsen-docker-case-append-smoke-none jepsen-docker-case-append-switchover-switchover jepsen-docker-case-append-failover-kill jepsen-docker-case-append-failover-packet jepsen-docker-case-append-failover-packet-kill jepsen-docker-case-append-failover-primary-dcs-partition jepsen-docker-case-append-failover-primary-replication-partition jepsen-docker-case-append-failover-failover-chain jepsen-docker-case-open-transaction-failover-kill jepsen-docker-case-vip-routing-switchover jepsen-docker-case-single-key-register-packet jepsen-docker-case-read-committed-txn-slow-network jepsen-docker-case-serializable-txn-packet-kill jepsen-docker-case-append-failover-repeated-failure
 
 jepsen-ci-check:
 	bash -n $(JEPSEN_CI_SCRIPT)
@@ -48,6 +48,9 @@ jepsen-case-append-failover-failover-chain:
 
 jepsen-case-open-transaction-failover-kill:
 	$(MAKE) jepsen-case PACMAN_JEPSEN_CASE=open-transaction-failover-kill
+
+jepsen-case-vip-routing-switchover:
+	$(MAKE) jepsen-case PACMAN_JEPSEN_CASE=vip-routing-switchover
 
 jepsen-case-single-key-register-packet:
 	$(MAKE) jepsen-case PACMAN_JEPSEN_CASE=single-key-register-packet
@@ -99,6 +102,9 @@ jepsen-docker-case-append-failover-failover-chain:
 
 jepsen-docker-case-open-transaction-failover-kill:
 	$(MAKE) jepsen-docker-case PACMAN_JEPSEN_CASE=open-transaction-failover-kill
+
+jepsen-docker-case-vip-routing-switchover:
+	$(MAKE) jepsen-docker-case PACMAN_JEPSEN_CASE=vip-routing-switchover
 
 jepsen-docker-case-single-key-register-packet:
 	$(MAKE) jepsen-docker-case PACMAN_JEPSEN_CASE=single-key-register-packet

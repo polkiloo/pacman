@@ -134,6 +134,8 @@ write_summary() {
         -name 'failover-chain.jsonl' -o \
         -name 'open-transaction-checker.json' -o \
         -name 'open-transaction.json' -o \
+        -name 'vip-routing-checker.json' -o \
+        -name 'vip-routing.jsonl' -o \
         -name 'primary-observations.jsonl' -o \
         -name 'pacman-cluster-snapshots.jsonl' -o \
         -name 'pg-stat-wal-receiver.jsonl' -o \

@@ -4,6 +4,7 @@ jepsen_pg_port="${PACMAN_JEPSEN_PG_PORT:-5432}"
 jepsen_pg_user="${PACMAN_JEPSEN_PG_USER:-postgres}"
 jepsen_pg_password="${PACMAN_JEPSEN_PG_PASSWORD:-pacman-demo-password}"
 jepsen_pg_database="${PACMAN_JEPSEN_PG_DATABASE:-postgres}"
+jepsen_vip_interface="${PACMAN_JEPSEN_VIP_INTERFACE:-eth0}"
 jepsen_default_ops="${PACMAN_JEPSEN_WORKLOAD_OPS:-12}"
 jepsen_default_duration="${PACMAN_JEPSEN_WORKLOAD_DURATION_SECONDS:-20}"
 jepsen_default_clients="${PACMAN_JEPSEN_WORKLOAD_CLIENTS:-3}"
@@ -14,7 +15,7 @@ jepsen_primary_sample_interval="${PACMAN_JEPSEN_PRIMARY_SAMPLE_INTERVAL_SECONDS:
 jepsen_allow_async_loss="${PACMAN_JEPSEN_ALLOW_ASYNC_LOSS:-false}"
 jepsen_append_switchover_op_delay="${PACMAN_JEPSEN_APPEND_SWITCHOVER_OP_DELAY_SECONDS:-1}"
 jepsen_smoke_cases_default="append-smoke:none"
-jepsen_nightly_cases_default="append-smoke:none append-switchover:switchover append-failover:kill append-failover:packet append-failover:packet,kill append-failover:primary-dcs-partition append-failover:primary-replication-partition append-failover:failover-chain open-transaction-failover:kill single-key-register:packet read-committed-txn:slow-network serializable-txn:packet,kill append-failover:repeated-failure"
+jepsen_nightly_cases_default="append-smoke:none append-switchover:switchover append-failover:kill append-failover:packet append-failover:packet,kill append-failover:primary-dcs-partition append-failover:primary-replication-partition append-failover:failover-chain open-transaction-failover:kill vip-routing:switchover single-key-register:packet read-committed-txn:slow-network serializable-txn:packet,kill append-failover:repeated-failure"
 
 jepsen_default_cases() {
   case "$1" in
@@ -47,6 +48,7 @@ append-failover-primary-dcs-partition append-failover:primary-dcs-partition Appe
 append-failover-primary-replication-partition append-failover:primary-replication-partition Append workload while blocking primary replication traffic only.
 append-failover-failover-chain append-failover:failover-chain Append workload while chaining manual failovers across all three data nodes.
 open-transaction-failover-kill open-transaction-failover:kill Hold a transaction open while killing the current primary.
+vip-routing-switchover vip-routing:switchover Verify vip-manager routes writes only to the current PACMAN primary during switchover.
 single-key-register-packet single-key-register:packet Register workload while partitioning the current primary.
 read-committed-txn-slow-network read-committed-txn:slow-network Read committed transaction workload under latency and loss.
 serializable-txn-packet-kill serializable-txn:packet,kill Serializable transaction workload under partition plus kill.
@@ -67,6 +69,7 @@ resolve_jepsen_case_spec() {
     append-failover-primary-replication-partition | append-failover:primary-replication-partition) printf 'append-failover:primary-replication-partition\n' ;;
     append-failover-failover-chain | append-failover:failover-chain) printf 'append-failover:failover-chain\n' ;;
     open-transaction-failover-kill | open-transaction-failover:kill) printf 'open-transaction-failover:kill\n' ;;
+    vip-routing-switchover | vip-routing:switchover) printf 'vip-routing:switchover\n' ;;
     single-key-register-packet | single-key-register:packet) printf 'single-key-register:packet\n' ;;
     read-committed-txn-slow-network | read-committed-txn:slow-network) printf 'read-committed-txn:slow-network\n' ;;
     serializable-txn-packet-kill | serializable-txn:packet,kill) printf 'serializable-txn:packet,kill\n' ;;

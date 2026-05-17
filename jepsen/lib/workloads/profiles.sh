@@ -232,6 +232,92 @@ COMMIT;
   [[ "${post_status}" -eq 0 ]]
 }
 
+run_vip_routing_workload() {
+  local run_id=$1
+  local case_dir=$2
+  local isolation=${3:-read committed}
+  local history="${case_dir}/history.edn"
+  local ack_file="${case_dir}/acknowledged-op-ids.txt"
+  local failures="${case_dir}/failures.log"
+  local route_file="${case_dir}/vip-routing.jsonl"
+  local duration=$((jepsen_default_duration + jepsen_nemesis_hold_seconds + 4))
+  local deadline=$((SECONDS + duration))
+  local op=0
+  local ok_count=0
+
+  : >"${ack_file}"
+  : >"${failures}"
+  : >"${route_file}"
+
+  while [[ "${SECONDS}" -lt "${deadline}" ]]; do
+    op=$((op + 1))
+    local client=$(( (op - 1) % jepsen_default_clients ))
+    local key=$(( (op - 1) % jepsen_default_keys ))
+    local op_id="${run_id}-vip-routing-${op}"
+    local value="route-${op}"
+    local observed_at primary_before primary_after vip_before vip_after output status in_recovery server_addr returned_op
+
+    observed_at="$(timestamp_utc)"
+    primary_before=$(current_primary_name 2>/dev/null || true)
+    [[ -n "${primary_before}" ]] || primary_before="unknown"
+    vip_before=$(vip_holder_member 2>/dev/null || true)
+    [[ -n "${vip_before}" ]] || vip_before="unknown"
+
+    write_case_event "${history}" "${client}" "invoke" "vip-routing" \
+      "{:op-id \"${op_id}\" :key ${key} :value \"${value}\" :pacman-primary \"${primary_before}\" :vip-holder \"${vip_before}\"}"
+
+    status=0
+    output=$(psql_vip "
+BEGIN ISOLATION LEVEL ${isolation};
+WITH inserted AS (
+  INSERT INTO jepsen.append_values(run_id, op_id, key_id, value, client_id, observed_primary, isolation)
+  VALUES ($(sql_literal "${run_id}"), $(sql_literal "${op_id}"), ${key}, $(sql_literal "${value}"), ${client}, $(sql_literal "${primary_before}"), $(sql_literal "${isolation}"))
+  RETURNING op_id
+)
+SELECT pg_is_in_recovery(), coalesce(inet_server_addr()::text, ''), op_id FROM inserted;
+COMMIT;
+" 2>&1) || status=$?
+
+    primary_after=$(current_primary_name 2>/dev/null || true)
+    [[ -n "${primary_after}" ]] || primary_after="unknown"
+    vip_after=$(vip_holder_member 2>/dev/null || true)
+    [[ -n "${vip_after}" ]] || vip_after="unknown"
+
+    in_recovery=""
+    server_addr=""
+    returned_op=""
+    if [[ "${status}" -eq 0 ]]; then
+      IFS='|' read -r in_recovery server_addr returned_op <<<"$(printf '%s\n' "${output}" | sed '/^$/d' | tail -n 1)"
+      printf '%s\n' "${op_id}" >>"${ack_file}"
+      ok_count=$((ok_count + 1))
+      write_case_event "${history}" "${client}" "ok" "vip-routing" \
+        "{:op-id \"${op_id}\" :key ${key} :value \"${value}\" :pacman-primary-before \"${primary_before}\" :pacman-primary-after \"${primary_after}\" :vip-holder-before \"${vip_before}\" :vip-holder-after \"${vip_after}\" :in-recovery \"${in_recovery}\"}"
+    else
+      printf '%s\n' "${output}" >>"${failures}"
+      write_case_event "${history}" "${client}" "fail" "vip-routing" \
+        "{:op-id \"${op_id}\" :key ${key} :value \"${value}\" :pacman-primary-before \"${primary_before}\" :pacman-primary-after \"${primary_after}\" :vip-holder-before \"${vip_before}\" :vip-holder-after \"${vip_after}\"}"
+    fi
+
+    append_jsonl "${route_file}" \
+      observedAt "$(json_escape "${observed_at}")" \
+      opId "$(json_escape "${op_id}")" \
+      ok "$([[ "${status}" -eq 0 ]] && printf true || printf false)" \
+      status "${status}" \
+      pacmanPrimaryBefore "$(json_escape "${primary_before}")" \
+      pacmanPrimaryAfter "$(json_escape "${primary_after}")" \
+      vipHolderBefore "$(json_escape "${vip_before}")" \
+      vipHolderAfter "$(json_escape "${vip_after}")" \
+      inRecovery "$([[ "${in_recovery}" == "t" ]] && printf true || printf false)" \
+      serverAddr "$(json_escape "${server_addr}")" \
+      returnedOp "$(json_escape "${returned_op}")" \
+      error "$(json_escape "$([[ "${status}" -eq 0 ]] && printf '' || printf '%s' "${output}")")"
+
+    sleep 1
+  done
+
+  [[ "${ok_count}" -gt 0 ]]
+}
+
 check_append_workload() {
   local run_id=$1
   local case_dir=$2

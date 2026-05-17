@@ -92,6 +92,15 @@ service_for_member() {
   esac
 }
 
+member_for_service() {
+  case "$1" in
+    pacman-primary) printf 'alpha-1\n' ;;
+    pacman-replica) printf 'alpha-2\n' ;;
+    pacman-replica-2) printf 'alpha-3\n' ;;
+    *) return 1 ;;
+  esac
+}
+
 peer_service_for_member() {
   case "$1" in
     alpha-1) printf 'pacman-replica pacman-replica-2\n' ;;
@@ -99,6 +108,20 @@ peer_service_for_member() {
     alpha-3) printf 'pacman-primary\n' ;;
     *) return 1 ;;
   esac
+}
+
+vip_holder_member() {
+  local service member output
+
+  for service in pacman-primary pacman-replica pacman-replica-2; do
+    if output=$(compose_exec "${service}" /bin/sh -lc "ip -o -4 addr show dev '${jepsen_vip_interface}' | grep -q ' ${jepsen_pg_host}/'" 2>&1); then
+      member=$(member_for_service "${service}") || return 1
+      printf '%s\n' "${member}"
+      return 0
+    fi
+  done
+
+  return 1
 }
 
 service_ip() {
