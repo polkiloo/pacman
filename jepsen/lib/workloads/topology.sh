@@ -114,8 +114,21 @@ dcs_services() {
   printf 'pacman-dcs pacman-dcs-2 pacman-dcs-3\n'
 }
 
+dcs_member_for_service() {
+  case "$1" in
+    pacman-dcs) printf 'alpha-dcs\n' ;;
+    pacman-dcs-2) printf 'alpha-dcs-2\n' ;;
+    pacman-dcs-3) printf 'alpha-dcs-3\n' ;;
+    *) return 1 ;;
+  esac
+}
+
 dcs_client_endpoints() {
   printf 'http://pacman-dcs:2379,http://pacman-dcs-2:2379,http://pacman-dcs-3:2379\n'
+}
+
+dcs_initial_cluster() {
+  printf 'alpha-dcs=http://pacman-dcs:2380,alpha-dcs-2=http://pacman-dcs-2:2380,alpha-dcs-3=http://pacman-dcs-3:2380\n'
 }
 
 vip_holder_member() {

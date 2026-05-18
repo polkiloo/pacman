@@ -175,6 +175,147 @@ raise SystemExit(0 if ok else 1)" "${endpoints}" 2>&1) || status=$?
   return 1
 }
 
+dcs_quorum_health_json() {
+  local endpoints
+  endpoints=$(dcs_client_endpoints)
+
+  compose_exec pacman-primary python3 -c \
+    "import json, sys, urllib.request
+endpoints = sys.argv[1].split(',')
+results = []
+healthy = 0
+for endpoint in endpoints:
+    try:
+        body = urllib.request.urlopen(endpoint + '/health', timeout=3).read().decode()
+        results.append({'endpoint': endpoint, 'ok': True, 'body': body})
+        healthy += 1
+    except Exception as exc:
+        results.append({'endpoint': endpoint, 'ok': False, 'error': str(exc)})
+print(json.dumps({
+    'totalEndpoints': len(endpoints),
+    'healthyEndpoints': healthy,
+    'failedEndpoints': len(endpoints) - healthy,
+    'endpoints': results,
+}, sort_keys=True))" "${endpoints}"
+}
+
+dcs_member_running() {
+  local service=$1
+  local member
+
+  member=$(dcs_member_for_service "${service}") || return 1
+  compose_exec "${service}" pgrep -f "/usr/bin/[e]tcd .*--name ${member}" >/dev/null 2>&1
+}
+
+record_dcs_quorum_probe() {
+  local case_dir=$1
+  local nemesis=$2
+  local phase=$3
+  local target_service=$4
+  local sample_file="${case_dir}/dcs-quorum-during-nemesis.jsonl"
+  local target_member observed_at output status target_running total healthy failed
+
+  target_member=$(dcs_member_for_service "${target_service}" 2>/dev/null || printf 'unknown')
+  observed_at="$(timestamp_utc)"
+  target_running=false
+  if dcs_member_running "${target_service}"; then
+    target_running=true
+  fi
+
+  status=0
+  output=$(dcs_quorum_health_json 2>&1) || status=$?
+  if [[ "${status}" -eq 0 ]] && printf '%s\n' "${output}" | jq -e . >/dev/null 2>&1; then
+    total=$(printf '%s\n' "${output}" | jq -r '.totalEndpoints // 0')
+    healthy=$(printf '%s\n' "${output}" | jq -r '.healthyEndpoints // 0')
+    failed=$(printf '%s\n' "${output}" | jq -r '.failedEndpoints // 0')
+    append_jsonl "${sample_file}" \
+      observedAt "$(json_escape "${observed_at}")" \
+      nemesis "$(json_escape "${nemesis}")" \
+      phase "$(json_escape "${phase}")" \
+      targetService "$(json_escape "${target_service}")" \
+      targetMember "$(json_escape "${target_member}")" \
+      targetRunning "${target_running}" \
+      ok true \
+      totalEndpoints "${total}" \
+      healthyEndpoints "${healthy}" \
+      failedEndpoints "${failed}" \
+      health "${output}" \
+      error "$(json_escape "")"
+    return 0
+  fi
+
+  append_jsonl "${sample_file}" \
+    observedAt "$(json_escape "${observed_at}")" \
+    nemesis "$(json_escape "${nemesis}")" \
+    phase "$(json_escape "${phase}")" \
+    targetService "$(json_escape "${target_service}")" \
+    targetMember "$(json_escape "${target_member}")" \
+    targetRunning "${target_running}" \
+    ok false \
+    totalEndpoints 0 \
+    healthyEndpoints 0 \
+    failedEndpoints 0 \
+    health null \
+    error "$(json_escape "${output}")"
+  return 1
+}
+
+stop_dcs_member() {
+  local service=$1
+  local member
+
+  member=$(dcs_member_for_service "${service}")
+  compose_exec "${service}" /bin/sh -lc \
+    "pkill -TERM -f '/usr/bin/[e]tcd .*--name ${member}' 2>/dev/null || true"
+  compose_exec "${service}" /bin/sh -lc \
+    "deadline=\$(( \$(date +%s) + 20 )); while pgrep -f '/usr/bin/[e]tcd .*--name ${member}' >/dev/null 2>&1; do if [ \$(date +%s) -ge \${deadline} ]; then echo 'timed out waiting for ${member} to stop' >&2; exit 1; fi; sleep 1; done"
+}
+
+start_dcs_member() {
+  local service=$1
+  local member initial_cluster
+
+  member=$(dcs_member_for_service "${service}")
+  initial_cluster=$(dcs_initial_cluster)
+  if dcs_member_running "${service}"; then
+    return 0
+  fi
+
+  compose_exec "${service}" /bin/bash -lc \
+    "nohup /usr/bin/etcd \
+      --name ${member} \
+      --data-dir /var/lib/etcd/pacman \
+      --listen-client-urls http://0.0.0.0:2379 \
+      --advertise-client-urls http://${service}:2379 \
+      --listen-peer-urls http://0.0.0.0:2380 \
+      --initial-advertise-peer-urls http://${service}:2380 \
+      --initial-cluster ${initial_cluster} \
+      --initial-cluster-state existing \
+      --initial-cluster-token pacman-cluster \
+      >>/var/log/etcd.log 2>&1 &"
+  compose_exec "${service}" /bin/sh -lc \
+    "deadline=\$(( \$(date +%s) + 20 )); while ! pgrep -f '/usr/bin/[e]tcd .*--name ${member}' >/dev/null 2>&1; do if [ \$(date +%s) -ge \${deadline} ]; then echo 'timed out waiting for ${member} to start' >&2; cat /var/log/etcd.log 2>/dev/null || true; exit 1; fi; sleep 1; done"
+}
+
+wait_for_dcs_healthy_count() {
+  local expected=$1
+  local timeout=${2:-60}
+  local deadline=$((SECONDS + timeout))
+  local output healthy
+
+  while [[ "${SECONDS}" -lt "${deadline}" ]]; do
+    output=$(dcs_quorum_health_json 2>/dev/null || true)
+    healthy=$(printf '%s\n' "${output}" | jq -r '.healthyEndpoints // 0' 2>/dev/null || printf '0')
+    if [[ "${healthy}" -ge "${expected}" ]]; then
+      return 0
+    fi
+    sleep 2
+  done
+
+  printf 'timed out waiting for %s healthy DCS endpoints; last=%s\n' "${expected}" "${output:-}" >&2
+  return 1
+}
+
 slow_network_on() {
   local service=$1
 
@@ -324,6 +465,28 @@ run_nemesis_profile() {
         iptables_replication_heal "${service}" ${peer_services} >>"${run_dir}/nemesis.log" 2>&1 || true
         printf '{:time "%s" :nemesis :primary-replication-partition :action :stop :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
+        ;;
+      dcs-kill-one)
+        local target_dcs_service target_dcs_member
+        target_dcs_service="${jepsen_dcs_kill_service}"
+        target_dcs_member=$(dcs_member_for_service "${target_dcs_service}" 2>/dev/null || printf '')
+        if [[ -z "${target_dcs_member}" ]]; then
+          printf 'unsupported DCS kill target service: %s\n' "${target_dcs_service}" >>"${run_dir}/nemesis.log"
+          return 2
+        fi
+
+        record_dcs_quorum_probe "${run_dir}" "${profile}" "before-kill" "${target_dcs_service}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        printf '{:time "%s" :nemesis :dcs-kill-one :action :start :target "%s" :member "%s"}\n' "$(timestamp_utc)" "${target_dcs_service}" "${target_dcs_member}" >>"${schedule_file}"
+        stop_dcs_member "${target_dcs_service}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        wait_for_dcs_healthy_count 2 30 >>"${run_dir}/nemesis.log" 2>&1 || true
+        record_dcs_quorum_probe "${run_dir}" "${profile}" "during-kill" "${target_dcs_service}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "${target_dcs_member}" "${service}" || true
+        sleep "${jepsen_nemesis_hold_seconds}"
+        start_dcs_member "${target_dcs_service}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        wait_for_dcs_healthy_count 3 60 >>"${run_dir}/nemesis.log" 2>&1 || true
+        printf '{:time "%s" :nemesis :dcs-kill-one :action :stop :target "%s" :member "%s"}\n' "$(timestamp_utc)" "${target_dcs_service}" "${target_dcs_member}" >>"${schedule_file}"
+        record_dcs_quorum_probe "${run_dir}" "${profile}" "after-restart" "${target_dcs_service}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${target_dcs_member}" "${service}" || true
         ;;
       failover-chain)
         local target target_service source source_service output chain_status requested_at step

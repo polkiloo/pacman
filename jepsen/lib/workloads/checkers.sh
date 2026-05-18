@@ -555,6 +555,58 @@ EOF
   jq -e '.valid == true' "${checker_file}" >/dev/null
 }
 
+check_dcs_quorum_during_nemesis() {
+  local nemesis=$1
+  local case_dir=$2
+  local checker_file="${case_dir}/dcs-quorum-checker.json"
+  local sample_file="${case_dir}/dcs-quorum-during-nemesis.jsonl"
+
+  if [[ "${nemesis}" != "dcs-kill-one" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"dcs-quorum-during-nemesis","valid":true,"applicable":false}
+EOF
+    return 0
+  fi
+
+  if [[ ! -s "${sample_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"dcs-quorum-during-nemesis","valid":false,"applicable":true,"error":"missing DCS quorum probe samples"}
+EOF
+    return 1
+  fi
+
+  jq -s '
+    def phase($name): map(select(.phase == $name));
+    (phase("before-kill")) as $before
+    | (phase("during-kill")) as $during
+    | (phase("after-restart")) as $after
+    | ($during | map(select(
+        .ok == true
+        and (.healthyEndpoints // 0) >= 2
+        and (.failedEndpoints // 0) >= 1
+        and .targetRunning == false
+      ))) as $duringQuorum
+    | ($after | map(select(
+        .ok == true
+        and (.healthyEndpoints // 0) == (.totalEndpoints // 0)
+        and (.totalEndpoints // 0) >= 3
+        and .targetRunning == true
+      ))) as $afterRecovered
+    | {
+        checker: "dcs-quorum-during-nemesis",
+        valid: (($duringQuorum | length) > 0 and ($afterRecovered | length) > 0),
+        applicable: true,
+        samples: length,
+        beforeSamples: ($before | length),
+        duringQuorumSamples: ($duringQuorum | length),
+        afterRecoveredSamples: ($afterRecovered | length),
+        observations: .
+      }
+  ' "${sample_file}" >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
+}
+
 check_failover_chain() {
   local nemesis=$1
   local case_dir=$2

@@ -101,7 +101,7 @@ These campaigns now run against the Docker lab's real three-node external etcd
 quorum.
 
 - [x] Three-node etcd target for PACMAN Jepsen.
-- [ ] Kill one DCS node.
+- [x] Kill one DCS node.
 - [ ] Lose DCS majority.
 - [ ] Isolate primary from DCS majority.
 - [ ] Full DCS restart.
