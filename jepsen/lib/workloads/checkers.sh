@@ -561,7 +561,7 @@ check_dcs_quorum_during_nemesis() {
   local checker_file="${case_dir}/dcs-quorum-checker.json"
   local sample_file="${case_dir}/dcs-quorum-during-nemesis.jsonl"
 
-  if [[ "${nemesis}" != "dcs-kill-one" ]]; then
+  if [[ "${nemesis}" != "dcs-kill-one" && "${nemesis}" != "dcs-lose-majority" ]]; then
     cat >"${checker_file}" <<'EOF'
 {"checker":"dcs-quorum-during-nemesis","valid":true,"applicable":false}
 EOF
@@ -575,17 +575,38 @@ EOF
     return 1
   fi
 
-  jq -s '
+  jq -s --arg nemesis "${nemesis}" '
     def phase($name): map(select(.phase == $name));
-    (phase("before-kill")) as $before
-    | (phase("during-kill")) as $during
+    (
+      if $nemesis == "dcs-lose-majority" then phase("before-majority-loss")
+      else phase("before-kill")
+      end
+    ) as $before
+    | (
+      if $nemesis == "dcs-lose-majority" then phase("during-majority-loss")
+      else phase("during-kill")
+      end
+    ) as $during
     | (phase("after-restart")) as $after
-    | ($during | map(select(
-        .ok == true
-        and (.healthyEndpoints // 0) >= 2
-        and (.failedEndpoints // 0) >= 1
-        and .targetRunning == false
-      ))) as $duringQuorum
+    | (
+        if $nemesis == "dcs-lose-majority" then
+          $during | map(select(
+            .ok == true
+            and (.healthyEndpoints // 0) <= 1
+            and (.failedEndpoints // 0) >= 2
+            and (.targetCount // 0) >= 2
+            and (.runningTargets // 0) == 0
+            and .targetRunning == false
+          ))
+        else
+          $during | map(select(
+            .ok == true
+            and (.healthyEndpoints // 0) >= 2
+            and (.failedEndpoints // 0) >= 1
+            and .targetRunning == false
+          ))
+        end
+      ) as $duringExpected
     | ($after | map(select(
         .ok == true
         and (.healthyEndpoints // 0) == (.totalEndpoints // 0)
@@ -594,11 +615,12 @@ EOF
       ))) as $afterRecovered
     | {
         checker: "dcs-quorum-during-nemesis",
-        valid: (($duringQuorum | length) > 0 and ($afterRecovered | length) > 0),
+        valid: (($duringExpected | length) > 0 and ($afterRecovered | length) > 0),
         applicable: true,
+        nemesis: $nemesis,
         samples: length,
         beforeSamples: ($before | length),
-        duringQuorumSamples: ($duringQuorum | length),
+        duringExpectedSamples: ($duringExpected | length),
         afterRecoveredSamples: ($afterRecovered | length),
         observations: .
       }
