@@ -131,12 +131,26 @@ record_dcs_traffic_probe() {
   local case_dir=$2
   local nemesis=$3
   local sample_file="${case_dir}/dcs-traffic-during-nemesis.jsonl"
-  local observed_at output status
+  local endpoints observed_at output status
+
+  endpoints=$(dcs_client_endpoints)
 
   observed_at="$(timestamp_utc)"
   status=0
   output=$(compose_exec "${service}" python3 -c \
-    "import urllib.request; urllib.request.urlopen('http://pacman-dcs:2379/health', timeout=3).read()" 2>&1) || status=$?
+    "import json, sys, urllib.request
+endpoints = sys.argv[1].split(',')
+results = []
+ok = True
+for endpoint in endpoints:
+    try:
+        body = urllib.request.urlopen(endpoint + '/health', timeout=3).read().decode()
+        results.append({'endpoint': endpoint, 'ok': True, 'body': body})
+    except Exception as exc:
+        ok = False
+        results.append({'endpoint': endpoint, 'ok': False, 'error': str(exc)})
+print(json.dumps(results, sort_keys=True))
+raise SystemExit(0 if ok else 1)" "${endpoints}" 2>&1) || status=$?
 
   if [[ "${status}" -eq 0 ]]; then
     append_jsonl "${sample_file}" \
@@ -145,6 +159,7 @@ record_dcs_traffic_probe() {
       service "$(json_escape "${service}")" \
       ok true \
       output "$(json_escape "${output}")" \
+      endpoints "$(json_escape "${endpoints}")" \
       error "$(json_escape "")"
     return 0
   fi
@@ -155,6 +170,7 @@ record_dcs_traffic_probe() {
     service "$(json_escape "${service}")" \
     ok false \
     output "$(json_escape "")" \
+    endpoints "$(json_escape "${endpoints}")" \
     error "$(json_escape "${output}")"
   return 1
 }
@@ -287,14 +303,16 @@ run_nemesis_profile() {
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         ;;
       primary-dcs-partition)
-        printf '{:time "%s" :nemesis :primary-dcs-partition :action :start :target "%s" :dcs "alpha-dcs"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
-        iptables_partition "${service}" pacman-dcs >>"${run_dir}/nemesis.log" 2>&1 || true
+        local dcs_targets
+        dcs_targets=$(dcs_services)
+        printf '{:time "%s" :nemesis :primary-dcs-partition :action :start :target "%s" :dcs "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" "${dcs_targets}" >>"${schedule_file}"
+        iptables_partition "${service}" ${dcs_targets} >>"${run_dir}/nemesis.log" 2>&1 || true
         record_client_traffic_probe "${run_dir}" "${profile}" "${member:-unknown}-dcs-isolated" >>"${run_dir}/nemesis.log" 2>&1 || true
         record_replication_health_probe "${service}" "${run_dir}" "${profile}" >>"${run_dir}/nemesis.log" 2>&1 || true
         capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         sleep "${jepsen_nemesis_hold_seconds}"
-        iptables_heal "${service}" pacman-dcs >>"${run_dir}/nemesis.log" 2>&1 || true
-        printf '{:time "%s" :nemesis :primary-dcs-partition :action :stop :target "%s" :dcs "alpha-dcs"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
+        iptables_heal "${service}" ${dcs_targets} >>"${run_dir}/nemesis.log" 2>&1 || true
+        printf '{:time "%s" :nemesis :primary-dcs-partition :action :stop :target "%s" :dcs "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" "${dcs_targets}" >>"${schedule_file}"
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         ;;
       primary-replication-partition)

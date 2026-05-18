@@ -110,6 +110,14 @@ peer_service_for_member() {
   esac
 }
 
+dcs_services() {
+  printf 'pacman-dcs pacman-dcs-2 pacman-dcs-3\n'
+}
+
+dcs_client_endpoints() {
+  printf 'http://pacman-dcs:2379,http://pacman-dcs-2:2379,http://pacman-dcs-3:2379\n'
+}
+
 vip_holder_member() {
   local service member output
 
@@ -130,6 +138,8 @@ service_ip() {
     pacman-replica) printf '172.28.0.12\n' ;;
     pacman-replica-2) printf '172.28.0.13\n' ;;
     pacman-dcs) printf '172.28.0.10\n' ;;
+    pacman-dcs-2) printf '172.28.0.14\n' ;;
+    pacman-dcs-3) printf '172.28.0.15\n' ;;
     *) return 1 ;;
   esac
 }

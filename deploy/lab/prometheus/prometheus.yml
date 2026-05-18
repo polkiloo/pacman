@@ -38,6 +38,20 @@ scrape_configs:
           lab_role: dcs
           lab_service: pacman-dcs
       - targets:
+          - pacman-dcs-2:9100
+        labels:
+          lab_member: alpha-dcs-2
+          lab_node: alpha-dcs-2
+          lab_role: dcs
+          lab_service: pacman-dcs-2
+      - targets:
+          - pacman-dcs-3:9100
+        labels:
+          lab_member: alpha-dcs-3
+          lab_node: alpha-dcs-3
+          lab_role: dcs
+          lab_service: pacman-dcs-3
+      - targets:
           - pacman-primary:9100
         labels:
           lab_member: alpha-1
@@ -69,3 +83,17 @@ scrape_configs:
           lab_node: alpha-dcs
           lab_role: dcs
           lab_service: pacman-dcs
+      - targets:
+          - pacman-dcs-2:2379
+        labels:
+          lab_member: alpha-dcs-2
+          lab_node: alpha-dcs-2
+          lab_role: dcs
+          lab_service: pacman-dcs-2
+      - targets:
+          - pacman-dcs-3:2379
+        labels:
+          lab_member: alpha-dcs-3
+          lab_node: alpha-dcs-3
+          lab_role: dcs
+          lab_service: pacman-dcs-3

@@ -38,6 +38,60 @@ services:
     network_mode: "service:pacman-dcs"
     pid: "service:pacman-dcs"
 
+  pacman-dcs-2:
+    image: ${PACMAN_LAB_IMAGE:-pacman-lab:local}
+    build:
+      context: ../..
+      dockerfile: test/docker/pacman-ansible-install.Dockerfile
+    container_name: pacman-lab-dcs-2
+    hostname: pacman-dcs-2
+    working_dir: /workspace
+    command: ["/bin/sh", "-lc", "sleep infinity"]
+    volumes:
+      - ../..:/workspace:ro
+      - ../../bin/ansible-install-rpm:/artifacts:ro
+      - ./.local/alpha-dcs-2/etc/pacman:/etc/pacman
+      - ./.local/alpha-dcs-2/var/lib/etcd:/var/lib/etcd
+      - ./.local/alpha-dcs-2/var/log:/var/log
+    networks:
+      pacman-lab-net:
+        ipv4_address: 172.28.0.14
+
+  pacman-dcs-2-node-exporter:
+    <<: *node_exporter_common
+    container_name: pacman-lab-dcs-2-node-exporter
+    depends_on:
+      - pacman-dcs-2
+    network_mode: "service:pacman-dcs-2"
+    pid: "service:pacman-dcs-2"
+
+  pacman-dcs-3:
+    image: ${PACMAN_LAB_IMAGE:-pacman-lab:local}
+    build:
+      context: ../..
+      dockerfile: test/docker/pacman-ansible-install.Dockerfile
+    container_name: pacman-lab-dcs-3
+    hostname: pacman-dcs-3
+    working_dir: /workspace
+    command: ["/bin/sh", "-lc", "sleep infinity"]
+    volumes:
+      - ../..:/workspace:ro
+      - ../../bin/ansible-install-rpm:/artifacts:ro
+      - ./.local/alpha-dcs-3/etc/pacman:/etc/pacman
+      - ./.local/alpha-dcs-3/var/lib/etcd:/var/lib/etcd
+      - ./.local/alpha-dcs-3/var/log:/var/log
+    networks:
+      pacman-lab-net:
+        ipv4_address: 172.28.0.15
+
+  pacman-dcs-3-node-exporter:
+    <<: *node_exporter_common
+    container_name: pacman-lab-dcs-3-node-exporter
+    depends_on:
+      - pacman-dcs-3
+    network_mode: "service:pacman-dcs-3"
+    pid: "service:pacman-dcs-3"
+
   pacman-primary:
     image: ${PACMAN_LAB_IMAGE:-pacman-lab:local}
     build:
@@ -160,6 +214,10 @@ services:
     depends_on:
       - pacman-dcs
       - pacman-dcs-node-exporter
+      - pacman-dcs-2
+      - pacman-dcs-2-node-exporter
+      - pacman-dcs-3
+      - pacman-dcs-3-node-exporter
       - pacman-primary
       - pacman-primary-node-exporter
       - pacman-replica

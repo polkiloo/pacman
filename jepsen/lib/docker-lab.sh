@@ -64,6 +64,12 @@ collect_artifacts() {
   compose_exec pacman-dcs /bin/sh -lc \
     "cat /var/log/etcd.log 2>/dev/null || true" \
     >"${run_dir}/dcs-logs/alpha-dcs-etcd.log" 2>&1 || true
+  compose_exec pacman-dcs-2 /bin/sh -lc \
+    "cat /var/log/etcd.log 2>/dev/null || true" \
+    >"${run_dir}/dcs-logs/alpha-dcs-2-etcd.log" 2>&1 || true
+  compose_exec pacman-dcs-3 /bin/sh -lc \
+    "cat /var/log/etcd.log 2>/dev/null || true" \
+    >"${run_dir}/dcs-logs/alpha-dcs-3-etcd.log" 2>&1 || true
 
   compose_exec pacman-primary /bin/sh -lc \
     "if [ -d /var/lib/pgsql/17/data/log ]; then find /var/lib/pgsql/17/data/log -maxdepth 1 -type f -print -exec cat {} \\; 2>/dev/null; fi" \
