@@ -946,6 +946,7 @@ func TestDaemonRecordsControlPlanePublishFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new daemon: %v", err)
 	}
+	daemon.apiServer = loopbackHTTPServer{httpServer: daemon.apiServer}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1602,6 +1603,14 @@ func (server startErrorServer) Start(context.Context, string) error {
 
 func (server startErrorServer) Wait() error {
 	return nil
+}
+
+type loopbackHTTPServer struct {
+	httpServer
+}
+
+func (server loopbackHTTPServer) Start(ctx context.Context, _ string) error {
+	return server.httpServer.Start(ctx, "127.0.0.1:0")
 }
 
 type loopbackPeerServer struct {
