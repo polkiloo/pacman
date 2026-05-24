@@ -355,18 +355,46 @@ wait_for_dcs_healthy_at_most() {
   return 1
 }
 
+start_pacman_node_runtime() {
+  local service=$1
+
+  compose_exec "${service}" /bin/sh -lc \
+    "mkdir -p /var/log/pacman; cd /var/lib/pacman && nohup runuser -u postgres -- /bin/bash -lc '. /etc/sysconfig/pacmand 2>/dev/null || true; export PACMAND_CONFIG PACMAND_EXTRA_ARGS PGPASSWORD; cd /var/lib/pacman && exec /usr/bin/pacmand -config \"\${PACMAND_CONFIG:-/etc/pacman/pacmand.yaml}\" \${PACMAND_EXTRA_ARGS:-}' >>/var/log/pacman/pacmand.log 2>&1 &"
+  compose_exec "${service}" /bin/sh -lc \
+    "deadline=\$(( \$(date +%s) + 30 )); while ! pgrep -u postgres -f '/usr/bin/[p]acmand -config /etc/pacman/pacmand.yaml' >/dev/null 2>&1; do if [ \$(date +%s) -ge \${deadline} ]; then echo 'timed out waiting for pacmand to start' >&2; cat /var/log/pacman/pacmand.log 2>/dev/null || true; exit 1; fi; sleep 1; done"
+  compose_exec "${service}" /bin/sh -lc \
+    "nohup /usr/local/bin/vip-manager --config /etc/pacman/vip-manager.yml </dev/null >>/var/log/pacman/vip-manager.log 2>&1 &"
+  compose_exec "${service}" /bin/sh -lc \
+    "deadline=\$(( \$(date +%s) + 30 )); while ! pgrep -f '/usr/local/bin/[v]ip-manager --config /etc/pacman/vip-manager.yml' >/dev/null 2>&1; do if [ \$(date +%s) -ge \${deadline} ]; then echo 'timed out waiting for vip-manager to start' >&2; cat /var/log/pacman/vip-manager.log 2>/dev/null || true; exit 1; fi; sleep 1; done"
+}
+
+stop_pacman_node_runtime() {
+  local service=$1
+
+  compose_exec "${service}" /bin/sh -lc \
+    "pids=\$(pgrep -f '/usr/local/bin/[v]ip-manager --config /etc/pacman/vip-manager.yml' 2>/dev/null || true); if [ -n \"\${pids}\" ]; then kill \${pids}; fi"
+  compose_exec "${service}" /bin/sh -lc \
+    "ip addr del '${jepsen_pg_host}/24' dev '${jepsen_vip_interface}' 2>/dev/null || true"
+  compose_exec "${service}" /bin/sh -lc \
+    "pkill -u postgres -f '/usr/bin/[p]acmand -config /etc/pacman/pacmand.yaml' 2>/dev/null || true"
+  compose_exec "${service}" /bin/sh -lc \
+    "runuser -u postgres -- /usr/pgsql-17/bin/pg_ctl -D /var/lib/pgsql/17/data -m immediate stop || true"
+  compose_exec "${service}" /bin/sh -lc \
+    "deadline=\$(( \$(date +%s) + 20 )); while pgrep -u postgres -f '/usr/bin/[p]acmand -config /etc/pacman/pacmand.yaml' >/dev/null 2>&1 || /usr/pgsql-17/bin/pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; do if [ \$(date +%s) -ge \${deadline} ]; then echo 'timed out waiting for node runtime to stop' >&2; ps -ef | grep -E '[p]acmand|[p]ostgres' || true; exit 1; fi; sleep 1; done"
+}
+
 slow_network_on() {
   local service=$1
 
   compose_exec "${service}" /bin/sh -lc \
-    "tc qdisc replace dev eth0 root netem delay 250ms 50ms loss 2%"
+    "tc_bin=\$(command -v tc || command -v /usr/sbin/tc || true); if [ -z \"\${tc_bin}\" ]; then echo 'tc command not found' >&2; exit 127; fi; \"\${tc_bin}\" qdisc replace dev eth0 root netem delay 250ms 50ms loss 2%"
 }
 
 slow_network_off() {
   local service=$1
 
   compose_exec "${service}" /bin/sh -lc \
-    "tc qdisc del dev eth0 root 2>/dev/null || true"
+    "tc_bin=\$(command -v tc || command -v /usr/sbin/tc || true); if [ -n \"\${tc_bin}\" ]; then \"\${tc_bin}\" qdisc del dev eth0 root 2>/dev/null || true; fi"
 }
 
 stop_postgres() {
@@ -410,12 +438,14 @@ run_nemesis_profile() {
 
     case "${profile}" in
       kill)
+        local promoted_after_kill
         printf '{:time "%s" :nemesis :kill :action :start :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
-        stop_postgres "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        stop_pacman_node_runtime "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        promoted_after_kill=$(wait_for_current_primary_not "${member:-}" 90 2>>"${run_dir}/nemesis.log" || true)
         capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         sleep "${jepsen_nemesis_hold_seconds}"
-        start_postgres "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
-        printf '{:time "%s" :nemesis :kill :action :stop :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
+        start_pacman_node_runtime "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        printf '{:time "%s" :nemesis :kill :action :stop :target "%s" :promoted "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" "${promoted_after_kill:-unknown}" >>"${schedule_file}"
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         ;;
       switchover)
@@ -568,6 +598,7 @@ run_nemesis_profile() {
         printf '{:time "%s" :nemesis :failover-chain :action :start :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
 
         for target in alpha-2 alpha-3 alpha-1; do
+          wait_for_cluster_switchover_ready 90 >>"${run_dir}/nemesis.log" 2>&1 || true
           source=$(current_primary_name 2>/dev/null || true)
           if [[ -z "${source}" || "${source}" == "${target}" ]]; then
             continue
@@ -586,6 +617,7 @@ run_nemesis_profile() {
             output=$(request_manual_switchover "${target}" "${source_service}" 2>&1) || chain_status=$?
             if [[ "${chain_status}" -eq 0 ]]; then
               wait_for_current_primary "${target}" 75 >>"${run_dir}/nemesis.log" 2>&1 || chain_status=$?
+              wait_for_cluster_switchover_ready 90 >>"${run_dir}/nemesis.log" 2>&1 || chain_status=$?
             fi
           fi
 

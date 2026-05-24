@@ -305,7 +305,7 @@ EOF
     return 1
   fi
 
-  jq -s '
+  jq -s --arg nemesis "${nemesis}" '
     def samples:
       sort_by(.sampleId)
       | group_by(.sampleId)
@@ -355,22 +355,41 @@ EOF
           and (($oldPrimaryFinalState.timeline // 0) == ($finalPrimary.timeline // 0))
         end
       ) as $oldPrimaryRejoined
+    | (
+        if ($promotionObserved | not) then true
+        elif (($nemesis == "kill") or ($nemesis == "packet,kill") or ($nemesis == "repeated-failure")) then
+          ($oldPrimaryFinalState != null)
+          and (
+            ($oldPrimaryFinalState.reachable == false)
+            or (
+              ($oldPrimaryFinalState.writable == false)
+              and (
+                ($oldPrimaryFinalState.inRecovery == true)
+                or (($oldPrimaryFinalState.timeline // 0) == ($finalPrimary.timeline // 0))
+              )
+            )
+          )
+        else $oldPrimaryRejoined
+        end
+      ) as $oldPrimarySafeOrRejoined
     | {
         checker: "old-primary-rejoin-after-failover",
         valid: (
           ($samples | length) > 0
           and (
             ($promotionObserved | not)
-            or $oldPrimaryRejoined
+            or $oldPrimarySafeOrRejoined
           )
         ),
         applicable: $promotionObserved,
+        nemesis: $nemesis,
         observations: length,
         samples: ($samples | length),
         promotionObserved: $promotionObserved,
         initialPrimary: (if $initialPrimary == null then null else ($initialPrimary | summarize_member) end),
         finalPrimary: (if $finalPrimary == null then null else ($finalPrimary | summarize_member) end),
         oldPrimaryRejoined: $oldPrimaryRejoined,
+        oldPrimarySafeOrRejoined: $oldPrimarySafeOrRejoined,
         oldPrimaryFinalState: (if $oldPrimaryFinalState == null then null else ($oldPrimaryFinalState | summarize_member) end)
       }
   ' "${observation_file}" >"${checker_file}"

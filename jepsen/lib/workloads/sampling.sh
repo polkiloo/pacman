@@ -90,8 +90,10 @@ start_primary_sampler() {
   local observation_file="${case_dir}/primary-observations.jsonl"
 
   (
+    local stop_requested=false
+    trap 'stop_requested=true' TERM INT
     local sample_id=1
-    while true; do
+    while [[ "${stop_requested}" != "true" ]]; do
       sample_primary_state "${sample_id}" "${observation_file}"
       sample_id=$((sample_id + 1))
       sleep "${jepsen_primary_sample_interval}"
