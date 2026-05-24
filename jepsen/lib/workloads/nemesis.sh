@@ -176,10 +176,11 @@ raise SystemExit(0 if ok else 1)" "${endpoints}" 2>&1) || status=$?
 }
 
 dcs_quorum_health_json() {
+  local observer_service=${1:-pacman-primary}
   local endpoints
   endpoints=$(dcs_client_endpoints)
 
-  compose_exec pacman-primary python3 -c \
+  compose_exec "${observer_service}" python3 -c \
     "import json, sys, urllib.request
 endpoints = sys.argv[1].split(',')
 results = []
@@ -212,6 +213,7 @@ record_dcs_quorum_probe() {
   local nemesis=$2
   local phase=$3
   local target_services=$4
+  local observer_service=${5:-pacman-primary}
   local sample_file="${case_dir}/dcs-quorum-during-nemesis.jsonl"
   local target_service target_member target_members observed_at output status target_running total healthy failed target_count running_targets
 
@@ -239,7 +241,7 @@ record_dcs_quorum_probe() {
   observed_at="$(timestamp_utc)"
 
   status=0
-  output=$(dcs_quorum_health_json 2>&1) || status=$?
+  output=$(dcs_quorum_health_json "${observer_service}" 2>&1) || status=$?
   if [[ "${status}" -eq 0 ]] && printf '%s\n' "${output}" | jq -e . >/dev/null 2>&1; then
     total=$(printf '%s\n' "${output}" | jq -r '.totalEndpoints // 0')
     healthy=$(printf '%s\n' "${output}" | jq -r '.healthyEndpoints // 0')
@@ -248,6 +250,7 @@ record_dcs_quorum_probe() {
       observedAt "$(json_escape "${observed_at}")" \
       nemesis "$(json_escape "${nemesis}")" \
       phase "$(json_escape "${phase}")" \
+      observerService "$(json_escape "${observer_service}")" \
       targetService "$(json_escape "${target_services}")" \
       targetMember "$(json_escape "${target_members}")" \
       targetCount "${target_count}" \
@@ -266,6 +269,7 @@ record_dcs_quorum_probe() {
     observedAt "$(json_escape "${observed_at}")" \
     nemesis "$(json_escape "${nemesis}")" \
     phase "$(json_escape "${phase}")" \
+    observerService "$(json_escape "${observer_service}")" \
     targetService "$(json_escape "${target_services}")" \
     targetMember "$(json_escape "${target_members}")" \
     targetCount "${target_count}" \
@@ -320,11 +324,12 @@ start_dcs_member() {
 wait_for_dcs_healthy_count() {
   local expected=$1
   local timeout=${2:-60}
+  local observer_service=${3:-pacman-primary}
   local deadline=$((SECONDS + timeout))
   local output healthy
 
   while [[ "${SECONDS}" -lt "${deadline}" ]]; do
-    output=$(dcs_quorum_health_json 2>/dev/null || true)
+    output=$(dcs_quorum_health_json "${observer_service}" 2>/dev/null || true)
     healthy=$(printf '%s\n' "${output}" | jq -r '.healthyEndpoints // 0' 2>/dev/null || printf '0')
     if [[ "${healthy}" -ge "${expected}" ]]; then
       return 0
@@ -339,11 +344,12 @@ wait_for_dcs_healthy_count() {
 wait_for_dcs_healthy_at_most() {
   local expected=$1
   local timeout=${2:-60}
+  local observer_service=${3:-pacman-primary}
   local deadline=$((SECONDS + timeout))
   local output healthy
 
   while [[ "${SECONDS}" -lt "${deadline}" ]]; do
-    output=$(dcs_quorum_health_json 2>/dev/null || true)
+    output=$(dcs_quorum_health_json "${observer_service}" 2>/dev/null || true)
     healthy=$(printf '%s\n' "${output}" | jq -r '.healthyEndpoints // 0' 2>/dev/null || printf '0')
     if [[ "${healthy}" -le "${expected}" ]]; then
       return 0
@@ -590,6 +596,36 @@ run_nemesis_profile() {
         printf '{:time "%s" :nemesis :dcs-lose-majority :action :stop :targets "%s" :members "%s"}\n' "$(timestamp_utc)" "${target_dcs_services}" "${target_dcs_members}" >>"${schedule_file}"
         record_dcs_quorum_probe "${run_dir}" "${profile}" "after-restart" "${target_dcs_services}" >>"${run_dir}/nemesis.log" 2>&1 || true
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${target_dcs_members}" "${service}" || true
+        ;;
+      primary-dcs-majority-partition)
+        local target_dcs_services target_dcs_service target_dcs_members target_dcs_member
+        target_dcs_services="${jepsen_dcs_majority_partition_services}"
+        target_dcs_members=""
+
+        for target_dcs_service in ${target_dcs_services}; do
+          target_dcs_member=$(dcs_member_for_service "${target_dcs_service}" 2>/dev/null || printf '')
+          if [[ -z "${target_dcs_member}" ]]; then
+            printf 'unsupported DCS majority-partition target service: %s\n' "${target_dcs_service}" >>"${run_dir}/nemesis.log"
+            return 2
+          fi
+          if [[ -n "${target_dcs_members}" ]]; then
+            target_dcs_members="${target_dcs_members} "
+          fi
+          target_dcs_members="${target_dcs_members}${target_dcs_member}"
+        done
+
+        record_dcs_quorum_probe "${run_dir}" "${profile}" "before-primary-majority-partition" "${target_dcs_services}" "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        printf '{:time "%s" :nemesis :primary-dcs-majority-partition :action :start :target "%s" :dcs "%s" :members "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" "${target_dcs_services}" "${target_dcs_members}" >>"${schedule_file}"
+        iptables_partition "${service}" ${target_dcs_services} >>"${run_dir}/nemesis.log" 2>&1 || true
+        wait_for_dcs_healthy_at_most 1 30 "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        record_dcs_quorum_probe "${run_dir}" "${profile}" "during-primary-majority-partition" "${target_dcs_services}" "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
+        sleep "${jepsen_nemesis_hold_seconds}"
+        iptables_heal "${service}" ${target_dcs_services} >>"${run_dir}/nemesis.log" 2>&1 || true
+        wait_for_dcs_healthy_count 3 60 "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        printf '{:time "%s" :nemesis :primary-dcs-majority-partition :action :stop :target "%s" :dcs "%s" :members "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" "${target_dcs_services}" "${target_dcs_members}" >>"${schedule_file}"
+        record_dcs_quorum_probe "${run_dir}" "${profile}" "after-primary-majority-partition" "${target_dcs_services}" "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         ;;
       failover-chain)
         local target target_service source source_service output chain_status requested_at step

@@ -580,7 +580,7 @@ check_dcs_quorum_during_nemesis() {
   local checker_file="${case_dir}/dcs-quorum-checker.json"
   local sample_file="${case_dir}/dcs-quorum-during-nemesis.jsonl"
 
-  if [[ "${nemesis}" != "dcs-kill-one" && "${nemesis}" != "dcs-lose-majority" ]]; then
+  if [[ "${nemesis}" != "dcs-kill-one" && "${nemesis}" != "dcs-lose-majority" && "${nemesis}" != "primary-dcs-majority-partition" ]]; then
     cat >"${checker_file}" <<'EOF'
 {"checker":"dcs-quorum-during-nemesis","valid":true,"applicable":false}
 EOF
@@ -598,15 +598,21 @@ EOF
     def phase($name): map(select(.phase == $name));
     (
       if $nemesis == "dcs-lose-majority" then phase("before-majority-loss")
+      elif $nemesis == "primary-dcs-majority-partition" then phase("before-primary-majority-partition")
       else phase("before-kill")
       end
     ) as $before
     | (
       if $nemesis == "dcs-lose-majority" then phase("during-majority-loss")
+      elif $nemesis == "primary-dcs-majority-partition" then phase("during-primary-majority-partition")
       else phase("during-kill")
       end
     ) as $during
-    | (phase("after-restart")) as $after
+    | (
+      if $nemesis == "primary-dcs-majority-partition" then phase("after-primary-majority-partition")
+      else phase("after-restart")
+      end
+    ) as $after
     | (
         if $nemesis == "dcs-lose-majority" then
           $during | map(select(
@@ -616,6 +622,15 @@ EOF
             and (.targetCount // 0) >= 2
             and (.runningTargets // 0) == 0
             and .targetRunning == false
+          ))
+        elif $nemesis == "primary-dcs-majority-partition" then
+          $during | map(select(
+            .ok == true
+            and (.healthyEndpoints // 0) <= 1
+            and (.failedEndpoints // 0) >= 2
+            and (.targetCount // 0) >= 2
+            and (.runningTargets // 0) == (.targetCount // 0)
+            and .targetRunning == true
           ))
         else
           $during | map(select(

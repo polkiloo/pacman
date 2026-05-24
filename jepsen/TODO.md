@@ -103,7 +103,7 @@ quorum.
 - [x] Three-node etcd target for PACMAN Jepsen.
 - [x] Kill one DCS node.
 - [x] Lose DCS majority.
-- [ ] Isolate primary from DCS majority.
+- [x] Isolate primary from DCS majority.
 - [ ] Full DCS restart.
 - [ ] Slow DCS / DCS latency campaign.
 
