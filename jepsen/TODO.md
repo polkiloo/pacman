@@ -199,7 +199,7 @@ larger orchestration rewrite.
    - [x] Keep GitHub Actions upload wiring in shell/YAML.
 
 5. [ ] Move JSON/JSONL checkers to Go one checker at a time.
-   - [ ] Start with DCS quorum checker.
+   - [x] Start with DCS quorum checker.
    - [ ] Then move single-primary, acknowledged-write, timeline, old-primary
          rejoin, manual-switchover, and VIP-routing checkers.
    - [ ] For each moved checker, keep golden JSONL fixtures and failure-case
