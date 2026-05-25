@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/go-connections/nat"
+	mobynetwork "github.com/moby/moby/api/types/network"
 	testcontainers "github.com/testcontainers/testcontainers-go"
 	tcexec "github.com/testcontainers/testcontainers-go/exec"
 	tclog "github.com/testcontainers/testcontainers-go/log"
@@ -426,7 +426,7 @@ func (p *Postgres) Host(t *testing.T) string {
 func (p *Postgres) Port(t *testing.T) int {
 	t.Helper()
 
-	return p.mappedPort(t).Int()
+	return int(p.mappedPort(t).Num())
 }
 
 // Address returns the host-reachable host:port pair for direct PostgreSQL
@@ -513,15 +513,10 @@ func (p *Postgres) Stop(t *testing.T) {
 	}
 }
 
-func (p *Postgres) mappedPort(t *testing.T) nat.Port {
+func (p *Postgres) mappedPort(t *testing.T) mobynetwork.Port {
 	t.Helper()
 
-	port, err := nat.NewPort("tcp", "5432")
-	if err != nil {
-		t.Fatalf("construct postgres port for fixture %q: %v", p.name, err)
-	}
-
-	mapped, err := p.container.MappedPort(p.ctx, port)
+	mapped, err := p.container.MappedPort(p.ctx, "5432/tcp")
 	if err != nil {
 		t.Fatalf("load mapped port for postgres fixture %q: %v", p.name, err)
 	}
