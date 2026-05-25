@@ -30,10 +30,16 @@ finish() {
   fi
 
   collect_artifacts "${run_dir}" "${valid}"
+  if ! destroy_lab_after_suite "${run_dir}" "${history_file}"; then
+    exit_status=1
+    write_results_file "${run_dir}" false
+  fi
 
   if [[ "${exit_status}" -eq 0 ]]; then
     printf 'PACMAN Jepsen nightly artifacts: %s\n' "${run_dir}"
   fi
+
+  exit "${exit_status}"
 }
 
 trap finish EXIT
@@ -67,9 +73,16 @@ for spec in ${cases}; do
     continue
   fi
 
-  compose_exec pacman-primary /bin/sh -lc \
-    "PACMANCTL_API_URL=http://pacman-primary:8080 PACMANCTL_API_TOKEN=lab-admin-token pacmanctl cluster status -o json" \
-    >"${run_dir}/pacman-cluster-before-${slug}.json" 2>&1 || true
+  write_edn_event "${history_file}" "cluster" "invoke" "\"three-data-node:${workload}:${nemesis}\""
+  if verify_three_data_node_cluster "${run_dir}/pacman-cluster-before-${slug}.json"; then
+    write_edn_event "${history_file}" "cluster" "ok" "\"three-data-node:${workload}:${nemesis}\""
+  else
+    write_edn_event "${history_file}" "cluster" "fail" "\"three-data-node:${workload}:${nemesis}\""
+    printf '%s:%s cluster shape failed\n' "${workload}" "${nemesis}" >>"${run_dir}/nightly-failures.txt"
+    failed_cases+=("${workload}:${nemesis}:cluster")
+    failed=1
+    continue
+  fi
 
   write_edn_event "${history_file}" "verify" "invoke" "\"demo-verify-before:${workload}:${nemesis}\""
   if verify_lab; then

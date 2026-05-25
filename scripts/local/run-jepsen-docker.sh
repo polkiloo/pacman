@@ -24,6 +24,7 @@ Environment:
   PACMAN_JEPSEN_DCS_SLOW_MIN_LATENCY_MS minimum observed endpoint latency for dcs-slow-network
   PACMAN_JEPSEN_BOOTSTRAP_LAB      set false to run against an existing lab
   PACMAN_JEPSEN_VERIFY_LAB         set false to skip demo verify before/after
+  PACMAN_JEPSEN_DESTROY_LAB        set false to preserve lab containers after artifact collection
   PACMAN_JEPSEN_BOOTSTRAP_ATTEMPTS bootstrap attempts per case (default: 3)
   PACMAN_JEPSEN_BOOTSTRAP_RETRY_DELAY_SECONDS delay between bootstrap attempts
 EOF
@@ -112,6 +113,7 @@ docker_args=(
   -e "PACMAN_JEPSEN_DCS_SLOW_MIN_LATENCY_MS=${PACMAN_JEPSEN_DCS_SLOW_MIN_LATENCY_MS:-}"
   -e "PACMAN_JEPSEN_BOOTSTRAP_LAB=${PACMAN_JEPSEN_BOOTSTRAP_LAB:-}"
   -e "PACMAN_JEPSEN_VERIFY_LAB=${PACMAN_JEPSEN_VERIFY_LAB:-}"
+  -e "PACMAN_JEPSEN_DESTROY_LAB=${PACMAN_JEPSEN_DESTROY_LAB:-}"
   -e "PACMAN_JEPSEN_BOOTSTRAP_ATTEMPTS=${PACMAN_JEPSEN_BOOTSTRAP_ATTEMPTS:-}"
   -e "PACMAN_JEPSEN_BOOTSTRAP_RETRY_DELAY_SECONDS=${PACMAN_JEPSEN_BOOTSTRAP_RETRY_DELAY_SECONDS:-}"
 )

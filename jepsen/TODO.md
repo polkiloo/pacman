@@ -170,7 +170,7 @@ surface.
 
 MVP-1 is done when:
 
-- [ ] The suite deploys and destroys a clean PACMAN three-data-node cluster.
+- [x] The suite deploys and destroys a clean PACMAN three-data-node cluster.
 - [ ] Every MVP case is runnable individually.
 - [ ] Every MVP case writes machine-checkable history.
 - [ ] Every nemesis action records target, start, heal, and command result.

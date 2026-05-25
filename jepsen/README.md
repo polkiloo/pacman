@@ -117,9 +117,16 @@ Implemented nemesis profiles:
 - `repeated-failure`
 
 Campaigns reset `deploy/lab/.local/` before bootstrap by default so repeated
-runs start from a clean PostgreSQL and DCS state. Set
-`PACMAN_JEPSEN_RESET_LAB=false` only when preserving the lab for interactive
+runs start from a clean PostgreSQL and DCS state. After artifact collection, the
+runners destroy the Docker Compose lab and assert no lab containers remain. Set
+`PACMAN_JEPSEN_RESET_LAB=false` only when reusing an existing lab, and set
+`PACMAN_JEPSEN_DESTROY_LAB=false` only when preserving the lab for interactive
 debugging.
+
+Every suite bootstrap records `pacman-cluster-before*.json` and asserts the
+clean target shape before workload execution: a healthy PACMAN cluster with
+exactly `alpha-1`, `alpha-2`, and `alpha-3`, one current primary, and two
+streaming replicas.
 
 Non-`none` nemesis cases wait `PACMAN_JEPSEN_POST_NEMESIS_SETTLE_SECONDS`
 seconds after the nemesis heals before final checker sampling. The default is
