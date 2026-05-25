@@ -32,6 +32,8 @@ vip-routing:switchover
 append-dcs-quorum:dcs-kill-one
 append-dcs-quorum:dcs-lose-majority
 append-dcs-quorum:primary-dcs-majority-partition
+append-dcs-quorum:dcs-full-restart
+append-dcs-quorum:dcs-slow-network
 single-key-register:packet
 read-committed-txn:slow-network
 serializable-txn:packet,kill
@@ -62,6 +64,8 @@ make jepsen-docker-case-vip-routing-switchover
 make jepsen-docker-case-append-dcs-quorum-dcs-kill-one
 make jepsen-docker-case-append-dcs-quorum-dcs-lose-majority
 make jepsen-docker-case-append-dcs-quorum-primary-dcs-majority-partition
+make jepsen-docker-case-append-dcs-quorum-dcs-full-restart
+make jepsen-docker-case-append-dcs-quorum-dcs-slow-network
 make jepsen-docker-case-single-key-register-packet
 make jepsen-docker-case-read-committed-txn-slow-network
 make jepsen-docker-case-serializable-txn-packet-kill
@@ -106,6 +110,8 @@ Implemented nemesis profiles:
 - `dcs-kill-one`
 - `dcs-lose-majority`
 - `primary-dcs-majority-partition`
+- `dcs-full-restart`
+- `dcs-slow-network`
 - `failover-chain`
 - `slow-network`
 - `repeated-failure`

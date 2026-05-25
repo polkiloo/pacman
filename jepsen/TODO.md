@@ -104,8 +104,8 @@ quorum.
 - [x] Kill one DCS node.
 - [x] Lose DCS majority.
 - [x] Isolate primary from DCS majority.
-- [ ] Full DCS restart.
-- [ ] Slow DCS / DCS latency campaign.
+- [x] Full DCS restart.
+- [x] Slow DCS / DCS latency campaign.
 
 ## Post-MVP Hardening
 

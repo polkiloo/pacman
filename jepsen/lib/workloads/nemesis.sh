@@ -181,21 +181,28 @@ dcs_quorum_health_json() {
   endpoints=$(dcs_client_endpoints)
 
   compose_exec "${observer_service}" python3 -c \
-    "import json, sys, urllib.request
+    "import json, sys, time, urllib.request
 endpoints = sys.argv[1].split(',')
 results = []
 healthy = 0
+started = time.monotonic()
 for endpoint in endpoints:
+    endpoint_started = time.monotonic()
     try:
         body = urllib.request.urlopen(endpoint + '/health', timeout=3).read().decode()
-        results.append({'endpoint': endpoint, 'ok': True, 'body': body})
+        elapsed_ms = int((time.monotonic() - endpoint_started) * 1000)
+        results.append({'endpoint': endpoint, 'ok': True, 'body': body, 'elapsedMillis': elapsed_ms})
         healthy += 1
     except Exception as exc:
-        results.append({'endpoint': endpoint, 'ok': False, 'error': str(exc)})
+        elapsed_ms = int((time.monotonic() - endpoint_started) * 1000)
+        results.append({'endpoint': endpoint, 'ok': False, 'error': str(exc), 'elapsedMillis': elapsed_ms})
+elapsed = int((time.monotonic() - started) * 1000)
 print(json.dumps({
     'totalEndpoints': len(endpoints),
     'healthyEndpoints': healthy,
     'failedEndpoints': len(endpoints) - healthy,
+    'totalElapsedMillis': elapsed,
+    'maxEndpointLatencyMillis': max([result.get('elapsedMillis', 0) for result in results] or [0]),
     'endpoints': results,
 }, sort_keys=True))" "${endpoints}"
 }
@@ -215,7 +222,7 @@ record_dcs_quorum_probe() {
   local target_services=$4
   local observer_service=${5:-pacman-primary}
   local sample_file="${case_dir}/dcs-quorum-during-nemesis.jsonl"
-  local target_service target_member target_members observed_at output status target_running total healthy failed target_count running_targets
+  local target_service target_member target_members observed_at output status target_running total healthy failed target_count running_targets total_elapsed max_latency
 
   target_members=""
   target_count=0
@@ -246,6 +253,8 @@ record_dcs_quorum_probe() {
     total=$(printf '%s\n' "${output}" | jq -r '.totalEndpoints // 0')
     healthy=$(printf '%s\n' "${output}" | jq -r '.healthyEndpoints // 0')
     failed=$(printf '%s\n' "${output}" | jq -r '.failedEndpoints // 0')
+    total_elapsed=$(printf '%s\n' "${output}" | jq -r '.totalElapsedMillis // 0')
+    max_latency=$(printf '%s\n' "${output}" | jq -r '.maxEndpointLatencyMillis // 0')
     append_jsonl "${sample_file}" \
       observedAt "$(json_escape "${observed_at}")" \
       nemesis "$(json_escape "${nemesis}")" \
@@ -260,6 +269,8 @@ record_dcs_quorum_probe() {
       totalEndpoints "${total}" \
       healthyEndpoints "${healthy}" \
       failedEndpoints "${failed}" \
+      totalElapsedMillis "${total_elapsed}" \
+      maxEndpointLatencyMillis "${max_latency}" \
       health "${output}" \
       error "$(json_escape "")"
     return 0
@@ -279,6 +290,8 @@ record_dcs_quorum_probe() {
     totalEndpoints 0 \
     healthyEndpoints 0 \
     failedEndpoints 0 \
+    totalElapsedMillis 0 \
+    maxEndpointLatencyMillis 0 \
     health null \
     error "$(json_escape "${output}")"
   return 1
@@ -319,6 +332,22 @@ start_dcs_member() {
       >>/var/log/etcd.log 2>&1 &"
   compose_exec "${service}" /bin/sh -lc \
     "deadline=\$(( \$(date +%s) + 20 )); while ! pgrep -f '/usr/bin/[e]tcd .*--name ${member}' >/dev/null 2>&1; do if [ \$(date +%s) -ge \${deadline} ]; then echo 'timed out waiting for ${member} to start' >&2; cat /var/log/etcd.log 2>/dev/null || true; exit 1; fi; sleep 1; done"
+}
+
+stop_dcs_members() {
+  local service
+
+  for service in "$@"; do
+    stop_dcs_member "${service}"
+  done
+}
+
+start_dcs_members() {
+  local service
+
+  for service in "$@"; do
+    start_dcs_member "${service}"
+  done
 }
 
 wait_for_dcs_healthy_count() {
@@ -401,6 +430,22 @@ slow_network_off() {
 
   compose_exec "${service}" /bin/sh -lc \
     "tc_bin=\$(command -v tc || command -v /usr/sbin/tc || true); if [ -n \"\${tc_bin}\" ]; then \"\${tc_bin}\" qdisc del dev eth0 root 2>/dev/null || true; fi"
+}
+
+slow_network_on_services() {
+  local service
+
+  for service in "$@"; do
+    slow_network_on "${service}"
+  done
+}
+
+slow_network_off_services() {
+  local service
+
+  for service in "$@"; do
+    slow_network_off "${service}"
+  done
 }
 
 stop_postgres() {
@@ -626,6 +671,65 @@ run_nemesis_profile() {
         printf '{:time "%s" :nemesis :primary-dcs-majority-partition :action :stop :target "%s" :dcs "%s" :members "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" "${target_dcs_services}" "${target_dcs_members}" >>"${schedule_file}"
         record_dcs_quorum_probe "${run_dir}" "${profile}" "after-primary-majority-partition" "${target_dcs_services}" "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
+        ;;
+      dcs-full-restart)
+        local target_dcs_services target_dcs_service target_dcs_members target_dcs_member
+        target_dcs_services="${jepsen_dcs_restart_services}"
+        target_dcs_members=""
+
+        for target_dcs_service in ${target_dcs_services}; do
+          target_dcs_member=$(dcs_member_for_service "${target_dcs_service}" 2>/dev/null || printf '')
+          if [[ -z "${target_dcs_member}" ]]; then
+            printf 'unsupported DCS restart target service: %s\n' "${target_dcs_service}" >>"${run_dir}/nemesis.log"
+            return 2
+          fi
+          if [[ -n "${target_dcs_members}" ]]; then
+            target_dcs_members="${target_dcs_members} "
+          fi
+          target_dcs_members="${target_dcs_members}${target_dcs_member}"
+        done
+
+        record_dcs_quorum_probe "${run_dir}" "${profile}" "before-full-restart" "${target_dcs_services}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        printf '{:time "%s" :nemesis :dcs-full-restart :action :start :targets "%s" :members "%s"}\n' "$(timestamp_utc)" "${target_dcs_services}" "${target_dcs_members}" >>"${schedule_file}"
+        stop_dcs_members ${target_dcs_services} >>"${run_dir}/nemesis.log" 2>&1 || true
+        wait_for_dcs_healthy_at_most 0 30 >>"${run_dir}/nemesis.log" 2>&1 || true
+        record_dcs_quorum_probe "${run_dir}" "${profile}" "during-full-restart" "${target_dcs_services}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "${target_dcs_members}" "${service}" || true
+        sleep "${jepsen_nemesis_hold_seconds}"
+        start_dcs_members ${target_dcs_services} >>"${run_dir}/nemesis.log" 2>&1 || true
+        wait_for_dcs_healthy_count 3 90 >>"${run_dir}/nemesis.log" 2>&1 || true
+        printf '{:time "%s" :nemesis :dcs-full-restart :action :stop :targets "%s" :members "%s"}\n' "$(timestamp_utc)" "${target_dcs_services}" "${target_dcs_members}" >>"${schedule_file}"
+        record_dcs_quorum_probe "${run_dir}" "${profile}" "after-full-restart" "${target_dcs_services}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${target_dcs_members}" "${service}" || true
+        ;;
+      dcs-slow-network)
+        local target_dcs_services target_dcs_service target_dcs_members target_dcs_member
+        target_dcs_services="${jepsen_dcs_slow_services}"
+        target_dcs_members=""
+
+        for target_dcs_service in ${target_dcs_services}; do
+          target_dcs_member=$(dcs_member_for_service "${target_dcs_service}" 2>/dev/null || printf '')
+          if [[ -z "${target_dcs_member}" ]]; then
+            printf 'unsupported DCS latency target service: %s\n' "${target_dcs_service}" >>"${run_dir}/nemesis.log"
+            return 2
+          fi
+          if [[ -n "${target_dcs_members}" ]]; then
+            target_dcs_members="${target_dcs_members} "
+          fi
+          target_dcs_members="${target_dcs_members}${target_dcs_member}"
+        done
+
+        record_dcs_quorum_probe "${run_dir}" "${profile}" "before-dcs-slow-network" "${target_dcs_services}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        printf '{:time "%s" :nemesis :dcs-slow-network :action :start :targets "%s" :members "%s"}\n' "$(timestamp_utc)" "${target_dcs_services}" "${target_dcs_members}" >>"${schedule_file}"
+        slow_network_on_services ${target_dcs_services} >>"${run_dir}/nemesis.log" 2>&1 || true
+        record_dcs_quorum_probe "${run_dir}" "${profile}" "during-dcs-slow-network" "${target_dcs_services}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "${target_dcs_members}" "${service}" || true
+        sleep "${jepsen_nemesis_hold_seconds}"
+        slow_network_off_services ${target_dcs_services} >>"${run_dir}/nemesis.log" 2>&1 || true
+        wait_for_dcs_healthy_count 3 60 >>"${run_dir}/nemesis.log" 2>&1 || true
+        printf '{:time "%s" :nemesis :dcs-slow-network :action :stop :targets "%s" :members "%s"}\n' "$(timestamp_utc)" "${target_dcs_services}" "${target_dcs_members}" >>"${schedule_file}"
+        record_dcs_quorum_probe "${run_dir}" "${profile}" "after-dcs-slow-network" "${target_dcs_services}" >>"${run_dir}/nemesis.log" 2>&1 || true
+        capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${target_dcs_members}" "${service}" || true
         ;;
       failover-chain)
         local target target_service source source_service output chain_status requested_at step
