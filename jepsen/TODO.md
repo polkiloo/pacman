@@ -172,10 +172,10 @@ Move brittle validation and checker logic to Go incrementally. Keep shell as the
 thin Docker/CI runner until the lab behavior is stable enough to justify a
 larger orchestration rewrite.
 
-1. [ ] Add a small Go CLI, `tools/jepsenctl`, with subcommands and table-driven
+1. [x] Add a small Go CLI, `tools/jepsenctl`, with subcommands and table-driven
        tests.
-   - [ ] Keep it repo-local and runnable with `go run ./tools/jepsenctl ...`.
-   - [ ] Use only standard library packages at first unless a dependency removes
+   - [x] Keep it repo-local and runnable with `go run ./tools/jepsenctl ...`.
+   - [x] Use only standard library packages at first unless a dependency removes
          real complexity.
 
 2. [ ] Move case registry validation to Go.

@@ -11,6 +11,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/common v0.62.0
+	github.com/spf13/cobra v1.10.2
 	github.com/testcontainers/testcontainers-go v0.41.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.41.0
 	go.etcd.io/etcd/api/v3 v3.6.10
@@ -67,6 +68,7 @@ require (
 	github.com/hashicorp/go-metrics v0.5.4 // indirect
 	github.com/hashicorp/go-msgpack/v2 v2.1.2 // indirect
 	github.com/hashicorp/golang-lru v0.5.0 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/klauspost/compress v1.18.2 // indirect
