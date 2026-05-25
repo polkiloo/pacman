@@ -64,6 +64,7 @@ Run with go run ./tools/jepsenctl <command> [args].
 `)
 
 	root.AddCommand(newCasesCommand(stdout, stderr))
+	root.AddCommand(newClusterCommand(stdout))
 	root.AddCommand(newVersionCommand(stdout))
 
 	return root

@@ -51,14 +51,18 @@ verify_three_data_node_cluster() {
     printf '%s\n' "${output}" >"${output_file}"
   fi
 
-  printf '%s\n' "${output}" | jq -e '
-    .phase == "healthy"
-    and (.members | length) == 3
-    and ([.members[].name] | sort) == ["alpha-1", "alpha-2", "alpha-3"]
-    and ([.members[] | select(.role == "primary")] | length) == 1
-    and ([.members[] | select(.role == "replica")] | length) == 2
-    and ([.members[] | select(.healthy == true)] | length) == 3
-  ' >/dev/null
+  if [[ -n "${output_file}" ]]; then
+    go run "${repo_root}/tools/jepsenctl" cluster validate "${output_file}"
+  else
+    local temp_file
+    local status
+    temp_file="$(mktemp)"
+    printf '%s\n' "${output}" >"${temp_file}"
+    status=0
+    go run "${repo_root}/tools/jepsenctl" cluster validate "${temp_file}" || status=$?
+    rm -f "${temp_file}"
+    return "${status}"
+  fi
 }
 
 destroy_lab() {

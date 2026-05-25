@@ -185,11 +185,11 @@ larger orchestration rewrite.
    - [x] Replace `jepsen/bin/check-case-targets` once the Go command is covered
          by tests.
 
-3. [ ] Move cluster-shape validation to Go.
-   - [ ] Read `pacman-cluster-before*.json`.
-   - [ ] Assert exactly three data nodes: `alpha-1`, `alpha-2`, and `alpha-3`.
-   - [ ] Assert one healthy primary and two healthy replicas.
-   - [ ] Keep the shell runner responsible only for collecting the JSON.
+3. [x] Move cluster-shape validation to Go.
+   - [x] Read `pacman-cluster-before*.json`.
+   - [x] Assert exactly three data nodes: `alpha-1`, `alpha-2`, and `alpha-3`.
+   - [x] Assert one healthy primary and two healthy replicas.
+   - [x] Keep the shell runner responsible only for collecting the JSON.
 
 4. [ ] Move artifact summary and index generation to Go.
    - [ ] Generate the artifact index currently assembled in
