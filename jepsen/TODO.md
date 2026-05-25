@@ -191,12 +191,12 @@ larger orchestration rewrite.
    - [x] Assert one healthy primary and two healthy replicas.
    - [x] Keep the shell runner responsible only for collecting the JSON.
 
-4. [ ] Move artifact summary and index generation to Go.
-   - [ ] Generate the artifact index currently assembled in
+4. [x] Move artifact summary and index generation to Go.
+   - [x] Generate the artifact index currently assembled in
          `scripts/ci/run-jepsen.sh`.
-   - [ ] Produce a concise failure summary from `case-results.jsonl`,
+   - [x] Produce a concise failure summary from `case-results.jsonl`,
          `nightly-failures.txt`, and checker JSON files.
-   - [ ] Keep GitHub Actions upload wiring in shell/YAML.
+   - [x] Keep GitHub Actions upload wiring in shell/YAML.
 
 5. [ ] Move JSON/JSONL checkers to Go one checker at a time.
    - [ ] Start with DCS quorum checker.

@@ -21,6 +21,7 @@ func TestRunDispatchesCommands(t *testing.T) {
 			wantStatus: 0,
 			wantStdout: []string{
 				"usage: jepsenctl <command> [args]",
+				"artifacts",
 				"cases",
 				"cluster",
 				"version",
@@ -33,6 +34,7 @@ func TestRunDispatchesCommands(t *testing.T) {
 			wantStatus: 0,
 			wantStdout: []string{
 				"usage: jepsenctl <command> [args]",
+				"artifacts",
 				"cases",
 				"cluster",
 				"version",
