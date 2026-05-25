@@ -10,7 +10,25 @@ capture_pacman_cluster_snapshot() {
   observed_at="$(timestamp_utc)"
   snapshot_status=0
   output=$(compose_exec "${service}" /bin/sh -lc \
-    "PACMANCTL_API_URL=http://${service}:8080 PACMANCTL_API_TOKEN=lab-admin-token pacmanctl cluster status -o json" 2>&1) || snapshot_status=$?
+    "PACMANCTL_API_URL=http://${service}:8080 PACMANCTL_API_TOKEN=lab-admin-token pacmanctl cluster status -o json" 2>&1) || {
+      snapshot_status=$?
+      if [[ "${service}" != "pacman-primary" ]]; then
+        output=$(compose_exec pacman-primary /bin/sh -lc \
+          "PACMANCTL_API_URL=http://pacman-primary:8080 PACMANCTL_API_TOKEN=lab-admin-token pacmanctl cluster status -o json" 2>&1) && snapshot_status=0
+      fi
+    }
+  if [[ "${snapshot_status}" -ne 0 ]]; then
+    local fallback_service
+    for fallback_service in pacman-primary pacman-replica pacman-replica-2; do
+      [[ "${fallback_service}" == "${service}" ]] && continue
+      output=$(compose_exec "${fallback_service}" /bin/sh -lc \
+        "PACMANCTL_API_URL=http://${fallback_service}:8080 PACMANCTL_API_TOKEN=lab-admin-token pacmanctl cluster status -o json" 2>&1) && {
+        snapshot_status=0
+        service="${fallback_service}"
+        break
+      }
+    done
+  fi
 
   if [[ "${snapshot_status}" -eq 0 ]] && cluster_json=$(printf '%s\n' "${output}" | jq -sc 'map(select(type == "object" and has("clusterName"))) | last // empty' 2>/dev/null) && [[ -n "${cluster_json}" ]]; then
     append_jsonl "${snapshot_file}" \

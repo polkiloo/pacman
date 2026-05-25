@@ -18,6 +18,20 @@ psql_vip_optional() {
   psql_vip "${sql}" 2>&1 || return 0
 }
 
+wait_for_vip_writable() {
+  local timeout=${1:-60}
+  local deadline=$((SECONDS + timeout))
+
+  while [[ "${SECONDS}" -lt "${deadline}" ]]; do
+    if psql_vip "SELECT 1;" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
 psql_service() {
   local service=$1
   local sql=$2

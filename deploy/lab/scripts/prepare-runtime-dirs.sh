@@ -11,6 +11,12 @@ mkdir -p \
   "${runtime_dir}/alpha-dcs/etc/pacman" \
   "${runtime_dir}/alpha-dcs/var/lib/etcd/pacman" \
   "${runtime_dir}/alpha-dcs/var/log" \
+  "${runtime_dir}/alpha-dcs-2/etc/pacman" \
+  "${runtime_dir}/alpha-dcs-2/var/lib/etcd/pacman" \
+  "${runtime_dir}/alpha-dcs-2/var/log" \
+  "${runtime_dir}/alpha-dcs-3/etc/pacman" \
+  "${runtime_dir}/alpha-dcs-3/var/lib/etcd/pacman" \
+  "${runtime_dir}/alpha-dcs-3/var/log" \
   "${runtime_dir}/alpha-1/etc/pacman" \
   "${runtime_dir}/alpha-1/var/lib/pacman/raft" \
   "${runtime_dir}/alpha-1/var/lib/pgsql/17/data" \

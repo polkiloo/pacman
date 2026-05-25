@@ -64,6 +64,12 @@ collect_artifacts() {
   compose_exec pacman-dcs /bin/sh -lc \
     "cat /var/log/etcd.log 2>/dev/null || true" \
     >"${run_dir}/dcs-logs/alpha-dcs-etcd.log" 2>&1 || true
+  compose_exec pacman-dcs-2 /bin/sh -lc \
+    "cat /var/log/etcd.log 2>/dev/null || true" \
+    >"${run_dir}/dcs-logs/alpha-dcs-2-etcd.log" 2>&1 || true
+  compose_exec pacman-dcs-3 /bin/sh -lc \
+    "cat /var/log/etcd.log 2>/dev/null || true" \
+    >"${run_dir}/dcs-logs/alpha-dcs-3-etcd.log" 2>&1 || true
 
   compose_exec pacman-primary /bin/sh -lc \
     "if [ -d /var/lib/pgsql/17/data/log ]; then find /var/lib/pgsql/17/data/log -maxdepth 1 -type f -print -exec cat {} \\; 2>/dev/null; fi" \
@@ -103,7 +109,7 @@ EOF
 <li><a href="nemesis-schedule.edn">nemesis-schedule.edn</a></li>
 <li><a href="pacman-cluster-after.json">pacman-cluster-after.json</a></li>
 <li><a href="pacman-history.json">pacman-history.json</a></li>
-<li>Per-case: primary-observations.jsonl, pacman-cluster-snapshots.jsonl, pg-stat-replication.json, pg-stat-wal-receiver.jsonl, single-primary-checker.json, acknowledged-write-checker.json, timeline-checker.json, old-primary-rejoin-checker.json, manual-switchover-checker.json, client-traffic-during-nemesis-checker.json, replication-traffic-during-nemesis-checker.json, and dcs-traffic-during-nemesis-checker.json</li>
+<li>Per-case: primary-observations.jsonl, pacman-cluster-snapshots.jsonl, pg-stat-replication.json, pg-stat-wal-receiver.jsonl, single-primary-checker.json, acknowledged-write-checker.json, timeline-checker.json, old-primary-rejoin-checker.json, manual-switchover-checker.json, client-traffic-during-nemesis-checker.json, replication-traffic-during-nemesis-checker.json, dcs-traffic-during-nemesis-checker.json, and dcs-quorum-checker.json</li>
 </ul>
 </body>
 </html>

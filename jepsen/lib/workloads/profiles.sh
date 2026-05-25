@@ -177,6 +177,7 @@ COMMIT;
       "{:op-id \"${open_op_id}\" :key 1 :value \"held\" :primary \"${observed_primary}\" :sleep-seconds ${open_sleep}}"
   fi
 
+  wait_for_vip_writable 90 >>"${failures}" 2>&1 || true
   post_primary=$(current_primary_name 2>/dev/null || true)
   [[ -n "${post_primary}" ]] || post_primary="unknown"
 

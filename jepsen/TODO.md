@@ -97,14 +97,13 @@ Implement after MVP-1 is stable and repeatable.
 
 ## MVP-3: DCS Quorum Campaigns
 
-Do not implement these until the Jepsen lab has a real three-node DCS quorum.
-The current Docker smoke target uses a single external etcd service, so DCS
-majority tests would be artificial today.
+These campaigns now run against the Docker lab's real three-node external etcd
+quorum.
 
-- [ ] Three-node etcd target for PACMAN Jepsen.
-- [ ] Kill one DCS node.
-- [ ] Lose DCS majority.
-- [ ] Isolate primary from DCS majority.
+- [x] Three-node etcd target for PACMAN Jepsen.
+- [x] Kill one DCS node.
+- [x] Lose DCS majority.
+- [x] Isolate primary from DCS majority.
 - [ ] Full DCS restart.
 - [ ] Slow DCS / DCS latency campaign.
 

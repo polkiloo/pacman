@@ -1,10 +1,22 @@
+pacman_cluster_status_any() {
+  local service
+
+  for service in pacman-primary pacman-replica pacman-replica-2; do
+    if pacman_cluster_status_json "${service}"; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 current_primary_name() {
-  pacman_cluster_status_json pacman-primary |
+  pacman_cluster_status_any |
     jq -r '.currentPrimary // .current_primary // ""'
 }
 
 switchover_candidate_name() {
-  pacman_cluster_status_json pacman-primary |
+  pacman_cluster_status_any |
     jq -r '
       (.currentPrimary // .current_primary // "") as $primary
       | [
@@ -22,7 +34,7 @@ switchover_candidate_name() {
 member_switchover_candidate_ready() {
   local member=$1
 
-  pacman_cluster_status_json pacman-primary |
+  pacman_cluster_status_any |
     jq -e --arg member "${member}" '
       (.currentPrimary // .current_primary // "") as $primary
       | any(
@@ -61,6 +73,66 @@ wait_for_current_primary() {
   while [[ "${SECONDS}" -lt "${deadline}" ]]; do
     current=$(current_primary_name 2>/dev/null || true)
     if [[ "${current}" == "${member}" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
+wait_for_current_primary_not() {
+  local member=$1
+  local timeout=${2:-60}
+  local deadline=$((SECONDS + timeout))
+  local current
+
+  while [[ "${SECONDS}" -lt "${deadline}" ]]; do
+    current=$(current_primary_name 2>/dev/null || true)
+    if [[ -n "${current}" && "${current}" != "${member}" ]]; then
+      printf '%s\n' "${current}"
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
+cluster_operation_idle() {
+  pacman_cluster_status_any |
+    jq -e '(.activeOperation // .active_operation // null) == null' >/dev/null
+}
+
+cluster_switchover_ready() {
+  pacman_cluster_status_any |
+    jq -e '
+      ((.activeOperation // .active_operation // null) == null)
+      and ((.phase // "") == "healthy")
+      and all(.members[]; (.healthy == true) and (((.needsRejoin // false) | not)))
+    ' >/dev/null
+}
+
+wait_for_cluster_operation_idle() {
+  local timeout=${1:-60}
+  local deadline=$((SECONDS + timeout))
+
+  while [[ "${SECONDS}" -lt "${deadline}" ]]; do
+    if cluster_operation_idle; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
+wait_for_cluster_switchover_ready() {
+  local timeout=${1:-90}
+  local deadline=$((SECONDS + timeout))
+
+  while [[ "${SECONDS}" -lt "${deadline}" ]]; do
+    if cluster_switchover_ready; then
       return 0
     fi
     sleep 1
@@ -110,6 +182,27 @@ peer_service_for_member() {
   esac
 }
 
+dcs_services() {
+  printf 'pacman-dcs pacman-dcs-2 pacman-dcs-3\n'
+}
+
+dcs_member_for_service() {
+  case "$1" in
+    pacman-dcs) printf 'alpha-dcs\n' ;;
+    pacman-dcs-2) printf 'alpha-dcs-2\n' ;;
+    pacman-dcs-3) printf 'alpha-dcs-3\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+dcs_client_endpoints() {
+  printf 'http://pacman-dcs:2379,http://pacman-dcs-2:2379,http://pacman-dcs-3:2379\n'
+}
+
+dcs_initial_cluster() {
+  printf 'alpha-dcs=http://pacman-dcs:2380,alpha-dcs-2=http://pacman-dcs-2:2380,alpha-dcs-3=http://pacman-dcs-3:2380\n'
+}
+
 vip_holder_member() {
   local service member output
 
@@ -130,6 +223,8 @@ service_ip() {
     pacman-replica) printf '172.28.0.12\n' ;;
     pacman-replica-2) printf '172.28.0.13\n' ;;
     pacman-dcs) printf '172.28.0.10\n' ;;
+    pacman-dcs-2) printf '172.28.0.14\n' ;;
+    pacman-dcs-3) printf '172.28.0.15\n' ;;
     *) return 1 ;;
   esac
 }

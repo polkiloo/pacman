@@ -3,7 +3,8 @@
 This directory provides a small Docker Compose lab for the same deployment
 shape that the Ansible automation targets:
 
-- one external etcd node: `pacman-dcs`
+- three external etcd quorum nodes: `pacman-dcs`, `pacman-dcs-2`, and
+  `pacman-dcs-3`
 - three PostgreSQL + `pacmand` nodes: `pacman-primary`, `pacman-replica`,
   `pacman-replica-2`
 
@@ -14,7 +15,7 @@ operator-facing instead of test-only:
 - node state is stored on host bind mounts under `deploy/lab/.local/`
 - the checked-in Ansible roles are applied directly to the running lab nodes
 - Prometheus + Grafana are provisioned automatically for demo observability
-- each lab node namespace, including the external DCS node, exposes a
+- each lab node namespace, including the external DCS nodes, exposes a
   dedicated `node_exporter` endpoint for Prometheus scraping
 
 ## Prerequisites
@@ -31,7 +32,7 @@ make rpm
 ## Files
 
 - `compose.yml`
-  four-node data/DCS container topology for the lab
+  six-node data/DCS container topology for the lab
 - `inventory.ini`
   local-connection Ansible inventory used inside the containers
 - `vars.yml`
@@ -95,9 +96,9 @@ That flow:
   default before applying the lab deployment
 - finds the latest PACMAN runtime RPM in `bin/ansible-install-rpm/`
 - builds the lab image from `test/docker/pacman-ansible-install.Dockerfile`
-- starts the four-container data/DCS compose environment
+- starts the six-container data/DCS compose environment
 - applies the Ansible deployment to each container with `ansible_connection=local`
-- starts the external etcd daemon and all three `pacmand` daemons
+- starts the three-member external etcd quorum and all three `pacmand` daemons
 - restarts `pacmand` and `vip-manager` during bootstrap so the lab picks up the
   freshly installed binaries and config
 - verifies etcd and PACMAN health endpoints
@@ -109,7 +110,9 @@ into the already-running PostgreSQL instances automatically.
 
 Useful host endpoints after bootstrap:
 
-- etcd: `http://127.0.0.1:2379`
+- etcd quorum: first member is published at `http://127.0.0.1:2379`;
+  in-container clients use
+  `http://pacman-dcs:2379,http://pacman-dcs-2:2379,http://pacman-dcs-3:2379`
 - primary PACMAN API: `http://127.0.0.1:8081`
 - replica PACMAN APIs: `http://127.0.0.1:8082`, `http://127.0.0.1:8083`
 - Prometheus: `http://127.0.0.1:9093`
@@ -130,7 +133,7 @@ intended for live demos and includes:
 - current primary and active control-plane operation
 - member health, primary-role movement, timeline, and replication lag
 - per-node network throughput from `node_exporter` for `alpha-1`, `alpha-2`,
-  `alpha-3`, and `alpha-dcs`
+  `alpha-3`, `alpha-dcs`, `alpha-dcs-2`, and `alpha-dcs-3`
 - Prometheus scrape-target health for PACMAN, `node_exporter`, and etcd
 
 If you override `PACMAN_DEMO_PRIMARY_API_URL` or
@@ -150,6 +153,10 @@ Wipe persisted state:
 deploy/lab/scripts/reset-state.sh
 ```
 
+If an older single-DCS lab state is present, reset once before bootstrapping the
+three-member etcd quorum. etcd cannot safely reinterpret an existing one-member
+data directory as a new static three-member cluster.
+
 ## State Layout
 
 The lab persists host-side state under `deploy/lab/.local/`:
@@ -162,6 +169,14 @@ The lab persists host-side state under `deploy/lab/.local/`:
     data/
   vars.generated.yml
   alpha-dcs/
+    etc/pacman/
+    var/lib/etcd/pacman
+    var/log/
+  alpha-dcs-2/
+    etc/pacman/
+    var/lib/etcd/pacman
+    var/log/
+  alpha-dcs-3/
     etc/pacman/
     var/lib/etcd/pacman
     var/log/
@@ -188,7 +203,8 @@ The lab persists host-side state under `deploy/lab/.local/`:
 Persistent control-plane state paths:
 
 - external etcd lab:
-  authoritative cluster state lives in `alpha-dcs/var/lib/etcd/pacman`
+  authoritative cluster state lives in the three-member quorum under
+  `alpha-dcs*/var/lib/etcd/pacman`
 - embedded Raft deployments:
   the upgrade-safe local control-plane state path is `/var/lib/pacman/raft`
   on each PACMAN node, represented here by
@@ -201,8 +217,7 @@ upgrade and rollback flows without losing state.
 
 ## Notes
 
-- The lab currently uses the same external-etcd topology as the Ansible
-  examples, not embedded Raft.
+- The lab currently uses an external-etcd quorum topology, not embedded Raft.
 - `pacmand` is started manually by the bootstrap script because the lab
   containers do not run `systemd` as PID 1.
 - Canonical host-side `systemd` assets live in `deploy/systemd/`.

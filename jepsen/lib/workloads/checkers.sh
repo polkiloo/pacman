@@ -305,7 +305,7 @@ EOF
     return 1
   fi
 
-  jq -s '
+  jq -s --arg nemesis "${nemesis}" '
     def samples:
       sort_by(.sampleId)
       | group_by(.sampleId)
@@ -355,22 +355,41 @@ EOF
           and (($oldPrimaryFinalState.timeline // 0) == ($finalPrimary.timeline // 0))
         end
       ) as $oldPrimaryRejoined
+    | (
+        if ($promotionObserved | not) then true
+        elif (($nemesis == "kill") or ($nemesis == "packet,kill") or ($nemesis == "repeated-failure")) then
+          ($oldPrimaryFinalState != null)
+          and (
+            ($oldPrimaryFinalState.reachable == false)
+            or (
+              ($oldPrimaryFinalState.writable == false)
+              and (
+                ($oldPrimaryFinalState.inRecovery == true)
+                or (($oldPrimaryFinalState.timeline // 0) == ($finalPrimary.timeline // 0))
+              )
+            )
+          )
+        else $oldPrimaryRejoined
+        end
+      ) as $oldPrimarySafeOrRejoined
     | {
         checker: "old-primary-rejoin-after-failover",
         valid: (
           ($samples | length) > 0
           and (
             ($promotionObserved | not)
-            or $oldPrimaryRejoined
+            or $oldPrimarySafeOrRejoined
           )
         ),
         applicable: $promotionObserved,
+        nemesis: $nemesis,
         observations: length,
         samples: ($samples | length),
         promotionObserved: $promotionObserved,
         initialPrimary: (if $initialPrimary == null then null else ($initialPrimary | summarize_member) end),
         finalPrimary: (if $finalPrimary == null then null else ($finalPrimary | summarize_member) end),
         oldPrimaryRejoined: $oldPrimaryRejoined,
+        oldPrimarySafeOrRejoined: $oldPrimarySafeOrRejoined,
         oldPrimaryFinalState: (if $oldPrimaryFinalState == null then null else ($oldPrimaryFinalState | summarize_member) end)
       }
   ' "${observation_file}" >"${checker_file}"
@@ -550,6 +569,95 @@ EOF
       healthySamples: (map(select(.ok == true)) | length),
       observations: .
     }
+  ' "${sample_file}" >"${checker_file}"
+
+  jq -e '.valid == true' "${checker_file}" >/dev/null
+}
+
+check_dcs_quorum_during_nemesis() {
+  local nemesis=$1
+  local case_dir=$2
+  local checker_file="${case_dir}/dcs-quorum-checker.json"
+  local sample_file="${case_dir}/dcs-quorum-during-nemesis.jsonl"
+
+  if [[ "${nemesis}" != "dcs-kill-one" && "${nemesis}" != "dcs-lose-majority" && "${nemesis}" != "primary-dcs-majority-partition" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"dcs-quorum-during-nemesis","valid":true,"applicable":false}
+EOF
+    return 0
+  fi
+
+  if [[ ! -s "${sample_file}" ]]; then
+    cat >"${checker_file}" <<'EOF'
+{"checker":"dcs-quorum-during-nemesis","valid":false,"applicable":true,"error":"missing DCS quorum probe samples"}
+EOF
+    return 1
+  fi
+
+  jq -s --arg nemesis "${nemesis}" '
+    def phase($name): map(select(.phase == $name));
+    (
+      if $nemesis == "dcs-lose-majority" then phase("before-majority-loss")
+      elif $nemesis == "primary-dcs-majority-partition" then phase("before-primary-majority-partition")
+      else phase("before-kill")
+      end
+    ) as $before
+    | (
+      if $nemesis == "dcs-lose-majority" then phase("during-majority-loss")
+      elif $nemesis == "primary-dcs-majority-partition" then phase("during-primary-majority-partition")
+      else phase("during-kill")
+      end
+    ) as $during
+    | (
+      if $nemesis == "primary-dcs-majority-partition" then phase("after-primary-majority-partition")
+      else phase("after-restart")
+      end
+    ) as $after
+    | (
+        if $nemesis == "dcs-lose-majority" then
+          $during | map(select(
+            .ok == true
+            and (.healthyEndpoints // 0) <= 1
+            and (.failedEndpoints // 0) >= 2
+            and (.targetCount // 0) >= 2
+            and (.runningTargets // 0) == 0
+            and .targetRunning == false
+          ))
+        elif $nemesis == "primary-dcs-majority-partition" then
+          $during | map(select(
+            .ok == true
+            and (.healthyEndpoints // 0) <= 1
+            and (.failedEndpoints // 0) >= 2
+            and (.targetCount // 0) >= 2
+            and (.runningTargets // 0) == (.targetCount // 0)
+            and .targetRunning == true
+          ))
+        else
+          $during | map(select(
+            .ok == true
+            and (.healthyEndpoints // 0) >= 2
+            and (.failedEndpoints // 0) >= 1
+            and .targetRunning == false
+          ))
+        end
+      ) as $duringExpected
+    | ($after | map(select(
+        .ok == true
+        and (.healthyEndpoints // 0) == (.totalEndpoints // 0)
+        and (.totalEndpoints // 0) >= 3
+        and .targetRunning == true
+      ))) as $afterRecovered
+    | {
+        checker: "dcs-quorum-during-nemesis",
+        valid: (($duringExpected | length) > 0 and ($afterRecovered | length) > 0),
+        applicable: true,
+        nemesis: $nemesis,
+        samples: length,
+        beforeSamples: ($before | length),
+        duringExpectedSamples: ($duringExpected | length),
+        afterRecoveredSamples: ($afterRecovered | length),
+        observations: .
+      }
   ' "${sample_file}" >"${checker_file}"
 
   jq -e '.valid == true' "${checker_file}" >/dev/null

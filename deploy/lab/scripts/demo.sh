@@ -29,6 +29,7 @@ postgres_config_value="${PACMAN_DEMO_POSTGRES_VALUE:-250ms}"
 vip_address="${PACMAN_DEMO_VIP_ADDRESS:-172.28.0.100}"
 vip_interface="${PACMAN_DEMO_VIP_INTERFACE:-eth0}"
 rw_host="${PACMAN_DEMO_RW_HOST:-${vip_address}}"
+dcs_client_endpoints="${PACMAN_DEMO_DCS_ENDPOINTS:-http://pacman-dcs:2379,http://pacman-dcs-2:2379,http://pacman-dcs-3:2379}"
 
 pgbench_host="${PACMAN_DEMO_PGBENCH_HOST:-${rw_host}}"
 pgbench_port="${PACMAN_DEMO_PGBENCH_PORT:-5432}"
@@ -101,6 +102,7 @@ Environment:
   PACMAN_DEMO_VIP_ADDRESS          default: ${vip_address}
   PACMAN_DEMO_VIP_INTERFACE        default: ${vip_interface}
   PACMAN_DEMO_RW_HOST              default: ${rw_host}
+  PACMAN_DEMO_DCS_ENDPOINTS        default: ${dcs_client_endpoints}
   PACMAN_DEMO_PGBENCH_HOST         default: ${pgbench_host}
   PACMAN_DEMO_PGBENCH_PORT         default: ${pgbench_port}
   PACMAN_DEMO_PGBENCH_USER         default: ${pgbench_user}
@@ -121,7 +123,7 @@ Notes:
   - vip-manager manages the writable PostgreSQL VIP at ${vip_address}; PostgreSQL
     client stages default to that address so they follow switchovers automatically.
   - bootstrap provisions Prometheus, Grafana, and one node_exporter endpoint on
-    each demo node namespace, including the external DCS node.
+    each demo node namespace, including the external DCS nodes.
   - the Grafana stack auto-loads the "PACMAN Demo Overview" dashboard with
     Prometheus as the default datasource.
   - The local lab member names are alpha-1, alpha-2, and alpha-3.
@@ -618,7 +620,8 @@ update_desired_postgres_parameter() {
 	require_etcdctl
 	require_python pacman-dcs
 	ensure_container_api_url "${primary_api_url}" "PACMAN_DEMO_PRIMARY_API_URL" "${primary_service}"
-	compose_exec pacman-dcs python3 - "${parameter}" "${value}" "${primary_api_url}/api/v1/cluster/spec" "${api_token}" <<'PY'
+	compose_exec pacman-dcs env "PACMAN_DEMO_DCS_ENDPOINTS=${dcs_client_endpoints}" \
+		python3 - "${parameter}" "${value}" "${primary_api_url}/api/v1/cluster/spec" "${api_token}" <<'PY'
 import base64
 import json
 import os
@@ -647,7 +650,7 @@ key = f"/pacman/{cluster_name}/config"
 current = subprocess.run(
     [
         "etcdctl",
-        "--endpoints=http://127.0.0.1:2379",
+        f"--endpoints={os.environ['PACMAN_DEMO_DCS_ENDPOINTS']}",
         "get",
         key,
         "-w",
@@ -700,7 +703,7 @@ else:
     subprocess.run(
         [
             "etcdctl",
-            "--endpoints=http://127.0.0.1:2379",
+            f"--endpoints={os.environ['PACMAN_DEMO_DCS_ENDPOINTS']}",
             "put",
             key,
             payload,
@@ -847,7 +850,7 @@ stage_postgres_config() {
 			pacmanctl cluster spec show -o json
 		log "update desired PostgreSQL parameter ${parameter}=${value} in DCS [PACMAN-native API + DCS]"
 		render_command docker compose -f "${compose_file}" exec -T pacman-dcs \
-			env ETCDCTL_API=3 etcdctl put "/pacman/<cluster>/config" "<updated-cluster-spec-json>"
+			env ETCDCTL_API=3 etcdctl "--endpoints=${dcs_client_endpoints}" put "/pacman/<cluster>/config" "<updated-cluster-spec-json>"
 		log "wait for desired PostgreSQL parameter to appear in cluster spec [PACMAN-native API]"
 		render_command docker compose -f "${compose_file}" exec -T "${primary_service}" \
 			env PACMANCTL_API_URL="${primary_api_url}" PACMANCTL_API_TOKEN="${api_token}" \

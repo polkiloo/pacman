@@ -1,6 +1,6 @@
 workload_op_table() {
   case "$1" in
-    append-smoke | append-failover | append-switchover | open-transaction-failover | vip-routing) printf 'jepsen.append_values\n' ;;
+    append-smoke | append-failover | append-switchover | append-dcs-quorum | open-transaction-failover | vip-routing) printf 'jepsen.append_values\n' ;;
     single-key-register) printf 'jepsen.register_values\n' ;;
     read-committed-txn | serializable-txn) printf 'jepsen.txn_ops\n' ;;
     *) return 1 ;;
@@ -90,8 +90,10 @@ start_primary_sampler() {
   local observation_file="${case_dir}/primary-observations.jsonl"
 
   (
+    local stop_requested=false
+    trap 'stop_requested=true' TERM INT
     local sample_id=1
-    while true; do
+    while [[ "${stop_requested}" != "true" ]]; do
       sample_primary_state "${sample_id}" "${observation_file}"
       sample_id=$((sample_id + 1))
       sleep "${jepsen_primary_sample_interval}"

@@ -130,6 +130,8 @@ write_summary() {
         -name 'replication-traffic-during-nemesis.jsonl' -o \
         -name 'dcs-traffic-during-nemesis-checker.json' -o \
         -name 'dcs-traffic-during-nemesis.jsonl' -o \
+        -name 'dcs-quorum-checker.json' -o \
+        -name 'dcs-quorum-during-nemesis.jsonl' -o \
         -name 'failover-chain-checker.json' -o \
         -name 'failover-chain.jsonl' -o \
         -name 'open-transaction-checker.json' -o \

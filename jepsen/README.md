@@ -26,6 +26,12 @@ append-failover:packet
 append-failover:packet,kill
 append-failover:primary-dcs-partition
 append-failover:primary-replication-partition
+append-failover:failover-chain
+open-transaction-failover:kill
+vip-routing:switchover
+append-dcs-quorum:dcs-kill-one
+append-dcs-quorum:dcs-lose-majority
+append-dcs-quorum:primary-dcs-majority-partition
 single-key-register:packet
 read-committed-txn:slow-network
 serializable-txn:packet,kill
@@ -50,6 +56,12 @@ make jepsen-docker-case-append-failover-packet
 make jepsen-docker-case-append-failover-packet-kill
 make jepsen-docker-case-append-failover-primary-dcs-partition
 make jepsen-docker-case-append-failover-primary-replication-partition
+make jepsen-docker-case-append-failover-failover-chain
+make jepsen-docker-case-open-transaction-failover-kill
+make jepsen-docker-case-vip-routing-switchover
+make jepsen-docker-case-append-dcs-quorum-dcs-kill-one
+make jepsen-docker-case-append-dcs-quorum-dcs-lose-majority
+make jepsen-docker-case-append-dcs-quorum-primary-dcs-majority-partition
 make jepsen-docker-case-single-key-register-packet
 make jepsen-docker-case-read-committed-txn-slow-network
 make jepsen-docker-case-serializable-txn-packet-kill
@@ -75,6 +87,9 @@ Implemented workload profiles:
 - `append-smoke`
 - `append-switchover`
 - `append-failover`
+- `append-dcs-quorum`
+- `open-transaction-failover`
+- `vip-routing`
 - `single-key-register`
 - `read-committed-txn`
 - `serializable-txn`
@@ -88,6 +103,10 @@ Implemented nemesis profiles:
 - `packet,kill`
 - `primary-dcs-partition`
 - `primary-replication-partition`
+- `dcs-kill-one`
+- `dcs-lose-majority`
+- `primary-dcs-majority-partition`
+- `failover-chain`
 - `slow-network`
 - `repeated-failure`
 

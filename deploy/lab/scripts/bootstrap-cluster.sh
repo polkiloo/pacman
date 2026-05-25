@@ -20,6 +20,11 @@ wait_for_observability="${PACMAN_LAB_WAIT_FOR_OBSERVABILITY:-true}"
 
 export PACMAN_LAB_IMAGE="${lab_image}"
 
+dcs_services=(pacman-dcs pacman-dcs-2 pacman-dcs-3)
+dcs_members=(alpha-dcs alpha-dcs-2 alpha-dcs-3)
+dcs_client_endpoints="http://pacman-dcs:2379,http://pacman-dcs-2:2379,http://pacman-dcs-3:2379"
+dcs_initial_cluster="alpha-dcs=http://pacman-dcs:2380,alpha-dcs-2=http://pacman-dcs-2:2380,alpha-dcs-3=http://pacman-dcs-3:2380"
+
 find_runtime_rpm() {
   local candidate name
   local candidates=()
@@ -91,12 +96,15 @@ apply_playbook() {
 
 wait_for_etcd_health() {
   local deadline=$((SECONDS + 60))
+  local service
 
   until compose_exec pacman-dcs /bin/bash -lc \
-    "ETCDCTL_API=3 etcdctl --endpoints=http://127.0.0.1:2379 endpoint health" >/dev/null 2>&1; do
+    "ETCDCTL_API=3 etcdctl --endpoints=${dcs_client_endpoints} endpoint health" >/dev/null 2>&1; do
     if (( SECONDS >= deadline )); then
-      compose_exec pacman-dcs /bin/sh -lc "ps -ef | grep '[e]tcd' || true"
-      compose_exec pacman-dcs /bin/sh -lc 'cat /var/log/etcd.log || true'
+      for service in "${dcs_services[@]}"; do
+        compose_exec "${service}" /bin/sh -lc "ps -ef | grep '[e]tcd' || true"
+        compose_exec "${service}" /bin/sh -lc 'cat /var/log/etcd.log || true'
+      done
       return 1
     fi
     sleep 2
@@ -155,24 +163,36 @@ wait_for_internal_http() {
 }
 
 start_etcd() {
-  if compose_exec pacman-dcs pgrep -f "/usr/bin/etcd --name alpha-dcs" >/dev/null 2>&1; then
+  local index member service
+
+  if compose_exec pacman-dcs /bin/bash -lc \
+    "ETCDCTL_API=3 etcdctl --endpoints=${dcs_client_endpoints} endpoint health" >/dev/null 2>&1; then
     wait_for_etcd_health
     return
   fi
 
-  compose_exec_detached pacman-dcs \
-    /bin/bash -lc \
-    "exec /usr/bin/etcd \
-      --name alpha-dcs \
-      --data-dir /var/lib/etcd/pacman \
-      --listen-client-urls http://0.0.0.0:2379 \
-      --advertise-client-urls http://pacman-dcs:2379 \
-      --listen-peer-urls http://0.0.0.0:2380 \
-      --initial-advertise-peer-urls http://pacman-dcs:2380 \
-      --initial-cluster alpha-dcs=http://pacman-dcs:2380 \
-      --initial-cluster-state new \
-      --initial-cluster-token pacman-cluster \
-      >>/var/log/etcd.log 2>&1"
+  for index in "${!dcs_services[@]}"; do
+    service=${dcs_services[${index}]}
+    member=${dcs_members[${index}]}
+
+    if compose_exec "${service}" pgrep -f "/usr/bin/etcd .*--name ${member}" >/dev/null 2>&1; then
+      continue
+    fi
+
+    compose_exec_detached "${service}" \
+      /bin/bash -lc \
+      "exec /usr/bin/etcd \
+        --name ${member} \
+        --data-dir /var/lib/etcd/pacman \
+        --listen-client-urls http://0.0.0.0:2379 \
+        --advertise-client-urls http://${service}:2379 \
+        --listen-peer-urls http://0.0.0.0:2380 \
+        --initial-advertise-peer-urls http://${service}:2380 \
+        --initial-cluster ${dcs_initial_cluster} \
+        --initial-cluster-state new \
+        --initial-cluster-token pacman-cluster \
+        >>/var/log/etcd.log 2>&1"
+  done
 
   wait_for_etcd_health
 }
@@ -226,6 +246,8 @@ main() {
   docker compose -f "${compose_file}" up -d --build
 
   apply_playbook pacman-dcs alpha-dcs
+  apply_playbook pacman-dcs-2 alpha-dcs-2
+  apply_playbook pacman-dcs-3 alpha-dcs-3
   apply_playbook pacman-primary alpha-1
   apply_playbook pacman-replica alpha-2
   apply_playbook pacman-replica-2 alpha-3
@@ -246,7 +268,7 @@ main() {
   printf 'PACMAN lab bootstrapped successfully.\n'
   printf 'Primary API: http://127.0.0.1:8081\n'
   printf 'Replica APIs: http://127.0.0.1:8082, http://127.0.0.1:8083\n'
-  printf 'etcd: http://127.0.0.1:2379\n'
+  printf 'etcd quorum: http://127.0.0.1:2379 (published first member), %s\n' "${dcs_client_endpoints}"
   printf 'Writable PostgreSQL VIP: %s:5432\n' "${vip_address}"
   if [[ "${wait_for_observability}" == "true" ]]; then
     printf 'Prometheus: %s\n' "${prometheus_url}"

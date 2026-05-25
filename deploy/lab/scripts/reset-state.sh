@@ -12,10 +12,14 @@ docker rm -f \
   pacman-lab-replica-2-node-exporter \
   pacman-lab-replica-node-exporter \
   pacman-lab-primary-node-exporter \
+  pacman-lab-dcs-3-node-exporter \
+  pacman-lab-dcs-2-node-exporter \
   pacman-lab-dcs-node-exporter \
   pacman-lab-replica \
   pacman-lab-replica-2 \
   pacman-lab-primary \
+  pacman-lab-dcs-3 \
+  pacman-lab-dcs-2 \
   pacman-lab-dcs >/dev/null 2>&1 || true
 
 docker network rm pacman-lab_pacman-lab-net >/dev/null 2>&1 || true
