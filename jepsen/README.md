@@ -9,6 +9,7 @@ Run locally through the Dockerized control node:
 
 ```bash
 make jepsen-list-cases
+make jepsen-check-case-targets
 make jepsen-docker-smoke
 make jepsen-docker-nightly
 ```
@@ -32,6 +33,8 @@ vip-routing:switchover
 append-dcs-quorum:dcs-kill-one
 append-dcs-quorum:dcs-lose-majority
 append-dcs-quorum:primary-dcs-majority-partition
+append-dcs-quorum:dcs-full-restart
+append-dcs-quorum:dcs-slow-network
 single-key-register:packet
 read-committed-txn:slow-network
 serializable-txn:packet,kill
@@ -62,11 +65,18 @@ make jepsen-docker-case-vip-routing-switchover
 make jepsen-docker-case-append-dcs-quorum-dcs-kill-one
 make jepsen-docker-case-append-dcs-quorum-dcs-lose-majority
 make jepsen-docker-case-append-dcs-quorum-primary-dcs-majority-partition
+make jepsen-docker-case-append-dcs-quorum-dcs-full-restart
+make jepsen-docker-case-append-dcs-quorum-dcs-slow-network
 make jepsen-docker-case-single-key-register-packet
 make jepsen-docker-case-read-committed-txn-slow-network
 make jepsen-docker-case-serializable-txn-packet-kill
 make jepsen-docker-case-append-failover-repeated-failure
 ```
+
+`make jepsen-check-case-targets` verifies every case listed by
+`jepsen/bin/list-cases` has both `jepsen-case-<name>` and
+`jepsen-docker-case-<name>` Make targets, so the implemented MVP matrix remains
+runnable one case at a time.
 
 The same target also accepts the explicit `workload:nemesis` form:
 
@@ -106,14 +116,23 @@ Implemented nemesis profiles:
 - `dcs-kill-one`
 - `dcs-lose-majority`
 - `primary-dcs-majority-partition`
+- `dcs-full-restart`
+- `dcs-slow-network`
 - `failover-chain`
 - `slow-network`
 - `repeated-failure`
 
 Campaigns reset `deploy/lab/.local/` before bootstrap by default so repeated
-runs start from a clean PostgreSQL and DCS state. Set
-`PACMAN_JEPSEN_RESET_LAB=false` only when preserving the lab for interactive
+runs start from a clean PostgreSQL and DCS state. After artifact collection, the
+runners destroy the Docker Compose lab and assert no lab containers remain. Set
+`PACMAN_JEPSEN_RESET_LAB=false` only when reusing an existing lab, and set
+`PACMAN_JEPSEN_DESTROY_LAB=false` only when preserving the lab for interactive
 debugging.
+
+Every suite bootstrap records `pacman-cluster-before*.json` and asserts the
+clean target shape before workload execution: a healthy PACMAN cluster with
+exactly `alpha-1`, `alpha-2`, and `alpha-3`, one current primary, and two
+streaming replicas.
 
 Non-`none` nemesis cases wait `PACMAN_JEPSEN_POST_NEMESIS_SETTLE_SECONDS`
 seconds after the nemesis heals before final checker sampling. The default is

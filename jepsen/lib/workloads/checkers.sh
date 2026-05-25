@@ -580,7 +580,7 @@ check_dcs_quorum_during_nemesis() {
   local checker_file="${case_dir}/dcs-quorum-checker.json"
   local sample_file="${case_dir}/dcs-quorum-during-nemesis.jsonl"
 
-  if [[ "${nemesis}" != "dcs-kill-one" && "${nemesis}" != "dcs-lose-majority" && "${nemesis}" != "primary-dcs-majority-partition" ]]; then
+  if [[ "${nemesis}" != "dcs-kill-one" && "${nemesis}" != "dcs-lose-majority" && "${nemesis}" != "primary-dcs-majority-partition" && "${nemesis}" != "dcs-full-restart" && "${nemesis}" != "dcs-slow-network" ]]; then
     cat >"${checker_file}" <<'EOF'
 {"checker":"dcs-quorum-during-nemesis","valid":true,"applicable":false}
 EOF
@@ -594,22 +594,28 @@ EOF
     return 1
   fi
 
-  jq -s --arg nemesis "${nemesis}" '
+  jq -s --arg nemesis "${nemesis}" --argjson minSlowLatencyMillis "${jepsen_dcs_slow_min_latency_ms}" '
     def phase($name): map(select(.phase == $name));
     (
       if $nemesis == "dcs-lose-majority" then phase("before-majority-loss")
       elif $nemesis == "primary-dcs-majority-partition" then phase("before-primary-majority-partition")
+      elif $nemesis == "dcs-full-restart" then phase("before-full-restart")
+      elif $nemesis == "dcs-slow-network" then phase("before-dcs-slow-network")
       else phase("before-kill")
       end
     ) as $before
     | (
       if $nemesis == "dcs-lose-majority" then phase("during-majority-loss")
       elif $nemesis == "primary-dcs-majority-partition" then phase("during-primary-majority-partition")
+      elif $nemesis == "dcs-full-restart" then phase("during-full-restart")
+      elif $nemesis == "dcs-slow-network" then phase("during-dcs-slow-network")
       else phase("during-kill")
       end
     ) as $during
     | (
       if $nemesis == "primary-dcs-majority-partition" then phase("after-primary-majority-partition")
+      elif $nemesis == "dcs-full-restart" then phase("after-full-restart")
+      elif $nemesis == "dcs-slow-network" then phase("after-dcs-slow-network")
       else phase("after-restart")
       end
     ) as $after
@@ -632,6 +638,25 @@ EOF
             and (.runningTargets // 0) == (.targetCount // 0)
             and .targetRunning == true
           ))
+        elif $nemesis == "dcs-full-restart" then
+          $during | map(select(
+            .ok == true
+            and (.healthyEndpoints // 0) == 0
+            and (.failedEndpoints // 0) >= 3
+            and (.targetCount // 0) >= 3
+            and (.runningTargets // 0) == 0
+            and .targetRunning == false
+          ))
+        elif $nemesis == "dcs-slow-network" then
+          $during | map(select(
+            .ok == true
+            and (.healthyEndpoints // 0) == (.totalEndpoints // 0)
+            and (.totalEndpoints // 0) >= 3
+            and (.targetCount // 0) >= 3
+            and (.runningTargets // 0) == (.targetCount // 0)
+            and .targetRunning == true
+            and (.maxEndpointLatencyMillis // 0) >= $minSlowLatencyMillis
+          ))
         else
           $during | map(select(
             .ok == true
@@ -652,6 +677,7 @@ EOF
         valid: (($duringExpected | length) > 0 and ($afterRecovered | length) > 0),
         applicable: true,
         nemesis: $nemesis,
+        minSlowLatencyMillis: $minSlowLatencyMillis,
         samples: length,
         beforeSamples: ($before | length),
         duringExpectedSamples: ($duringExpected | length),

@@ -118,6 +118,7 @@ write_summary() {
         -name 'nemesis-schedule.edn' -o \
         -name 'case-results.jsonl' -o \
         -name 'nightly-failures.txt' -o \
+        -name 'docker-compose-after-destroy.txt' -o \
         -name 'checker.json' -o \
         -name 'single-primary-checker.json' -o \
         -name 'acknowledged-write-checker.json' -o \

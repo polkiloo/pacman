@@ -104,8 +104,8 @@ quorum.
 - [x] Kill one DCS node.
 - [x] Lose DCS majority.
 - [x] Isolate primary from DCS majority.
-- [ ] Full DCS restart.
-- [ ] Slow DCS / DCS latency campaign.
+- [x] Full DCS restart.
+- [x] Slow DCS / DCS latency campaign.
 
 ## Post-MVP Hardening
 
@@ -166,12 +166,63 @@ surface.
 - [ ] `patronictl pause` / `resume`.
 - [ ] Patroni dynamic config changes through DCS.
 
+## Go Automation Migration Plan
+
+Move brittle validation and checker logic to Go incrementally. Keep shell as the
+thin Docker/CI runner until the lab behavior is stable enough to justify a
+larger orchestration rewrite.
+
+1. [ ] Add a small Go CLI, `tools/jepsenctl`, with subcommands and table-driven
+       tests.
+   - [ ] Keep it repo-local and runnable with `go run ./tools/jepsenctl ...`.
+   - [ ] Use only standard library packages at first unless a dependency removes
+         real complexity.
+
+2. [ ] Move case registry validation to Go.
+   - [ ] Parse `jepsen/bin/list-cases` output or a future structured registry.
+   - [ ] Verify every case has `jepsen-case-<slug>` and
+         `jepsen-docker-case-<slug>` Make targets.
+   - [ ] Replace `jepsen/bin/check-case-targets` once the Go command is covered
+         by tests.
+
+3. [ ] Move cluster-shape validation to Go.
+   - [ ] Read `pacman-cluster-before*.json`.
+   - [ ] Assert exactly three data nodes: `alpha-1`, `alpha-2`, and `alpha-3`.
+   - [ ] Assert one healthy primary and two healthy replicas.
+   - [ ] Keep the shell runner responsible only for collecting the JSON.
+
+4. [ ] Move artifact summary and index generation to Go.
+   - [ ] Generate the artifact index currently assembled in
+         `scripts/ci/run-jepsen.sh`.
+   - [ ] Produce a concise failure summary from `case-results.jsonl`,
+         `nightly-failures.txt`, and checker JSON files.
+   - [ ] Keep GitHub Actions upload wiring in shell/YAML.
+
+5. [ ] Move JSON/JSONL checkers to Go one checker at a time.
+   - [ ] Start with DCS quorum checker.
+   - [ ] Then move single-primary, acknowledged-write, timeline, old-primary
+         rejoin, manual-switchover, and VIP-routing checkers.
+   - [ ] For each moved checker, keep golden JSONL fixtures and failure-case
+         tests.
+
+6. [ ] Move nemesis schedule validation to Go.
+   - [ ] Verify every nemesis records start, heal/stop, target, and command
+         result.
+   - [ ] Validate schedule entries against the selected `workload:nemesis`
+         profile.
+
+7. [ ] Revisit lab orchestration after checker migration is stable.
+   - [ ] Decide whether `bootstrap/reset/destroy`, `docker compose exec`, and
+         nemesis execution should stay shell or move behind Go subcommands.
+   - [ ] Do not rewrite long-running Docker orchestration until the Go
+         validators have reduced real maintenance pain.
+
 ## Definition of Done
 
 MVP-1 is done when:
 
-- [ ] The suite deploys and destroys a clean PACMAN three-data-node cluster.
-- [ ] Every MVP case is runnable individually.
+- [x] The suite deploys and destroys a clean PACMAN three-data-node cluster.
+- [x] Every MVP case is runnable individually.
 - [ ] Every MVP case writes machine-checkable history.
 - [ ] Every nemesis action records target, start, heal, and command result.
 - [ ] Every failed run produces enough logs and snapshots to explain the failure.

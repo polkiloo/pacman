@@ -40,6 +40,74 @@ compose_exec() {
   docker compose -f "${compose_file}" exec -T "${service}" "$@"
 }
 
+verify_three_data_node_cluster() {
+  local output_file=${1:-}
+  local output
+
+  output=$(compose_exec pacman-primary /bin/sh -lc \
+    "PACMANCTL_API_URL=http://pacman-primary:8080 PACMANCTL_API_TOKEN=lab-admin-token pacmanctl cluster status -o json")
+
+  if [[ -n "${output_file}" ]]; then
+    printf '%s\n' "${output}" >"${output_file}"
+  fi
+
+  printf '%s\n' "${output}" | jq -e '
+    .phase == "healthy"
+    and (.members | length) == 3
+    and ([.members[].name] | sort) == ["alpha-1", "alpha-2", "alpha-3"]
+    and ([.members[] | select(.role == "primary")] | length) == 1
+    and ([.members[] | select(.role == "replica")] | length) == 2
+    and ([.members[] | select(.healthy == true)] | length) == 3
+  ' >/dev/null
+}
+
+destroy_lab() {
+  "${repo_root}/deploy/lab/scripts/destroy-cluster.sh"
+}
+
+assert_lab_destroyed() {
+  local running
+
+  running=$(docker compose -f "${compose_file}" ps -q)
+  if [[ -n "${running}" ]]; then
+    docker compose -f "${compose_file}" ps >&2 || true
+    return 1
+  fi
+}
+
+destroy_lab_after_suite() {
+  local run_dir=$1
+  local history_file=$2
+
+  if [[ "${PACMAN_JEPSEN_DESTROY_LAB:-true}" != "true" ]]; then
+    write_edn_event "${history_file}" "destroy" "ok" "\"preserved-docker-lab\""
+    return 0
+  fi
+
+  write_edn_event "${history_file}" "destroy" "invoke" "\"docker-lab\""
+  if destroy_lab && assert_lab_destroyed; then
+    write_edn_event "${history_file}" "destroy" "ok" "\"docker-lab\""
+    docker compose -f "${compose_file}" ps >"${run_dir}/docker-compose-after-destroy.txt" 2>&1 || true
+    return 0
+  fi
+
+  write_edn_event "${history_file}" "destroy" "fail" "\"docker-lab\""
+  docker compose -f "${compose_file}" ps >"${run_dir}/docker-compose-after-destroy.txt" 2>&1 || true
+  return 1
+}
+
+write_results_file() {
+  local run_dir=$1
+  local status=$2
+
+  cat >"${run_dir}/results.edn" <<EOF
+{:valid? ${status}
+ :campaign "${PACMAN_JEPSEN_CAMPAIGN:-smoke}"
+ :target "pacman-docker-lab"
+ :checked-at "$(timestamp_utc)"}
+EOF
+}
+
 collect_artifacts() {
   local run_dir=$1
   local status=$2
@@ -88,12 +156,7 @@ collect_artifacts() {
     "PACMANCTL_API_URL=http://pacman-primary:8080 PACMANCTL_API_TOKEN=lab-admin-token pacmanctl history list -o json" \
     >"${run_dir}/pacman-history.json" 2>&1 || true
 
-  cat >"${run_dir}/results.edn" <<EOF
-{:valid? ${status}
- :campaign "${PACMAN_JEPSEN_CAMPAIGN:-smoke}"
- :target "pacman-docker-lab"
- :checked-at "$(timestamp_utc)"}
-EOF
+  write_results_file "${run_dir}" "${status}"
 
   cat >"${run_dir}/index.html" <<EOF
 <!doctype html>

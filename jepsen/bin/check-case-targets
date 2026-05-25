@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/../.." && pwd)"
+
+missing=0
+
+while read -r slug _description; do
+  [[ -n "${slug}" ]] || continue
+
+  for target in "jepsen-case-${slug}" "jepsen-docker-case-${slug}"; do
+    if ! make -C "${repo_root}" -n "${target}" >/dev/null 2>&1; then
+      printf 'missing Make target for Jepsen case %s: %s\n' "${slug}" "${target}" >&2
+      missing=1
+    fi
+  done
+done < <("${script_dir}/list-cases")
+
+exit "${missing}"
