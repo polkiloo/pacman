@@ -178,11 +178,11 @@ larger orchestration rewrite.
    - [x] Use only standard library packages at first unless a dependency removes
          real complexity.
 
-2. [ ] Move case registry validation to Go.
-   - [ ] Parse `jepsen/bin/list-cases` output or a future structured registry.
-   - [ ] Verify every case has `jepsen-case-<slug>` and
+2. [x] Move case registry validation to Go.
+   - [x] Parse `jepsen/bin/list-cases` output or a future structured registry.
+   - [x] Verify every case has `jepsen-case-<slug>` and
          `jepsen-docker-case-<slug>` Make targets.
-   - [ ] Replace `jepsen/bin/check-case-targets` once the Go command is covered
+   - [x] Replace `jepsen/bin/check-case-targets` once the Go command is covered
          by tests.
 
 3. [ ] Move cluster-shape validation to Go.

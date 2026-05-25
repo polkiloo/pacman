@@ -63,6 +63,7 @@ Commands:
 Run with go run ./tools/jepsenctl <command> [args].
 `)
 
+	root.AddCommand(newCasesCommand(stdout, stderr))
 	root.AddCommand(newVersionCommand(stdout))
 
 	return root
