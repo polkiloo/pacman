@@ -9,6 +9,7 @@ Run locally through the Dockerized control node:
 
 ```bash
 make jepsen-list-cases
+make jepsen-check-case-targets
 make jepsen-docker-smoke
 make jepsen-docker-nightly
 ```
@@ -71,6 +72,11 @@ make jepsen-docker-case-read-committed-txn-slow-network
 make jepsen-docker-case-serializable-txn-packet-kill
 make jepsen-docker-case-append-failover-repeated-failure
 ```
+
+`make jepsen-check-case-targets` verifies every case listed by
+`jepsen/bin/list-cases` has both `jepsen-case-<name>` and
+`jepsen-docker-case-<name>` Make targets, so the implemented MVP matrix remains
+runnable one case at a time.
 
 The same target also accepts the explicit `workload:nemesis` form:
 
