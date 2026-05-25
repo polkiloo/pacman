@@ -2,6 +2,7 @@ EXTENSION = pacman_agent
 MODULE_big = pacman_agent
 OBJS = pacman_agent.o
 DATA = sql/pacman_agent--0.1.0.sql
+override with_llvm = no
 
 PG_CONFIG ?= pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)

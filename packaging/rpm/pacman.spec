@@ -111,8 +111,6 @@ make -C postgresql/pacman_agent PG_CONFIG=%{pg17_prefix}/bin/pg_config DESTDIR=%
 %license LICENSE
 %doc packaging/rpm/README.md
 %{pg17_prefix}/lib/pacman_agent.so
-%{pg17_prefix}/lib/bitcode/pacman_agent.index.bc
-%{pg17_prefix}/lib/bitcode/pacman_agent/pacman_agent.bc
 %{pg17_prefix}/share/extension/pacman_agent.control
 %{pg17_prefix}/share/extension/pacman_agent--0.1.0.sql
 
