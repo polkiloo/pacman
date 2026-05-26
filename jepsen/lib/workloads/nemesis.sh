@@ -471,9 +471,9 @@ run_nemesis_profile() {
 
   case "${profile}" in
     none)
-      printf '{:time "%s" :nemesis :none :action :start}\n' "$(timestamp_utc)" >>"${schedule_file}"
+      printf '{:time "%s" :nemesis :none :action :start :target "none"}\n' "$(timestamp_utc)" >>"${schedule_file}"
       capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "" || true
-      printf '{:time "%s" :nemesis :none :action :stop}\n' "$(timestamp_utc)" >>"${schedule_file}"
+      printf '{:time "%s" :nemesis :none :action :stop :target "none" :result :ok}\n' "$(timestamp_utc)" >>"${schedule_file}"
       capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "" || true
       printf -v "${__pid_var}" '%s' ''
       return 0
@@ -496,7 +496,7 @@ run_nemesis_profile() {
         capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         sleep "${jepsen_nemesis_hold_seconds}"
         start_pacman_node_runtime "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
-        printf '{:time "%s" :nemesis :kill :action :stop :target "%s" :promoted "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" "${promoted_after_kill:-unknown}" >>"${schedule_file}"
+        printf '{:time "%s" :nemesis :kill :action :stop :target "%s" :promoted "%s" :result :ok}\n' "$(timestamp_utc)" "${member:-unknown}" "${promoted_after_kill:-unknown}" >>"${schedule_file}"
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         ;;
       switchover)
@@ -549,7 +549,7 @@ run_nemesis_profile() {
         capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         sleep "${jepsen_nemesis_hold_seconds}"
         iptables_heal "${service}" ${peer_services} >>"${run_dir}/nemesis.log" 2>&1 || true
-        printf '{:time "%s" :nemesis :packet :action :stop :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
+        printf '{:time "%s" :nemesis :packet :action :stop :target "%s" :result :ok}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         ;;
       packet,kill)
@@ -560,7 +560,7 @@ run_nemesis_profile() {
         sleep "${jepsen_nemesis_hold_seconds}"
         start_postgres "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
         iptables_heal "${service}" ${peer_services} >>"${run_dir}/nemesis.log" 2>&1 || true
-        printf '{:time "%s" :nemesis :packet-kill :action :stop :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
+        printf '{:time "%s" :nemesis :packet-kill :action :stop :target "%s" :result :ok}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         ;;
       primary-dcs-partition)
@@ -573,7 +573,7 @@ run_nemesis_profile() {
         capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         sleep "${jepsen_nemesis_hold_seconds}"
         iptables_heal "${service}" ${dcs_targets} >>"${run_dir}/nemesis.log" 2>&1 || true
-        printf '{:time "%s" :nemesis :primary-dcs-partition :action :stop :target "%s" :dcs "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" "${dcs_targets}" >>"${schedule_file}"
+        printf '{:time "%s" :nemesis :primary-dcs-partition :action :stop :target "%s" :dcs "%s" :result :ok}\n' "$(timestamp_utc)" "${member:-unknown}" "${dcs_targets}" >>"${schedule_file}"
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         ;;
       primary-replication-partition)
@@ -583,7 +583,7 @@ run_nemesis_profile() {
         capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         sleep "${jepsen_nemesis_hold_seconds}"
         iptables_replication_heal "${service}" ${peer_services} >>"${run_dir}/nemesis.log" 2>&1 || true
-        printf '{:time "%s" :nemesis :primary-replication-partition :action :stop :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
+        printf '{:time "%s" :nemesis :primary-replication-partition :action :stop :target "%s" :result :ok}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         ;;
       dcs-kill-one)
@@ -604,7 +604,7 @@ run_nemesis_profile() {
         sleep "${jepsen_nemesis_hold_seconds}"
         start_dcs_member "${target_dcs_service}" >>"${run_dir}/nemesis.log" 2>&1 || true
         wait_for_dcs_healthy_count 3 60 >>"${run_dir}/nemesis.log" 2>&1 || true
-        printf '{:time "%s" :nemesis :dcs-kill-one :action :stop :target "%s" :member "%s"}\n' "$(timestamp_utc)" "${target_dcs_service}" "${target_dcs_member}" >>"${schedule_file}"
+        printf '{:time "%s" :nemesis :dcs-kill-one :action :stop :target "%s" :member "%s" :result :ok}\n' "$(timestamp_utc)" "${target_dcs_service}" "${target_dcs_member}" >>"${schedule_file}"
         record_dcs_quorum_probe "${run_dir}" "${profile}" "after-restart" "${target_dcs_service}" >>"${run_dir}/nemesis.log" 2>&1 || true
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${target_dcs_member}" "${service}" || true
         ;;
@@ -638,7 +638,7 @@ run_nemesis_profile() {
           start_dcs_member "${target_dcs_service}" >>"${run_dir}/nemesis.log" 2>&1 || true
         done
         wait_for_dcs_healthy_count 3 60 >>"${run_dir}/nemesis.log" 2>&1 || true
-        printf '{:time "%s" :nemesis :dcs-lose-majority :action :stop :targets "%s" :members "%s"}\n' "$(timestamp_utc)" "${target_dcs_services}" "${target_dcs_members}" >>"${schedule_file}"
+        printf '{:time "%s" :nemesis :dcs-lose-majority :action :stop :targets "%s" :members "%s" :result :ok}\n' "$(timestamp_utc)" "${target_dcs_services}" "${target_dcs_members}" >>"${schedule_file}"
         record_dcs_quorum_probe "${run_dir}" "${profile}" "after-restart" "${target_dcs_services}" >>"${run_dir}/nemesis.log" 2>&1 || true
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${target_dcs_members}" "${service}" || true
         ;;
@@ -668,7 +668,7 @@ run_nemesis_profile() {
         sleep "${jepsen_nemesis_hold_seconds}"
         iptables_heal "${service}" ${target_dcs_services} >>"${run_dir}/nemesis.log" 2>&1 || true
         wait_for_dcs_healthy_count 3 60 "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
-        printf '{:time "%s" :nemesis :primary-dcs-majority-partition :action :stop :target "%s" :dcs "%s" :members "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" "${target_dcs_services}" "${target_dcs_members}" >>"${schedule_file}"
+        printf '{:time "%s" :nemesis :primary-dcs-majority-partition :action :stop :target "%s" :dcs "%s" :members "%s" :result :ok}\n' "$(timestamp_utc)" "${member:-unknown}" "${target_dcs_services}" "${target_dcs_members}" >>"${schedule_file}"
         record_dcs_quorum_probe "${run_dir}" "${profile}" "after-primary-majority-partition" "${target_dcs_services}" "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         ;;
@@ -698,7 +698,7 @@ run_nemesis_profile() {
         sleep "${jepsen_nemesis_hold_seconds}"
         start_dcs_members ${target_dcs_services} >>"${run_dir}/nemesis.log" 2>&1 || true
         wait_for_dcs_healthy_count 3 90 >>"${run_dir}/nemesis.log" 2>&1 || true
-        printf '{:time "%s" :nemesis :dcs-full-restart :action :stop :targets "%s" :members "%s"}\n' "$(timestamp_utc)" "${target_dcs_services}" "${target_dcs_members}" >>"${schedule_file}"
+        printf '{:time "%s" :nemesis :dcs-full-restart :action :stop :targets "%s" :members "%s" :result :ok}\n' "$(timestamp_utc)" "${target_dcs_services}" "${target_dcs_members}" >>"${schedule_file}"
         record_dcs_quorum_probe "${run_dir}" "${profile}" "after-full-restart" "${target_dcs_services}" >>"${run_dir}/nemesis.log" 2>&1 || true
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${target_dcs_members}" "${service}" || true
         ;;
@@ -727,7 +727,7 @@ run_nemesis_profile() {
         sleep "${jepsen_nemesis_hold_seconds}"
         slow_network_off_services ${target_dcs_services} >>"${run_dir}/nemesis.log" 2>&1 || true
         wait_for_dcs_healthy_count 3 60 >>"${run_dir}/nemesis.log" 2>&1 || true
-        printf '{:time "%s" :nemesis :dcs-slow-network :action :stop :targets "%s" :members "%s"}\n' "$(timestamp_utc)" "${target_dcs_services}" "${target_dcs_members}" >>"${schedule_file}"
+        printf '{:time "%s" :nemesis :dcs-slow-network :action :stop :targets "%s" :members "%s" :result :ok}\n' "$(timestamp_utc)" "${target_dcs_services}" "${target_dcs_members}" >>"${schedule_file}"
         record_dcs_quorum_probe "${run_dir}" "${profile}" "after-dcs-slow-network" "${target_dcs_services}" >>"${run_dir}/nemesis.log" 2>&1 || true
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${target_dcs_members}" "${service}" || true
         ;;
@@ -783,7 +783,7 @@ run_nemesis_profile() {
         done
 
         sleep "${jepsen_nemesis_hold_seconds}"
-        printf '{:time "%s" :nemesis :failover-chain :action :stop :target "%s"}\n' "$(timestamp_utc)" "$(current_primary_name 2>/dev/null || printf unknown)" >>"${schedule_file}"
+        printf '{:time "%s" :nemesis :failover-chain :action :stop :target "%s" :result :ok}\n' "$(timestamp_utc)" "$(current_primary_name 2>/dev/null || printf unknown)" >>"${schedule_file}"
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "$(current_primary_name 2>/dev/null || printf unknown)" "" || true
         ;;
       slow-network)
@@ -792,7 +792,7 @@ run_nemesis_profile() {
         capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         sleep "${jepsen_nemesis_hold_seconds}"
         slow_network_off "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
-        printf '{:time "%s" :nemesis :slow-network :action :stop :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
+        printf '{:time "%s" :nemesis :slow-network :action :stop :target "%s" :result :ok}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         ;;
       repeated-failure)
@@ -809,7 +809,7 @@ run_nemesis_profile() {
         capture_pacman_cluster_snapshot "${run_dir}" "during-nemesis" "kill" "${member:-unknown}" "${service}" || true
         sleep "${jepsen_nemesis_hold_seconds}"
         start_postgres "${service}" >>"${run_dir}/nemesis.log" 2>&1 || true
-        printf '{:time "%s" :nemesis :repeated-failure :action :stop :target "%s"}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
+        printf '{:time "%s" :nemesis :repeated-failure :action :stop :target "%s" :result :ok}\n' "$(timestamp_utc)" "${member:-unknown}" >>"${schedule_file}"
         capture_pacman_cluster_snapshot "${run_dir}" "after-nemesis" "${profile}" "${member:-unknown}" "${service}" || true
         ;;
       *)

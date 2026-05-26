@@ -147,16 +147,25 @@ bin/jepsen-ci/<campaign>/summary.md
 ```
 
 Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
-`case-results.jsonl`, per-case `history.edn`, workload `checker.json`,
+`case-results.jsonl`, per-case `history.edn`, `nemesis-schedule.edn`,
+`nemesis-schedule-checker.log`, workload `checker.json`,
 `primary-observations.jsonl`, `single-primary-checker.json`,
 `acknowledged-write-checker.json`, `timeline-checker.json`,
 `old-primary-rejoin-checker.json`, `manual-switchover-checker.json`,
 `client-traffic-during-nemesis-checker.json`,
 `replication-traffic-during-nemesis-checker.json`,
 `dcs-traffic-during-nemesis-checker.json`,
+`acknowledged-op-ids.txt`, `final-primary-op-counts.tsv`,
 `pacman-cluster-snapshots.jsonl`, `pg-stat-replication.json`,
 `pg-stat-wal-receiver.jsonl`, nemesis logs, PACMAN cluster/history snapshots,
 Docker logs, PostgreSQL logs, and a small `index.html` for operator review.
+
+The runner intentionally keeps live PostgreSQL collection in shell. Shell owns
+Docker Compose service selection, `psql` execution, and lab credentials; Go
+checkers consume deterministic artifact files. `final-primary-op-counts.tsv`
+is the stable handoff from the final-primary SQL query into the Go
+acknowledged-write checker. Revisit this only if `jepsenctl` also takes over
+Docker/PostgreSQL orchestration.
 
 This harness deliberately uses the existing `deploy/lab` topology, which is
 three PACMAN data nodes plus external etcd. The broader Jepsen plan in

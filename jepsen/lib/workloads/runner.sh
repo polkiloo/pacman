@@ -85,11 +85,14 @@ run_jepsen_case() {
   start_primary_sampler "${case_dir}" primary_sampler_pid
 
   local nemesis_pid=""
+  local schedule_start_line
+  schedule_start_line=$(wc -l <"${schedule_file}" | tr -d ' ')
   run_nemesis_profile "${nemesis}" "${case_dir}" "${schedule_file}" nemesis_pid "${jepsen_default_duration}" || true
 
   local workload_status=0
   run_workload_profile "${workload}" "${run_id}" "${case_dir}" || workload_status=$?
   wait_for_nemesis "${nemesis_pid}"
+  tail -n +"$((schedule_start_line + 1))" "${schedule_file}" >"${case_dir}/nemesis-schedule.edn"
   settle_after_nemesis "${nemesis}" "${case_dir}"
   stop_primary_sampler "${primary_sampler_pid}"
   capture_pacman_cluster_snapshot "${case_dir}" "after-settle" "${nemesis}" "" || true
@@ -136,7 +139,14 @@ run_jepsen_case() {
   local vip_routing_checker_status=0
   check_vip_write_routing "${workload}" "${nemesis}" "${case_dir}" || vip_routing_checker_status=$?
 
-  if [[ "${workload_status}" -eq 0 && "${workload_checker_status}" -eq 0 && "${primary_checker_status}" -eq 0 && "${acknowledged_checker_status}" -eq 0 && "${timeline_checker_status}" -eq 0 && "${old_primary_rejoin_checker_status}" -eq 0 && "${manual_switchover_checker_status}" -eq 0 && "${client_traffic_checker_status}" -eq 0 && "${replication_traffic_checker_status}" -eq 0 && "${dcs_traffic_checker_status}" -eq 0 && "${dcs_quorum_checker_status}" -eq 0 && "${failover_chain_checker_status}" -eq 0 && "${open_transaction_checker_status}" -eq 0 && "${vip_routing_checker_status}" -eq 0 ]]; then
+  local nemesis_schedule_checker_status=0
+  go run "${repo_root}/tools/jepsenctl" nemesis validate-schedule \
+    --workload "${workload}" \
+    --nemesis "${nemesis}" \
+    --schedule-file "${case_dir}/nemesis-schedule.edn" \
+    >"${case_dir}/nemesis-schedule-checker.log" 2>&1 || nemesis_schedule_checker_status=$?
+
+  if [[ "${workload_status}" -eq 0 && "${workload_checker_status}" -eq 0 && "${primary_checker_status}" -eq 0 && "${acknowledged_checker_status}" -eq 0 && "${timeline_checker_status}" -eq 0 && "${old_primary_rejoin_checker_status}" -eq 0 && "${manual_switchover_checker_status}" -eq 0 && "${client_traffic_checker_status}" -eq 0 && "${replication_traffic_checker_status}" -eq 0 && "${dcs_traffic_checker_status}" -eq 0 && "${dcs_quorum_checker_status}" -eq 0 && "${failover_chain_checker_status}" -eq 0 && "${open_transaction_checker_status}" -eq 0 && "${vip_routing_checker_status}" -eq 0 && "${nemesis_schedule_checker_status}" -eq 0 ]]; then
     write_case_event "${case_dir}/history.edn" ":case" "ok" "workload" \
       "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\"}"
     cat "${case_dir}/history.edn" >>"${run_dir}/jepsen-history.edn"
@@ -145,10 +155,10 @@ run_jepsen_case() {
     return 0
   fi
 
-  local failure_details="workload_status=${workload_status} workload_checker_status=${workload_checker_status} primary_checker_status=${primary_checker_status} acknowledged_checker_status=${acknowledged_checker_status} timeline_checker_status=${timeline_checker_status} old_primary_rejoin_checker_status=${old_primary_rejoin_checker_status} manual_switchover_checker_status=${manual_switchover_checker_status} client_traffic_checker_status=${client_traffic_checker_status} replication_traffic_checker_status=${replication_traffic_checker_status} dcs_traffic_checker_status=${dcs_traffic_checker_status} dcs_quorum_checker_status=${dcs_quorum_checker_status} failover_chain_checker_status=${failover_chain_checker_status} open_transaction_checker_status=${open_transaction_checker_status} vip_routing_checker_status=${vip_routing_checker_status}"
+  local failure_details="workload_status=${workload_status} workload_checker_status=${workload_checker_status} primary_checker_status=${primary_checker_status} acknowledged_checker_status=${acknowledged_checker_status} timeline_checker_status=${timeline_checker_status} old_primary_rejoin_checker_status=${old_primary_rejoin_checker_status} manual_switchover_checker_status=${manual_switchover_checker_status} client_traffic_checker_status=${client_traffic_checker_status} replication_traffic_checker_status=${replication_traffic_checker_status} dcs_traffic_checker_status=${dcs_traffic_checker_status} dcs_quorum_checker_status=${dcs_quorum_checker_status} failover_chain_checker_status=${failover_chain_checker_status} open_transaction_checker_status=${open_transaction_checker_status} vip_routing_checker_status=${vip_routing_checker_status} nemesis_schedule_checker_status=${nemesis_schedule_checker_status}"
 
   write_case_event "${case_dir}/history.edn" ":case" "fail" "workload" \
-    "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\" :workload-status ${workload_status} :workload-checker-status ${workload_checker_status} :primary-checker-status ${primary_checker_status} :acknowledged-checker-status ${acknowledged_checker_status} :timeline-checker-status ${timeline_checker_status} :old-primary-rejoin-checker-status ${old_primary_rejoin_checker_status} :manual-switchover-checker-status ${manual_switchover_checker_status} :client-traffic-checker-status ${client_traffic_checker_status} :replication-traffic-checker-status ${replication_traffic_checker_status} :dcs-traffic-checker-status ${dcs_traffic_checker_status} :dcs-quorum-checker-status ${dcs_quorum_checker_status} :failover-chain-checker-status ${failover_chain_checker_status} :open-transaction-checker-status ${open_transaction_checker_status} :vip-routing-checker-status ${vip_routing_checker_status}}"
+    "{:workload \"${workload}\" :nemesis \"${nemesis}\" :run-id \"${run_id}\" :workload-status ${workload_status} :workload-checker-status ${workload_checker_status} :primary-checker-status ${primary_checker_status} :acknowledged-checker-status ${acknowledged_checker_status} :timeline-checker-status ${timeline_checker_status} :old-primary-rejoin-checker-status ${old_primary_rejoin_checker_status} :manual-switchover-checker-status ${manual_switchover_checker_status} :client-traffic-checker-status ${client_traffic_checker_status} :replication-traffic-checker-status ${replication_traffic_checker_status} :dcs-traffic-checker-status ${dcs_traffic_checker_status} :dcs-quorum-checker-status ${dcs_quorum_checker_status} :failover-chain-checker-status ${failover_chain_checker_status} :open-transaction-checker-status ${open_transaction_checker_status} :vip-routing-checker-status ${vip_routing_checker_status} :nemesis-schedule-checker-status ${nemesis_schedule_checker_status}}"
   cat "${case_dir}/history.edn" >>"${run_dir}/jepsen-history.edn"
   write_edn_event "${campaign_history}" "${workload}/${nemesis}" "fail" "\"${run_id}\""
   record_case_result "${case_results}" "${workload}" "${nemesis}" "false" "${failure_details}"

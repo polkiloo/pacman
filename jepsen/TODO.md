@@ -212,14 +212,20 @@ larger orchestration rewrite.
    - [x] Keep golden fixtures and failure-case tests for old-primary rejoin.
    - [x] Keep golden fixtures and failure-case tests for manual-switchover.
    - [x] Keep golden fixtures and failure-case tests for VIP-routing.
-   - [ ] After checker migration is stable, decide whether to move live SQL
+   - [x] After checker migration is stable, decide whether to move live SQL
          collection into Go and remove intermediate TSV handoff files such as
          `final-primary-op-counts.tsv`.
+         Decision: keep live SQL collection in shell for now. The shell runner
+         already owns Docker Compose service selection, `psql` invocation, and
+         lab credentials; `jepsenctl` should keep consuming deterministic files
+         until Go also owns Docker/PostgreSQL orchestration. Keep
+         `final-primary-op-counts.tsv` as an explicit acknowledged-write checker
+         handoff artifact.
 
-6. [ ] Move nemesis schedule validation to Go.
-   - [ ] Verify every nemesis records start, heal/stop, target, and command
+6. [x] Move nemesis schedule validation to Go.
+   - [x] Verify every nemesis records start, heal/stop, target, and command
          result.
-   - [ ] Validate schedule entries against the selected `workload:nemesis`
+   - [x] Validate schedule entries against the selected `workload:nemesis`
          profile.
 
 7. [ ] Revisit lab orchestration after checker migration is stable.
