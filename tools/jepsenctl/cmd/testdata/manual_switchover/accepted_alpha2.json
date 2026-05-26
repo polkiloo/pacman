@@ -1,0 +1,7 @@
+{
+  "requestedAt": "2026-05-01T00:00:01Z",
+  "candidate": "alpha-2",
+  "controlService": "pacman-primary",
+  "exitStatus": 0,
+  "output": "switchover accepted"
+}

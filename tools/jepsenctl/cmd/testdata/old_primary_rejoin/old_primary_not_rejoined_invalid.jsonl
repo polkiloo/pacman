@@ -1,0 +1,6 @@
+{"sampleId":1,"observedAt":"2026-05-01T00:00:01Z","member":"alpha-1","service":"pacman-primary","reachable":true,"writable":true,"inRecovery":false,"timeline":1,"lsn":"0/100"}
+{"sampleId":1,"observedAt":"2026-05-01T00:00:01Z","member":"alpha-2","service":"pacman-replica","reachable":true,"writable":false,"inRecovery":true,"timeline":1,"lsn":"0/100"}
+{"sampleId":1,"observedAt":"2026-05-01T00:00:01Z","member":"alpha-3","service":"pacman-replica-2","reachable":true,"writable":false,"inRecovery":true,"timeline":1,"lsn":"0/100"}
+{"sampleId":2,"observedAt":"2026-05-01T00:00:02Z","member":"alpha-1","service":"pacman-primary","reachable":true,"writable":false,"inRecovery":false,"timeline":1,"lsn":"0/180"}
+{"sampleId":2,"observedAt":"2026-05-01T00:00:02Z","member":"alpha-2","service":"pacman-replica","reachable":true,"writable":true,"inRecovery":false,"timeline":2,"lsn":"0/300"}
+{"sampleId":2,"observedAt":"2026-05-01T00:00:02Z","member":"alpha-3","service":"pacman-replica-2","reachable":true,"writable":false,"inRecovery":true,"timeline":2,"lsn":"0/300"}

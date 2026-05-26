@@ -10,8 +10,11 @@ func newCheckersCommand() *cobra.Command {
 
 	checkers.AddCommand(newAcknowledgedWriteCheckerCommand())
 	checkers.AddCommand(newDCSQuorumCheckerCommand())
+	checkers.AddCommand(newManualSwitchoverCheckerCommand())
+	checkers.AddCommand(newOldPrimaryRejoinCheckerCommand())
 	checkers.AddCommand(newSinglePrimaryCheckerCommand())
 	checkers.AddCommand(newTimelineCheckerCommand())
+	checkers.AddCommand(newVIPRoutingCheckerCommand())
 
 	return checkers
 }

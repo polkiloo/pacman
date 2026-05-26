@@ -77,187 +77,19 @@ check_timeline_convergence() {
 check_old_primary_rejoin_after_failover() {
   local case_dir=$1
   local nemesis=${2:-}
-  local observation_file="${case_dir}/primary-observations.jsonl"
-  local checker_file="${case_dir}/old-primary-rejoin-checker.json"
 
-  if [[ "${nemesis}" == "switchover" ]]; then
-    cat >"${checker_file}" <<'EOF'
-{"checker":"old-primary-rejoin-after-failover","valid":true,"applicable":false,"observations":0,"samples":0,"reason":"manual switchover is covered by the manual switchover checker"}
-EOF
-    return 0
-  fi
-
-  if [[ ! -s "${observation_file}" ]]; then
-    cat >"${checker_file}" <<'EOF'
-{"checker":"old-primary-rejoin-after-failover","valid":false,"applicable":false,"observations":0,"samples":0,"error":"missing primary observations"}
-EOF
-    return 1
-  fi
-
-  jq -s --arg nemesis "${nemesis}" '
-    def samples:
-      sort_by(.sampleId)
-      | group_by(.sampleId)
-      | map({
-          sampleId: .[0].sampleId,
-          observedAt: .[0].observedAt,
-          observations: .
-        });
-    def writable_members($sample):
-      $sample.observations
-      | map(select(.reachable == true and .writable == true));
-    def primary_of($sample):
-      writable_members($sample) | sort_by(.member) | .[0] // null;
-    def summarize_member:
-      {
-        member,
-        service,
-        reachable,
-        writable,
-        inRecovery,
-        timeline,
-        lsn,
-        error
-      };
-
-    samples as $samples
-    | ($samples[0] // null) as $initialSample
-    | ($samples[-1] // null) as $finalSample
-    | (if $initialSample == null then null else primary_of($initialSample) end) as $initialPrimary
-    | (if $finalSample == null then null else primary_of($finalSample) end) as $finalPrimary
-    | (($initialPrimary != null) and ($finalPrimary != null) and ($initialPrimary.member != $finalPrimary.member)) as $promotionObserved
-    | (
-        if ($promotionObserved | not) then null
-        else
-          $finalSample.observations
-          | map(select(.member == $initialPrimary.member))
-          | .[0] // null
-        end
-      ) as $oldPrimaryFinalState
-    | (
-        if ($promotionObserved | not) then true
-        elif $oldPrimaryFinalState == null then false
-        else
-          ($oldPrimaryFinalState.reachable == true)
-          and ($oldPrimaryFinalState.writable == false)
-          and ($oldPrimaryFinalState.inRecovery == true)
-          and (($oldPrimaryFinalState.timeline // 0) == ($finalPrimary.timeline // 0))
-        end
-      ) as $oldPrimaryRejoined
-    | (
-        if ($promotionObserved | not) then true
-        elif (($nemesis == "kill") or ($nemesis == "packet,kill") or ($nemesis == "repeated-failure")) then
-          ($oldPrimaryFinalState != null)
-          and (
-            ($oldPrimaryFinalState.reachable == false)
-            or (
-              ($oldPrimaryFinalState.writable == false)
-              and (
-                ($oldPrimaryFinalState.inRecovery == true)
-                or (($oldPrimaryFinalState.timeline // 0) == ($finalPrimary.timeline // 0))
-              )
-            )
-          )
-        else $oldPrimaryRejoined
-        end
-      ) as $oldPrimarySafeOrRejoined
-    | {
-        checker: "old-primary-rejoin-after-failover",
-        valid: (
-          ($samples | length) > 0
-          and (
-            ($promotionObserved | not)
-            or $oldPrimarySafeOrRejoined
-          )
-        ),
-        applicable: $promotionObserved,
-        nemesis: $nemesis,
-        observations: length,
-        samples: ($samples | length),
-        promotionObserved: $promotionObserved,
-        initialPrimary: (if $initialPrimary == null then null else ($initialPrimary | summarize_member) end),
-        finalPrimary: (if $finalPrimary == null then null else ($finalPrimary | summarize_member) end),
-        oldPrimaryRejoined: $oldPrimaryRejoined,
-        oldPrimarySafeOrRejoined: $oldPrimarySafeOrRejoined,
-        oldPrimaryFinalState: (if $oldPrimaryFinalState == null then null else ($oldPrimaryFinalState | summarize_member) end)
-      }
-  ' "${observation_file}" >"${checker_file}"
-
-  jq -e '.valid == true' "${checker_file}" >/dev/null
+  go run "${repo_root}/tools/jepsenctl" checkers old-primary-rejoin \
+    --case-dir "${case_dir}" \
+    --nemesis "${nemesis}"
 }
 
 check_manual_switchover() {
   local nemesis=$1
   local case_dir=$2
-  local checker_file="${case_dir}/manual-switchover-checker.json"
-  local operation_file="${case_dir}/manual-switchover.json"
-  local observation_file="${case_dir}/primary-observations.jsonl"
 
-  if [[ "${nemesis}" != "switchover" ]]; then
-    cat >"${checker_file}" <<'EOF'
-{"checker":"manual-switchover","valid":true,"applicable":false}
-EOF
-    return 0
-  fi
-
-  if [[ ! -s "${operation_file}" || ! -s "${observation_file}" ]]; then
-    cat >"${checker_file}" <<'EOF'
-{"checker":"manual-switchover","valid":false,"applicable":true,"error":"missing switchover operation metadata or primary observations"}
-EOF
-    return 1
-  fi
-
-  jq -n \
-    --slurpfile operation "${operation_file}" \
-    --slurpfile observations "${observation_file}" '
-      def samples:
-        $observations
-        | sort_by(.sampleId)
-        | group_by(.sampleId)
-        | map({
-            sampleId: .[0].sampleId,
-            observedAt: .[0].observedAt,
-            observations: .
-          });
-      def writable_members($sample):
-        $sample.observations
-        | map(select(.reachable == true and .writable == true));
-      def primary_of($sample):
-        writable_members($sample) | sort_by(.member) | .[0] // null;
-      def summarize_member:
-        {
-          member,
-          service,
-          reachable,
-          writable,
-          inRecovery,
-          timeline,
-          lsn,
-          error
-        };
-
-      ($operation[0] // {}) as $op
-      | samples as $samples
-      | ($samples[-1] // null) as $finalSample
-      | (if $finalSample == null then null else primary_of($finalSample) end) as $finalPrimary
-      | (($op.candidate // "") != "") as $hasCandidate
-      | (($op.exitStatus // 1) == 0) as $requestAccepted
-      | ($hasCandidate and $requestAccepted and $finalPrimary != null and ($finalPrimary.member == $op.candidate)) as $valid
-      | {
-          checker: "manual-switchover",
-          valid: $valid,
-          applicable: true,
-          requestedAt: ($op.requestedAt // null),
-          candidate: ($op.candidate // ""),
-          controlService: ($op.controlService // ""),
-          exitStatus: ($op.exitStatus // null),
-          requestAccepted: $requestAccepted,
-          finalPrimary: (if $finalPrimary == null then null else ($finalPrimary | summarize_member) end),
-          output: ($op.output // "")
-        }
-    ' >"${checker_file}"
-
-  jq -e '.valid == true' "${checker_file}" >/dev/null
+  go run "${repo_root}/tools/jepsenctl" checkers manual-switchover \
+    --case-dir "${case_dir}" \
+    --nemesis "${nemesis}"
 }
 
 check_client_traffic_during_nemesis() {
@@ -476,75 +308,9 @@ check_vip_write_routing() {
   local workload=$1
   local nemesis=$2
   local case_dir=$3
-  local checker_file="${case_dir}/vip-routing-checker.json"
-  local route_file="${case_dir}/vip-routing.jsonl"
 
-  if [[ "${workload}" != "vip-routing" ]]; then
-    cat >"${checker_file}" <<'EOF'
-{"checker":"vip-write-routing","valid":true,"applicable":false}
-EOF
-    return 0
-  fi
-
-  if [[ ! -s "${route_file}" ]]; then
-    cat >"${checker_file}" <<'EOF'
-{"checker":"vip-write-routing","valid":false,"applicable":true,"error":"missing VIP routing samples"}
-EOF
-    return 1
-  fi
-
-  jq -s --arg nemesis "${nemesis}" '
-    def known($value): (($value // "") != "" and ($value // "") != "unknown");
-    def stable:
-      known(.pacmanPrimaryBefore)
-      and known(.pacmanPrimaryAfter)
-      and known(.vipHolderBefore)
-      and known(.vipHolderAfter)
-      and .pacmanPrimaryBefore == .pacmanPrimaryAfter
-      and .vipHolderBefore == .vipHolderAfter;
-    def successful_stable_matches:
-      map(select(
-        .ok == true
-        and (.inRecovery == false)
-        and stable
-        and .pacmanPrimaryBefore == .vipHolderBefore
-      ));
-    def routed_to_replica_violations:
-      map(select(.ok == true and .inRecovery == true));
-    def stable_primary_mismatch_violations:
-      map(select(
-        .ok == true
-        and stable
-        and .pacmanPrimaryBefore != .vipHolderBefore
-      ));
-
-    successful_stable_matches as $matches
-    | routed_to_replica_violations as $replicaViolations
-    | stable_primary_mismatch_violations as $mismatchViolations
-    | ($matches | map(.pacmanPrimaryBefore) | unique | sort) as $matchedPrimaries
-    | {
-        checker: "vip-write-routing",
-        valid: (
-          (map(select(.ok == true)) | length) > 0
-          and ($replicaViolations | length) == 0
-          and ($mismatchViolations | length) == 0
-          and (
-            if $nemesis == "switchover"
-            then ($matchedPrimaries | length) >= 2
-            else ($matchedPrimaries | length) >= 1
-            end
-          )
-        ),
-        applicable: true,
-        samples: length,
-        successfulWrites: (map(select(.ok == true)) | length),
-        failedWrites: (map(select(.ok != true)) | length),
-        matchedPrimaryMembers: $matchedPrimaries,
-        routedToReplicaViolations: $replicaViolations,
-        stablePrimaryMismatchViolations: $mismatchViolations,
-        observations: .
-      }
-  ' "${route_file}" >"${checker_file}"
-
-  jq -e '.valid == true' "${checker_file}" >/dev/null
+  go run "${repo_root}/tools/jepsenctl" checkers vip-routing \
+    --workload "${workload}" \
+    --case-dir "${case_dir}" \
+    --nemesis "${nemesis}"
 }
