@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	dockernetwork "github.com/docker/docker/api/types/network"
+	mobynetwork "github.com/moby/moby/api/types/network"
 	testcontainers "github.com/testcontainers/testcontainers-go"
 	tcnetwork "github.com/testcontainers/testcontainers-go/network"
 
@@ -73,8 +74,12 @@ func TestAnsibleDemoSwitchoverWithVIPManagerUnderLoad(t *testing.T) {
 	testenv.RequireLocalImage(t, ansibleInstallImage())
 
 	networkCfg := newDemoClusterNetwork(t)
-	env := testenv.NewWithNetworkOptions(t, tcnetwork.WithIPAM(&dockernetwork.IPAM{
-		Config: []dockernetwork.IPAMConfig{{Subnet: networkCfg.Subnet}},
+	demoSubnet, err := netip.ParsePrefix(networkCfg.Subnet)
+	if err != nil {
+		t.Fatalf("parse demo subnet %q: %v", networkCfg.Subnet, err)
+	}
+	env := testenv.NewWithNetworkOptions(t, tcnetwork.WithIPAM(&mobynetwork.IPAM{
+		Config: []mobynetwork.IPAMConfig{{Subnet: demoSubnet}},
 	}))
 
 	repoRoot := integrationRepoRoot(t)
