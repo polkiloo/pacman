@@ -202,10 +202,14 @@ larger orchestration rewrite.
    - [x] Start with DCS quorum checker.
    - [x] Move single-primary checker.
    - [x] Move acknowledged-write checker.
-   - [ ] Then move timeline, old-primary rejoin, manual-switchover, and
-         VIP-routing checkers.
-   - [ ] For each moved checker, keep golden JSONL fixtures and failure-case
-         tests.
+   - [x] Move timeline checker.
+   - [ ] Then move old-primary rejoin, manual-switchover, and VIP-routing
+         checkers.
+   - [x] Keep golden fixtures and failure-case tests for currently moved
+         checkers: DCS quorum, single-primary, acknowledged-write, and
+         timeline.
+   - [ ] Keep golden fixtures and failure-case tests for each remaining checker
+         as it moves to Go.
    - [ ] After checker migration is stable, decide whether to move live SQL
          collection into Go and remove intermediate TSV handoff files such as
          `final-primary-op-counts.tsv`.

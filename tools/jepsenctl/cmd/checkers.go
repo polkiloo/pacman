@@ -11,6 +11,7 @@ func newCheckersCommand() *cobra.Command {
 	checkers.AddCommand(newAcknowledgedWriteCheckerCommand())
 	checkers.AddCommand(newDCSQuorumCheckerCommand())
 	checkers.AddCommand(newSinglePrimaryCheckerCommand())
+	checkers.AddCommand(newTimelineCheckerCommand())
 
 	return checkers
 }
