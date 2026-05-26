@@ -8,7 +8,9 @@ func newCheckersCommand() *cobra.Command {
 		Short: "run Jepsen artifact checkers",
 	}
 
+	checkers.AddCommand(newAcknowledgedWriteCheckerCommand())
 	checkers.AddCommand(newDCSQuorumCheckerCommand())
+	checkers.AddCommand(newSinglePrimaryCheckerCommand())
 
 	return checkers
 }

@@ -1,38 +1,8 @@
 check_single_writable_primary() {
   local case_dir=$1
-  local observation_file="${case_dir}/primary-observations.jsonl"
-  local checker_file="${case_dir}/single-primary-checker.json"
 
-  if [[ ! -s "${observation_file}" ]]; then
-    cat >"${checker_file}" <<'EOF'
-{"checker":"single-writable-primary","valid":false,"observations":0,"samples":0,"writableObservations":0,"violationSamples":[]}
-EOF
-    return 1
-  fi
-
-  jq -s '
-    def writable: map(select(.reachable == true and .writable == true));
-    def violation_samples:
-      writable
-      | group_by(.sampleId)
-      | map(select(length > 1))
-      | map({
-          sampleId: .[0].sampleId,
-          observedAt: .[0].observedAt,
-          writableMembers: map(.member),
-          timelines: map(.timeline)
-        });
-    {
-      checker: "single-writable-primary",
-      valid: ((violation_samples | length) == 0),
-      observations: length,
-      samples: ([.[].sampleId] | unique | length),
-      writableObservations: (writable | length),
-      violationSamples: violation_samples
-    }
-  ' "${observation_file}" >"${checker_file}"
-
-  jq -e '.valid == true and .samples > 0' "${checker_file}" >/dev/null
+  go run "${repo_root}/tools/jepsenctl" checkers single-primary \
+    --case-dir "${case_dir}"
 }
 
 check_acknowledged_write_preservation() {
@@ -42,13 +12,6 @@ check_acknowledged_write_preservation() {
   local checker_file="${case_dir}/acknowledged-write-checker.json"
   local ack_file="${case_dir}/acknowledged-op-ids.txt"
   local counts_file="${case_dir}/final-primary-op-counts.tsv"
-  local acknowledged_file="${case_dir}/acknowledged-op-ids.sorted"
-  local actual_file="${case_dir}/final-primary-op-ids.sorted"
-  local observed_once_file="${case_dir}/final-primary-observed-once-op-ids.sorted"
-  local duplicate_file="${case_dir}/final-primary-duplicate-op-ids.sorted"
-  local missing_file="${case_dir}/missing-acknowledged-op-ids.txt"
-  local duplicate_ack_file="${case_dir}/duplicate-acknowledged-op-ids.txt"
-  local unexpected_file="${case_dir}/unacknowledged-observed-op-ids.txt"
   local table final_primary final_primary_service query_status
 
   table=$(workload_op_table "${workload}") || {
@@ -59,7 +22,6 @@ EOF
   }
 
   touch "${ack_file}"
-  LC_ALL=C sort -u "${ack_file}" >"${acknowledged_file}"
 
   final_primary=$(current_primary_name 2>/dev/null || true)
   [[ -n "${final_primary}" ]] || final_primary="alpha-1"
@@ -95,67 +57,14 @@ ORDER BY op_id;
     return 1
   fi
 
-  awk -F $'\t' 'NF >= 2 {print $1}' "${counts_file}" | LC_ALL=C sort -u >"${actual_file}"
-  awk -F $'\t' 'NF >= 2 && $2 == 1 {print $1}' "${counts_file}" | LC_ALL=C sort -u >"${observed_once_file}"
-  awk -F $'\t' 'NF >= 2 && $2 != 1 {print $1}' "${counts_file}" | LC_ALL=C sort -u >"${duplicate_file}"
-  comm -23 "${acknowledged_file}" "${actual_file}" >"${missing_file}"
-  comm -12 "${acknowledged_file}" "${duplicate_file}" >"${duplicate_ack_file}"
-  comm -13 "${acknowledged_file}" "${actual_file}" >"${unexpected_file}"
-
-  local expected observed_once missing duplicate_ack unexpected async_loss_allowed valid
-  expected=$(wc -l <"${acknowledged_file}" | tr -d ' ')
-  observed_once=$(comm -12 "${acknowledged_file}" "${observed_once_file}" | wc -l | tr -d ' ')
-  missing=$(wc -l <"${missing_file}" | tr -d ' ')
-  duplicate_ack=$(wc -l <"${duplicate_ack_file}" | tr -d ' ')
-  unexpected=$(wc -l <"${unexpected_file}" | tr -d ' ')
-  async_loss_allowed=false
-  if [[ "${jepsen_allow_async_loss}" == "true" ]]; then
-    async_loss_allowed=true
-  fi
-
-  valid=false
-  if [[ "${expected}" -gt 0 && "${duplicate_ack}" -eq 0 ]]; then
-    if [[ "${missing}" -eq 0 || "${async_loss_allowed}" == "true" ]]; then
-      valid=true
-    fi
-  fi
-
-  jq -n \
-    --arg workload "${workload}" \
-    --arg runId "${run_id}" \
-    --arg finalPrimary "${final_primary}" \
-    --arg finalPrimaryService "${final_primary_service}" \
-    --arg table "${table}" \
-    --argjson valid "${valid}" \
-    --argjson asyncLossAllowed "${async_loss_allowed}" \
-    --argjson expectedAcknowledged "${expected}" \
-    --argjson observedExactlyOnce "${observed_once}" \
-    --argjson missingAcknowledged "${missing}" \
-    --argjson duplicateAcknowledged "${duplicate_ack}" \
-    --argjson unacknowledgedObserved "${unexpected}" \
-    --argjson missingOpIds "$(json_array_from_file "${missing_file}")" \
-    --argjson duplicateOpIds "$(json_array_from_file "${duplicate_ack_file}")" \
-    --argjson unacknowledgedObservedOpIds "$(json_array_from_file "${unexpected_file}")" \
-    '{
-      checker: "acknowledged-write-preservation",
-      valid: $valid,
-      workload: $workload,
-      runId: $runId,
-      finalPrimary: $finalPrimary,
-      finalPrimaryService: $finalPrimaryService,
-      table: $table,
-      asyncLossAllowed: $asyncLossAllowed,
-      expectedAcknowledged: $expectedAcknowledged,
-      observedExactlyOnce: $observedExactlyOnce,
-      missingAcknowledged: $missingAcknowledged,
-      duplicateAcknowledged: $duplicateAcknowledged,
-      unacknowledgedObserved: $unacknowledgedObserved,
-      missingOpIds: $missingOpIds,
-      duplicateOpIds: $duplicateOpIds,
-      unacknowledgedObservedOpIds: $unacknowledgedObservedOpIds
-    }' >"${checker_file}"
-
-  jq -e '.valid == true' "${checker_file}" >/dev/null
+  go run "${repo_root}/tools/jepsenctl" checkers acknowledged-write \
+    --workload "${workload}" \
+    --run-id "${run_id}" \
+    --case-dir "${case_dir}" \
+    --table "${table}" \
+    --final-primary "${final_primary}" \
+    --final-primary-service "${final_primary_service}" \
+    --async-loss-allowed="${jepsen_allow_async_loss}"
 }
 
 check_timeline_convergence() {

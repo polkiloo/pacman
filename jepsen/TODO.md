@@ -200,10 +200,15 @@ larger orchestration rewrite.
 
 5. [ ] Move JSON/JSONL checkers to Go one checker at a time.
    - [x] Start with DCS quorum checker.
-   - [ ] Then move single-primary, acknowledged-write, timeline, old-primary
-         rejoin, manual-switchover, and VIP-routing checkers.
+   - [x] Move single-primary checker.
+   - [x] Move acknowledged-write checker.
+   - [ ] Then move timeline, old-primary rejoin, manual-switchover, and
+         VIP-routing checkers.
    - [ ] For each moved checker, keep golden JSONL fixtures and failure-case
          tests.
+   - [ ] After checker migration is stable, decide whether to move live SQL
+         collection into Go and remove intermediate TSV handoff files such as
+         `final-primary-op-counts.tsv`.
 
 6. [ ] Move nemesis schedule validation to Go.
    - [ ] Verify every nemesis records start, heal/stop, target, and command
