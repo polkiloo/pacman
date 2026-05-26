@@ -1,0 +1,6 @@
+{"sampleId":0,"observedAt":"2026-05-18T07:07:27Z","member":"alpha-1","service":"pacman-primary","reachable":true,"writable":true,"inRecovery":false,"timeline":1,"lsn":"0/3000000","error":""}
+{"sampleId":0,"observedAt":"2026-05-18T07:07:27Z","member":"alpha-2","service":"pacman-replica","reachable":true,"writable":true,"inRecovery":false,"timeline":2,"lsn":"0/4000000","error":""}
+{"sampleId":0,"observedAt":"2026-05-18T07:07:27Z","member":"alpha-3","service":"pacman-replica-2","reachable":true,"writable":false,"inRecovery":true,"timeline":1,"lsn":"0/3000000","error":""}
+{"sampleId":1,"observedAt":"2026-05-18T07:07:28Z","member":"alpha-1","service":"pacman-primary","reachable":true,"writable":false,"inRecovery":true,"timeline":2,"lsn":"0/4000000","error":""}
+{"sampleId":1,"observedAt":"2026-05-18T07:07:28Z","member":"alpha-2","service":"pacman-replica","reachable":true,"writable":true,"inRecovery":false,"timeline":2,"lsn":"0/4000000","error":""}
+{"sampleId":1,"observedAt":"2026-05-18T07:07:28Z","member":"alpha-3","service":"pacman-replica-2","reachable":true,"writable":false,"inRecovery":true,"timeline":2,"lsn":"0/4000000","error":""}

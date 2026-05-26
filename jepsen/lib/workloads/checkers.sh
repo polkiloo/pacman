@@ -1,38 +1,8 @@
 check_single_writable_primary() {
   local case_dir=$1
-  local observation_file="${case_dir}/primary-observations.jsonl"
-  local checker_file="${case_dir}/single-primary-checker.json"
 
-  if [[ ! -s "${observation_file}" ]]; then
-    cat >"${checker_file}" <<'EOF'
-{"checker":"single-writable-primary","valid":false,"observations":0,"samples":0,"writableObservations":0,"violationSamples":[]}
-EOF
-    return 1
-  fi
-
-  jq -s '
-    def writable: map(select(.reachable == true and .writable == true));
-    def violation_samples:
-      writable
-      | group_by(.sampleId)
-      | map(select(length > 1))
-      | map({
-          sampleId: .[0].sampleId,
-          observedAt: .[0].observedAt,
-          writableMembers: map(.member),
-          timelines: map(.timeline)
-        });
-    {
-      checker: "single-writable-primary",
-      valid: ((violation_samples | length) == 0),
-      observations: length,
-      samples: ([.[].sampleId] | unique | length),
-      writableObservations: (writable | length),
-      violationSamples: violation_samples
-    }
-  ' "${observation_file}" >"${checker_file}"
-
-  jq -e '.valid == true and .samples > 0' "${checker_file}" >/dev/null
+  go run "${repo_root}/tools/jepsenctl" checkers single-primary \
+    --case-dir "${case_dir}"
 }
 
 check_acknowledged_write_preservation() {
@@ -42,13 +12,6 @@ check_acknowledged_write_preservation() {
   local checker_file="${case_dir}/acknowledged-write-checker.json"
   local ack_file="${case_dir}/acknowledged-op-ids.txt"
   local counts_file="${case_dir}/final-primary-op-counts.tsv"
-  local acknowledged_file="${case_dir}/acknowledged-op-ids.sorted"
-  local actual_file="${case_dir}/final-primary-op-ids.sorted"
-  local observed_once_file="${case_dir}/final-primary-observed-once-op-ids.sorted"
-  local duplicate_file="${case_dir}/final-primary-duplicate-op-ids.sorted"
-  local missing_file="${case_dir}/missing-acknowledged-op-ids.txt"
-  local duplicate_ack_file="${case_dir}/duplicate-acknowledged-op-ids.txt"
-  local unexpected_file="${case_dir}/unacknowledged-observed-op-ids.txt"
   local table final_primary final_primary_service query_status
 
   table=$(workload_op_table "${workload}") || {
@@ -59,7 +22,6 @@ EOF
   }
 
   touch "${ack_file}"
-  LC_ALL=C sort -u "${ack_file}" >"${acknowledged_file}"
 
   final_primary=$(current_primary_name 2>/dev/null || true)
   [[ -n "${final_primary}" ]] || final_primary="alpha-1"
@@ -95,194 +57,21 @@ ORDER BY op_id;
     return 1
   fi
 
-  awk -F $'\t' 'NF >= 2 {print $1}' "${counts_file}" | LC_ALL=C sort -u >"${actual_file}"
-  awk -F $'\t' 'NF >= 2 && $2 == 1 {print $1}' "${counts_file}" | LC_ALL=C sort -u >"${observed_once_file}"
-  awk -F $'\t' 'NF >= 2 && $2 != 1 {print $1}' "${counts_file}" | LC_ALL=C sort -u >"${duplicate_file}"
-  comm -23 "${acknowledged_file}" "${actual_file}" >"${missing_file}"
-  comm -12 "${acknowledged_file}" "${duplicate_file}" >"${duplicate_ack_file}"
-  comm -13 "${acknowledged_file}" "${actual_file}" >"${unexpected_file}"
-
-  local expected observed_once missing duplicate_ack unexpected async_loss_allowed valid
-  expected=$(wc -l <"${acknowledged_file}" | tr -d ' ')
-  observed_once=$(comm -12 "${acknowledged_file}" "${observed_once_file}" | wc -l | tr -d ' ')
-  missing=$(wc -l <"${missing_file}" | tr -d ' ')
-  duplicate_ack=$(wc -l <"${duplicate_ack_file}" | tr -d ' ')
-  unexpected=$(wc -l <"${unexpected_file}" | tr -d ' ')
-  async_loss_allowed=false
-  if [[ "${jepsen_allow_async_loss}" == "true" ]]; then
-    async_loss_allowed=true
-  fi
-
-  valid=false
-  if [[ "${expected}" -gt 0 && "${duplicate_ack}" -eq 0 ]]; then
-    if [[ "${missing}" -eq 0 || "${async_loss_allowed}" == "true" ]]; then
-      valid=true
-    fi
-  fi
-
-  jq -n \
-    --arg workload "${workload}" \
-    --arg runId "${run_id}" \
-    --arg finalPrimary "${final_primary}" \
-    --arg finalPrimaryService "${final_primary_service}" \
-    --arg table "${table}" \
-    --argjson valid "${valid}" \
-    --argjson asyncLossAllowed "${async_loss_allowed}" \
-    --argjson expectedAcknowledged "${expected}" \
-    --argjson observedExactlyOnce "${observed_once}" \
-    --argjson missingAcknowledged "${missing}" \
-    --argjson duplicateAcknowledged "${duplicate_ack}" \
-    --argjson unacknowledgedObserved "${unexpected}" \
-    --argjson missingOpIds "$(json_array_from_file "${missing_file}")" \
-    --argjson duplicateOpIds "$(json_array_from_file "${duplicate_ack_file}")" \
-    --argjson unacknowledgedObservedOpIds "$(json_array_from_file "${unexpected_file}")" \
-    '{
-      checker: "acknowledged-write-preservation",
-      valid: $valid,
-      workload: $workload,
-      runId: $runId,
-      finalPrimary: $finalPrimary,
-      finalPrimaryService: $finalPrimaryService,
-      table: $table,
-      asyncLossAllowed: $asyncLossAllowed,
-      expectedAcknowledged: $expectedAcknowledged,
-      observedExactlyOnce: $observedExactlyOnce,
-      missingAcknowledged: $missingAcknowledged,
-      duplicateAcknowledged: $duplicateAcknowledged,
-      unacknowledgedObserved: $unacknowledgedObserved,
-      missingOpIds: $missingOpIds,
-      duplicateOpIds: $duplicateOpIds,
-      unacknowledgedObservedOpIds: $unacknowledgedObservedOpIds
-    }' >"${checker_file}"
-
-  jq -e '.valid == true' "${checker_file}" >/dev/null
+  go run "${repo_root}/tools/jepsenctl" checkers acknowledged-write \
+    --workload "${workload}" \
+    --run-id "${run_id}" \
+    --case-dir "${case_dir}" \
+    --table "${table}" \
+    --final-primary "${final_primary}" \
+    --final-primary-service "${final_primary_service}" \
+    --async-loss-allowed="${jepsen_allow_async_loss}"
 }
 
 check_timeline_convergence() {
   local case_dir=$1
-  local observation_file="${case_dir}/primary-observations.jsonl"
-  local checker_file="${case_dir}/timeline-checker.json"
 
-  if [[ ! -s "${observation_file}" ]]; then
-    cat >"${checker_file}" <<'EOF'
-{"checker":"timeline-convergence","valid":false,"observations":0,"samples":0,"error":"missing primary observations"}
-EOF
-    return 1
-  fi
-
-  jq -s '
-    def samples:
-      sort_by(.sampleId)
-      | group_by(.sampleId)
-      | map({
-          sampleId: .[0].sampleId,
-          observedAt: .[0].observedAt,
-          observations: .
-        });
-    def writable_members($sample):
-      $sample.observations
-      | map(select(.reachable == true and .writable == true));
-    def primary_of($sample):
-      writable_members($sample) | sort_by(.member) | .[0] // null;
-    def summarize_member:
-      {
-        member,
-        service,
-        reachable,
-        writable,
-        inRecovery,
-        timeline,
-        lsn,
-        error
-      };
-
-    samples as $samples
-    | ($samples[0] // null) as $initialSample
-    | ($samples[-1] // null) as $finalSample
-    | (if $initialSample == null then [] else writable_members($initialSample) end) as $initialWritable
-    | (if $finalSample == null then [] else writable_members($finalSample) end) as $finalWritable
-    | (if $initialSample == null then null else primary_of($initialSample) end) as $initialPrimary
-    | (if $finalSample == null then null else primary_of($finalSample) end) as $finalPrimary
-    | (($initialPrimary != null) and ($finalPrimary != null)) as $hasPrimaries
-    | ($hasPrimaries and ($initialPrimary.member != $finalPrimary.member)) as $promotionObserved
-    | (
-        if ($hasPrimaries | not) then false
-        elif ($promotionObserved | not) then true
-        else (($finalPrimary.timeline // 0) > ($initialPrimary.timeline // 0))
-        end
-      ) as $timelineAdvanced
-    | (
-        if $finalPrimary == null then []
-        else
-          $finalSample.observations
-          | map(select(
-              .reachable == true
-              and .member != $finalPrimary.member
-              and (.timeline // 0) != ($finalPrimary.timeline // 0)
-            ))
-          | map(summarize_member)
-        end
-      ) as $replicaTimelineViolations
-    | (
-        if ($promotionObserved | not) then null
-        else
-          $finalSample.observations
-          | map(select(.member == $initialPrimary.member))
-          | .[0] // null
-        end
-      ) as $oldPrimaryFinalState
-    | (
-        if ($promotionObserved | not) then true
-        elif $oldPrimaryFinalState == null then false
-        else
-          (($oldPrimaryFinalState.reachable == false)
-          or (($oldPrimaryFinalState.writable == false)
-              and (($oldPrimaryFinalState.timeline // 0) == ($finalPrimary.timeline // 0))))
-        end
-      ) as $oldPrimarySafe
-    | (($initialWritable | length) == 1) as $singleInitialPrimary
-    | (($finalWritable | length) == 1) as $singleFinalPrimary
-    | (($replicaTimelineViolations | length) == 0) as $replicasConverged
-    | {
-        checker: "timeline-convergence",
-        valid: (
-          ($samples | length) > 0
-          and $singleInitialPrimary
-          and $singleFinalPrimary
-          and $timelineAdvanced
-          and $replicasConverged
-          and $oldPrimarySafe
-        ),
-        observations: length,
-        samples: ($samples | length),
-        initialSample: (
-          if $initialSample == null then null else {
-            sampleId: $initialSample.sampleId,
-            observedAt: $initialSample.observedAt,
-            primary: (if $initialPrimary == null then null else ($initialPrimary | summarize_member) end),
-            writableMembers: ($initialWritable | map(.member)),
-            members: ($initialSample.observations | map(summarize_member))
-          } end
-        ),
-        finalSample: (
-          if $finalSample == null then null else {
-            sampleId: $finalSample.sampleId,
-            observedAt: $finalSample.observedAt,
-            primary: (if $finalPrimary == null then null else ($finalPrimary | summarize_member) end),
-            writableMembers: ($finalWritable | map(.member)),
-            members: ($finalSample.observations | map(summarize_member))
-          } end
-        ),
-        promotionObserved: $promotionObserved,
-        timelineAdvanced: $timelineAdvanced,
-        replicasConverged: $replicasConverged,
-        oldPrimarySafe: $oldPrimarySafe,
-        replicaTimelineViolations: $replicaTimelineViolations,
-        oldPrimaryFinalState: (if $oldPrimaryFinalState == null then null else ($oldPrimaryFinalState | summarize_member) end)
-      }
-  ' "${observation_file}" >"${checker_file}"
-
-  jq -e '.valid == true' "${checker_file}" >/dev/null
+  go run "${repo_root}/tools/jepsenctl" checkers timeline \
+    --case-dir "${case_dir}"
 }
 
 check_old_primary_rejoin_after_failover() {
@@ -577,116 +366,11 @@ EOF
 check_dcs_quorum_during_nemesis() {
   local nemesis=$1
   local case_dir=$2
-  local checker_file="${case_dir}/dcs-quorum-checker.json"
-  local sample_file="${case_dir}/dcs-quorum-during-nemesis.jsonl"
 
-  if [[ "${nemesis}" != "dcs-kill-one" && "${nemesis}" != "dcs-lose-majority" && "${nemesis}" != "primary-dcs-majority-partition" && "${nemesis}" != "dcs-full-restart" && "${nemesis}" != "dcs-slow-network" ]]; then
-    cat >"${checker_file}" <<'EOF'
-{"checker":"dcs-quorum-during-nemesis","valid":true,"applicable":false}
-EOF
-    return 0
-  fi
-
-  if [[ ! -s "${sample_file}" ]]; then
-    cat >"${checker_file}" <<'EOF'
-{"checker":"dcs-quorum-during-nemesis","valid":false,"applicable":true,"error":"missing DCS quorum probe samples"}
-EOF
-    return 1
-  fi
-
-  jq -s --arg nemesis "${nemesis}" --argjson minSlowLatencyMillis "${jepsen_dcs_slow_min_latency_ms}" '
-    def phase($name): map(select(.phase == $name));
-    (
-      if $nemesis == "dcs-lose-majority" then phase("before-majority-loss")
-      elif $nemesis == "primary-dcs-majority-partition" then phase("before-primary-majority-partition")
-      elif $nemesis == "dcs-full-restart" then phase("before-full-restart")
-      elif $nemesis == "dcs-slow-network" then phase("before-dcs-slow-network")
-      else phase("before-kill")
-      end
-    ) as $before
-    | (
-      if $nemesis == "dcs-lose-majority" then phase("during-majority-loss")
-      elif $nemesis == "primary-dcs-majority-partition" then phase("during-primary-majority-partition")
-      elif $nemesis == "dcs-full-restart" then phase("during-full-restart")
-      elif $nemesis == "dcs-slow-network" then phase("during-dcs-slow-network")
-      else phase("during-kill")
-      end
-    ) as $during
-    | (
-      if $nemesis == "primary-dcs-majority-partition" then phase("after-primary-majority-partition")
-      elif $nemesis == "dcs-full-restart" then phase("after-full-restart")
-      elif $nemesis == "dcs-slow-network" then phase("after-dcs-slow-network")
-      else phase("after-restart")
-      end
-    ) as $after
-    | (
-        if $nemesis == "dcs-lose-majority" then
-          $during | map(select(
-            .ok == true
-            and (.healthyEndpoints // 0) <= 1
-            and (.failedEndpoints // 0) >= 2
-            and (.targetCount // 0) >= 2
-            and (.runningTargets // 0) == 0
-            and .targetRunning == false
-          ))
-        elif $nemesis == "primary-dcs-majority-partition" then
-          $during | map(select(
-            .ok == true
-            and (.healthyEndpoints // 0) <= 1
-            and (.failedEndpoints // 0) >= 2
-            and (.targetCount // 0) >= 2
-            and (.runningTargets // 0) == (.targetCount // 0)
-            and .targetRunning == true
-          ))
-        elif $nemesis == "dcs-full-restart" then
-          $during | map(select(
-            .ok == true
-            and (.healthyEndpoints // 0) == 0
-            and (.failedEndpoints // 0) >= 3
-            and (.targetCount // 0) >= 3
-            and (.runningTargets // 0) == 0
-            and .targetRunning == false
-          ))
-        elif $nemesis == "dcs-slow-network" then
-          $during | map(select(
-            .ok == true
-            and (.healthyEndpoints // 0) == (.totalEndpoints // 0)
-            and (.totalEndpoints // 0) >= 3
-            and (.targetCount // 0) >= 3
-            and (.runningTargets // 0) == (.targetCount // 0)
-            and .targetRunning == true
-            and (.maxEndpointLatencyMillis // 0) >= $minSlowLatencyMillis
-          ))
-        else
-          $during | map(select(
-            .ok == true
-            and (.healthyEndpoints // 0) >= 2
-            and (.failedEndpoints // 0) >= 1
-            and .targetRunning == false
-          ))
-        end
-      ) as $duringExpected
-    | ($after | map(select(
-        .ok == true
-        and (.healthyEndpoints // 0) == (.totalEndpoints // 0)
-        and (.totalEndpoints // 0) >= 3
-        and .targetRunning == true
-      ))) as $afterRecovered
-    | {
-        checker: "dcs-quorum-during-nemesis",
-        valid: (($duringExpected | length) > 0 and ($afterRecovered | length) > 0),
-        applicable: true,
-        nemesis: $nemesis,
-        minSlowLatencyMillis: $minSlowLatencyMillis,
-        samples: length,
-        beforeSamples: ($before | length),
-        duringExpectedSamples: ($duringExpected | length),
-        afterRecoveredSamples: ($afterRecovered | length),
-        observations: .
-      }
-  ' "${sample_file}" >"${checker_file}"
-
-  jq -e '.valid == true' "${checker_file}" >/dev/null
+  go run "${repo_root}/tools/jepsenctl" checkers dcs-quorum \
+    --nemesis "${nemesis}" \
+    --case-dir "${case_dir}" \
+    --min-slow-latency-ms "${jepsen_dcs_slow_min_latency_ms}"
 }
 
 check_failover_chain() {

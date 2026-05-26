@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"os/exec"
 	"strings"
 	"testing"
 	"time"
 
-	dockercontainer "github.com/docker/docker/api/types/container"
-	dockernetwork "github.com/docker/docker/api/types/network"
-	"github.com/docker/go-connections/nat"
+	mobycontainer "github.com/moby/moby/api/types/container"
+	mobynetwork "github.com/moby/moby/api/types/network"
 	testcontainers "github.com/testcontainers/testcontainers-go"
 	tcexec "github.com/testcontainers/testcontainers-go/exec"
 	tclog "github.com/testcontainers/testcontainers-go/log"
@@ -71,22 +71,26 @@ func (e *Environment) StartService(t *testing.T, cfg ServiceConfig) *Service {
 	}
 
 	if strings.TrimSpace(cfg.IPv4Address) != "" {
-		options = append(options, testcontainers.WithEndpointSettingsModifier(func(settings map[string]*dockernetwork.EndpointSettings) {
+		ipv4Address, err := netip.ParseAddr(cfg.IPv4Address)
+		if err != nil {
+			t.Fatalf("parse service %q IPv4 address %q: %v", cfg.Name, cfg.IPv4Address, err)
+		}
+		options = append(options, testcontainers.WithEndpointSettingsModifier(func(settings map[string]*mobynetwork.EndpointSettings) {
 			endpoint := settings[e.network.Name]
 			if endpoint == nil {
-				endpoint = &dockernetwork.EndpointSettings{}
+				endpoint = &mobynetwork.EndpointSettings{}
 				settings[e.network.Name] = endpoint
 			}
 			if endpoint.IPAMConfig == nil {
-				endpoint.IPAMConfig = &dockernetwork.EndpointIPAMConfig{}
+				endpoint.IPAMConfig = &mobynetwork.EndpointIPAMConfig{}
 			}
-			endpoint.IPAMConfig.IPv4Address = cfg.IPv4Address
+			endpoint.IPAMConfig.IPv4Address = ipv4Address
 		}))
 	}
 
 	if len(cfg.CapAdd) > 0 {
 		capAdd := append([]string(nil), cfg.CapAdd...)
-		options = append(options, testcontainers.WithHostConfigModifier(func(hostConfig *dockercontainer.HostConfig) {
+		options = append(options, testcontainers.WithHostConfigModifier(func(hostConfig *mobycontainer.HostConfig) {
 			hostConfig.CapAdd = append(hostConfig.CapAdd, capAdd...)
 		}))
 	}
@@ -152,7 +156,7 @@ func (s *Service) Host(t *testing.T) string {
 func (s *Service) Port(t *testing.T, port string) int {
 	t.Helper()
 
-	return s.mappedPort(t, port).Int()
+	return int(s.mappedPort(t, port).Num())
 }
 
 // Address returns the host-reachable host:port pair for the given container port.
@@ -252,15 +256,10 @@ func (s *Service) ConnectNetwork(t *testing.T, networkName string, aliases ...st
 	}
 }
 
-func (s *Service) mappedPort(t *testing.T, port string) nat.Port {
+func (s *Service) mappedPort(t *testing.T, port string) mobynetwork.Port {
 	t.Helper()
 
-	natPort, err := nat.NewPort("tcp", port)
-	if err != nil {
-		t.Fatalf("construct service port %q for %q: %v", port, s.name, err)
-	}
-
-	mapped, err := s.container.MappedPort(s.ctx, natPort)
+	mapped, err := s.container.MappedPort(s.ctx, port)
 	if err != nil {
 		t.Fatalf("load mapped port %q for service %q: %v", port, s.name, err)
 	}

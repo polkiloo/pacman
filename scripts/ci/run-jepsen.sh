@@ -58,6 +58,7 @@ notice() {
 write_summary() {
   local status="$1"
   local status_label="passed"
+  local commit_ref
 
   if [[ -n "${summary_status_label}" ]]; then
     status_label="${summary_status_label}"
@@ -67,96 +68,23 @@ write_summary() {
     status_label="failed"
   fi
 
+  commit_ref="${GITHUB_SHA:-$(git -C "${repo_root}" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
+
   mkdir -p "${ci_artifact_dir}"
-  {
-    echo "# Jepsen ${campaign} ${status_label}"
-    echo
-    echo "- Campaign: \`${campaign}\`"
-    if [[ "${campaign}" == "case" ]]; then
-      echo "- Case: \`${PACMAN_JEPSEN_CASE}\`"
-    fi
-    echo "- Status: \`${status_label}\`"
-    echo "- Harness: \`${jepsen_dir}\`"
-    echo "- Store: \`${artifact_dir}\`"
-    echo "- Runner: \`${runner}\`"
-    echo "- Commit: \`${GITHUB_SHA:-$(git -C "${repo_root}" rev-parse --short HEAD 2>/dev/null || echo unknown)}\`"
-    if [[ -n "${GITHUB_RUN_ID:-}" ]]; then
-      echo "- GitHub run: \`${GITHUB_RUN_ID}\`"
-    fi
-    echo
-    if [[ -n "${summary_note}" ]]; then
-      echo "## Summary"
-      echo
-      echo "${summary_note}"
-      echo
-    elif [[ "${status}" -ne 0 ]]; then
-      echo "## Summary"
-      echo
-      echo "The Jepsen campaign exited with status ${status}. Inspect the HTML report, history, checker output, and node logs in the uploaded artifacts."
-      echo
-    fi
-    echo "## Review Checklist"
-    echo
-    echo "1. Open this summary first."
-    echo "2. Inspect Jepsen HTML reports and checker output."
-    echo "3. Inspect \`jepsen-history.edn\`, \`results.edn\`, and \`nemesis-schedule.edn\` around failure windows."
-    echo "4. Compare PACMAN cluster/history snapshots with PostgreSQL and DCS logs."
-    echo "5. Preserve the seed and full artifact path in any regression issue."
-    echo
-    echo "## Artifact Index"
-    echo
-  } >"${summary_path}"
-
-  if [[ -d "${artifact_dir}" ]]; then
-    {
-      find "${artifact_dir}" -type f \( \
-        -name '*.html' -o \
-        -name '*history*.edn' -o \
-        -name 'history.edn' -o \
-        -name 'jepsen-history.edn' -o \
-        -name 'results.edn' -o \
-        -name 'nemesis-schedule.edn' -o \
-        -name 'case-results.jsonl' -o \
-        -name 'nightly-failures.txt' -o \
-        -name 'docker-compose-after-destroy.txt' -o \
-        -name 'checker.json' -o \
-        -name 'single-primary-checker.json' -o \
-        -name 'acknowledged-write-checker.json' -o \
-        -name 'timeline-checker.json' -o \
-        -name 'old-primary-rejoin-checker.json' -o \
-        -name 'manual-switchover-checker.json' -o \
-        -name 'client-traffic-during-nemesis-checker.json' -o \
-        -name 'client-traffic-during-nemesis.jsonl' -o \
-        -name 'replication-traffic-during-nemesis-checker.json' -o \
-        -name 'replication-traffic-during-nemesis.jsonl' -o \
-        -name 'dcs-traffic-during-nemesis-checker.json' -o \
-        -name 'dcs-traffic-during-nemesis.jsonl' -o \
-        -name 'dcs-quorum-checker.json' -o \
-        -name 'dcs-quorum-during-nemesis.jsonl' -o \
-        -name 'failover-chain-checker.json' -o \
-        -name 'failover-chain.jsonl' -o \
-        -name 'open-transaction-checker.json' -o \
-        -name 'open-transaction.json' -o \
-        -name 'vip-routing-checker.json' -o \
-        -name 'vip-routing.jsonl' -o \
-        -name 'primary-observations.jsonl' -o \
-        -name 'pacman-cluster-snapshots.jsonl' -o \
-        -name 'pg-stat-wal-receiver.jsonl' -o \
-        -name 'pg-stat-replication.json' -o \
-        -name '*.log' -o \
-        -name '*.json' \
-      \) | sort
-    } >"${artifact_index_path}"
-
-    if [[ -s "${artifact_index_path}" ]]; then
-      sed "s#${repo_root}/##" "${artifact_index_path}" | sed 's/^/- `/' | sed 's/$/`/' >>"${summary_path}"
-    else
-      echo "- No Jepsen report, history, log, or JSON artifacts found under the store path." >>"${summary_path}"
-    fi
-  else
-    echo "- Jepsen store path was not created." >>"${summary_path}"
-    : >"${artifact_index_path}"
-  fi
+  go run "${repo_root}/tools/jepsenctl" artifacts summarize \
+    --campaign "${campaign}" \
+    --case "${PACMAN_JEPSEN_CASE:-}" \
+    --status "${status}" \
+    --status-label "${status_label}" \
+    --harness "${jepsen_dir}" \
+    --store "${artifact_dir}" \
+    --runner "${runner}" \
+    --commit "${commit_ref}" \
+    --github-run-id "${GITHUB_RUN_ID:-}" \
+    --repo-root "${repo_root}" \
+    --summary-path "${summary_path}" \
+    --artifact-index-path "${artifact_index_path}" \
+    --summary-note "${summary_note}"
 
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     cat "${summary_path}" >>"${GITHUB_STEP_SUMMARY}"
