@@ -474,7 +474,7 @@ Inspired by [Wolfsrudel/database-postgres-ha-patroni-testing-jepsen](https://git
 - [x] define Jepsen workload coverage for append/register-style histories, single-key stress, read committed checks, and serializable checks; workload matrix recorded in [JEPSEN.md](JEPSEN.md)
 - [x] define Jepsen nemesis coverage for `none`, `packet`, `kill`, combined `packet,kill`, and slow-network / repeated-failure campaigns inspired by the Patroni repo; nemesis matrix recorded in [JEPSEN.md](JEPSEN.md)
 - [x] add a repeat-run soak profile for non-deterministic failures, including multi-run 30-minute campaigns and archived failure seeds / histories; soak profile recorded in [JEPSEN.md](JEPSEN.md)
-- [x] document local Jepsen lab prerequisites and bootstrap flow, including `JDK`, `Leiningen`, VM/Kubernetes substrate, node inventory generation, and artifact review; local lab flow recorded in [JEPSEN.md](JEPSEN.md)
+- [x] document local Jepsen lab prerequisites and bootstrap flow, including `Go`, Docker/Compose substrate, PACMAN lab generation, and artifact review; local lab flow recorded in [JEPSEN.md](JEPSEN.md)
 - [x] decide where Jepsen runs execute in automation, preferring separate long-running CI/CD stages or scheduled jobs instead of the fast default PR pipeline; automation placement recorded in [JEPSEN.md](JEPSEN.md)
 - [x] add separate CI/CD jobs for Jepsen smoke validation on demand and extended nightly / scheduled Jepsen campaigns; workflow entry points added in `.github/workflows/jepsen.yml`
 - [x] publish Jepsen HTML/history artifacts and concise failure summaries from CI/CD for operator review and regression tracking; summary and artifact upload contract recorded in [JEPSEN.md](JEPSEN.md)

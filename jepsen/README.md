@@ -164,19 +164,16 @@ Make and CI Jepsen entrypoints now go through `jepsenctl`:
 `go run ./tools/jepsenctl run ci ...` for host execution and
 `go run ./tools/jepsenctl run docker ...` for Dockerized local execution.
 
-The workload engine still keeps live PostgreSQL collection in shell. Shell owns
-Docker Compose service selection, `psql` execution, and lab credentials; Go
-checkers consume deterministic artifact files. `final-primary-op-counts.tsv`
-is the stable handoff from the final-primary SQL query into the Go
-acknowledged-write checker. Revisit this as the remaining Jepsen workload and
-nemesis orchestration moves behind `jepsenctl`.
+The Jepsen workload engine, nemesis scheduling, artifact collection, lab
+bootstrap/destroy calls, Docker Compose execution, and checker handoff logic now
+live in `jepsenctl`. The `final-primary-op-counts.tsv` file remains as an
+explicit acknowledged-write checker artifact, not as a shell handoff.
 
-Lab orchestration also remains in shell for now. `deploy/lab` is still the
-source of truth for bootstrap, reset, destroy, Docker Compose lifecycle, and
-container-local command execution. The remaining shell removal plan is tracked
-in `jepsen/TODO.md`.
+`deploy/lab` remains the product-supported local lab interface for bootstrap,
+reset, destroy, and demo workflows. Jepsen calls that interface from Go instead
+of carrying a separate `jepsen/lib` shell library.
 
 This harness deliberately uses the existing `deploy/lab` topology, which is
 three PACMAN data nodes plus external etcd. The broader Jepsen plan in
 `docs/JEPSEN.md` still tracks the Patroni baseline, optional witness target, and
-Clojure/Jepsen checker port.
+broader Jepsen campaign plan.

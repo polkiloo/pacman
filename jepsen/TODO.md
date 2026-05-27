@@ -191,7 +191,7 @@ orchestration code that needs a separate port.
    - [x] Read `pacman-cluster-before*.json`.
    - [x] Assert exactly three data nodes: `alpha-1`, `alpha-2`, and `alpha-3`.
    - [x] Assert one healthy primary and two healthy replicas.
-   - [x] Keep the shell runner responsible only for collecting the JSON.
+   - [x] Move cluster JSON collection into the Go harness.
 
 4. [x] Move artifact summary and index generation to Go.
    - [x] Generate the artifact index currently assembled in
@@ -217,12 +217,10 @@ orchestration code that needs a separate port.
    - [x] After checker migration is stable, decide whether to move live SQL
          collection into Go and remove intermediate TSV handoff files such as
          `final-primary-op-counts.tsv`.
-         Decision: keep live SQL collection in shell for now. The shell runner
-         already owns Docker Compose service selection, `psql` invocation, and
-         lab credentials; `jepsenctl` should keep consuming deterministic files
-         until Go also owns Docker/PostgreSQL orchestration. Keep
+         Decision: move live SQL collection into `jepsenctl`. Keep
          `final-primary-op-counts.tsv` as an explicit acknowledged-write checker
-         handoff artifact.
+         artifact until the checker no longer needs a persisted final-primary
+         row-count view.
 
 6. [x] Move nemesis schedule validation to Go.
    - [x] Verify every nemesis records start, heal/stop, target, and command
@@ -233,17 +231,15 @@ orchestration code that needs a separate port.
 7. [x] Revisit lab orchestration after checker migration is stable.
    - [x] Decide whether `bootstrap/reset/destroy`, `docker compose exec`, and
          nemesis execution should stay shell or move behind Go subcommands.
-         Decision: keep them in shell for now. `deploy/lab` already owns
-         bootstrap/reset/destroy semantics, Docker Compose lifecycle, and
-         container-local command execution. Moving that into Go today would
-         duplicate working orchestration without improving the checker signal.
-         Revisit only if repeated failures show shell quoting, process
-         management, or Docker Compose interaction is the dominant maintenance
-         cost.
+         Decision: move Jepsen-owned orchestration into `jepsenctl` while
+         keeping `deploy/lab` as the product-supported local lab interface.
+         Jepsen still invokes deploy/lab bootstrap/reset/destroy entrypoints,
+         but Docker Compose execution, workload flow, nemesis flow, artifact
+         collection, and checker handoffs are Go-owned.
    - [x] Do not rewrite long-running Docker orchestration until the Go
          validators have reduced real maintenance pain.
 
-8. [ ] Port remaining Jepsen shell workload orchestration to Go.
+8. [x] Port remaining Jepsen shell workload orchestration to Go.
    - [x] Replace Make/CI entrypoints `scripts/ci/run-jepsen.sh` and
          `scripts/local/run-jepsen-docker.sh` with
          `go run ./tools/jepsenctl run ci|docker ...`.
@@ -251,13 +247,13 @@ orchestration code that needs a separate port.
          `go run ./tools/jepsenctl cases list|validate`.
    - [x] Port `jepsen/bin/ci-smoke`, `jepsen/bin/ci-nightly`, and
          `jepsen/bin/ci-case` campaign orchestration to Go.
-   - [ ] Port `jepsen/lib/docker-lab.sh` artifact collection, cluster
+   - [x] Port `jepsen/lib/docker-lab.sh` artifact collection, cluster
          validation calls, lab bootstrap/destroy hooks, and EDN event writing
          to Go.
-   - [ ] Port `jepsen/lib/workloads/*.sh` SQL workload generation, nemesis
+   - [x] Port `jepsen/lib/workloads/*.sh` SQL workload generation, nemesis
          execution, sampling, topology helpers, and remaining checker handoff
          logic to Go.
-   - [ ] After the Go workload engine is complete, delete the replaced Jepsen
+   - [x] After the Go workload engine is complete, delete the replaced Jepsen
          shell files and keep deploy/lab shell scripts only if they remain the
          product-supported local lab interface.
 

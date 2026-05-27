@@ -16,13 +16,15 @@ Do not directly adapt the reference repository layout as the primary PACMAN harn
 
 ## Harness Direction
 
-The PACMAN harness should still use Jepsen/Clojure and keep the proven shape of the reference tests:
+The PACMAN harness uses a repo-local Go control program, `jepsenctl`, while
+keeping the proven workload and nemesis shape from the Jepsen reference tests:
 
-- Jepsen control node with SSH access to data nodes.
+- Dockerized or host `jepsenctl` control node with access to the PACMAN lab.
 - PostgreSQL clients that exercise reads, writes, transactions, and operation histories through the current primary endpoint.
 - Workloads covering append/register-style histories, single-key stress, read committed, and serializable checks.
 - Nemeses covering no fault, network partition, process kill, combined partition plus kill, slow network, and repeated-failure campaigns.
-- Result archival with Jepsen `store/` output, histories, plots, and concise PACMAN-specific failure summaries.
+- Result archival under `jepsen/store/`, histories, checker JSON, logs, and
+  concise PACMAN-specific failure summaries.
 
 The target deployment should be PACMAN-native:
 
@@ -227,15 +229,16 @@ Pass/fail interpretation:
 
 ## Local Lab Prerequisites And Bootstrap
 
-The local Jepsen lab needs a Clojure control environment, SSH-reachable database
-nodes, and a repeatable way to generate both PACMAN and Patroni inventories.
+The local Jepsen lab needs a Go-built `jepsenctl` control environment, a Docker
+Compose substrate for the PACMAN lab, and PACMAN build artifacts for the exact
+commit under test.
 
 Required local tools:
 
-- JDK, pinned to the version supported by the chosen Jepsen dependency.
-- Leiningen for running Jepsen/Clojure commands.
-- SSH client with key-based access from the Jepsen control node to every lab node.
-- PostgreSQL client tools for manual verification and final artifact inspection.
+- Go, for running or building `./tools/jepsenctl`.
+- Docker with Compose support.
+- PostgreSQL client tools for optional manual verification and final artifact
+  inspection.
 - A substrate provider: start with VM or container hosts that match the Ansible/lab
   deployment model; add `kind` or k3s only when Kubernetes-native Jepsen targets are
   introduced.
@@ -308,10 +311,9 @@ go run ./tools/jepsenctl run docker smoke
 go run ./tools/jepsenctl run docker nightly
 ```
 
-The runner image includes a compiled `jepsenctl` binary, JDK 21, Leiningen,
-Docker CLI/Compose, SSH client, PostgreSQL client tools, and common
-network/process debugging tools. It is a Jepsen control node, not a PACMAN data
-node. The Make targets build the PACMAN runtime RPM into
+The runner image includes a compiled `jepsenctl` binary plus Docker
+CLI/Compose. It is a Jepsen control node, not a PACMAN data node. The Make
+targets build the PACMAN runtime RPM into
 `bin/ansible-install-rpm/` before starting the runner so the Docker lab can
 install the exact workspace build.
 
@@ -324,8 +326,8 @@ go run ./tools/jepsenctl run ci case <case-name|workload:nemesis>
 ```
 
 `run ci smoke` bootstraps the Docker Compose lab and runs the lab verification stage.
-`run ci nightly` bootstraps the same lab, verifies it, runs a planned switchover, and
-verifies it again. A missing `lein`, missing runner, checker failure, or lab
+`run ci nightly` bootstraps the same lab, verifies it, runs a planned
+switchover, and verifies it again. A missing runner, checker failure, or lab
 bootstrap failure fails the command and preserves the same summary/artifact
 layout used by CI.
 
@@ -376,11 +378,9 @@ The GitHub Actions entry point is `.github/workflows/jepsen.yml`. It exposes:
 - `workflow_dispatch` with `campaign=nightly`, which runs `make jepsen-nightly`;
 - a scheduled nightly trigger that also runs `make jepsen-nightly`.
 
-The workflow installs JDK and Leiningen only when a `jepsen/` harness directory is
-present. Until the harness lands, the jobs skip with a notice instead of turning
-the scheduled workflow red. Once the harness exists, `jepsenctl` requires the
-Jepsen library directory and fails the workflow clearly if the harness is
-incomplete.
+The workflow runs `jepsenctl` through Make targets. If the `jepsen/` harness
+directory is missing, `jepsenctl` skips with a notice instead of turning the
+scheduled workflow red.
 
 Each campaign writes a concise CI summary to `bin/jepsen-ci/<campaign>/summary.md`
 and appends the same content to the GitHub Actions step summary. The summary
@@ -393,4 +393,8 @@ needed for regression tracking.
 
 ## Consequences
 
-This choice keeps the valuable Jepsen parts: workload generators, nemesis schedule, history checking, and repeat-run campaigns. It avoids coupling PACMAN's first Jepsen campaign to k3s or Patroni-specific assumptions. The tradeoff is that PACMAN needs its own small Clojure target layer for install/start/stop, primary discovery, client connection routing, and artifact collection.
+This choice keeps the valuable Jepsen parts: workload generators, nemesis
+schedule, history checking, and repeat-run campaigns. It avoids coupling
+PACMAN's first Jepsen campaign to k3s or Patroni-specific assumptions. The
+tradeoff is that PACMAN owns a small Go target layer for install/start/stop,
+primary discovery, client connection routing, and artifact collection.
