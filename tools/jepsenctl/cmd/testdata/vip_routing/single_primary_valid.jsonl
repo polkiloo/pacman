@@ -1,0 +1,2 @@
+{"observedAt":"2026-05-01T00:00:01Z","opId":"op-1","ok":true,"status":0,"pacmanPrimaryBefore":"alpha-1","pacmanPrimaryAfter":"alpha-1","vipHolderBefore":"alpha-1","vipHolderAfter":"alpha-1","inRecovery":false,"serverAddr":"172.28.0.100","returnedOp":"op-1"}
+{"observedAt":"2026-05-01T00:00:02Z","opId":"op-2","ok":false,"status":1,"pacmanPrimaryBefore":"alpha-1","pacmanPrimaryAfter":"alpha-1","vipHolderBefore":"alpha-1","vipHolderAfter":"alpha-1","inRecovery":false,"error":"temporary write failure"}

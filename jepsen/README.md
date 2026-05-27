@@ -74,7 +74,7 @@ make jepsen-docker-case-append-failover-repeated-failure
 ```
 
 `make jepsen-check-case-targets` verifies every case listed by
-`jepsen/bin/list-cases` has both `jepsen-case-<name>` and
+`go run ./tools/jepsenctl cases list` has both `jepsen-case-<name>` and
 `jepsen-docker-case-<name>` Make targets, so the implemented MVP matrix remains
 runnable one case at a time.
 
@@ -82,7 +82,7 @@ The same target also accepts the explicit `workload:nemesis` form:
 
 ```bash
 PACMAN_JEPSEN_CASE='serializable-txn:packet,kill' make jepsen-docker-case
-./scripts/local/run-jepsen-docker.sh case serializable-txn:packet,kill
+go run ./tools/jepsenctl run docker case serializable-txn:packet,kill
 ```
 
 Override the case list when running manually:
@@ -147,18 +147,33 @@ bin/jepsen-ci/<campaign>/summary.md
 ```
 
 Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
-`case-results.jsonl`, per-case `history.edn`, workload `checker.json`,
+`case-results.jsonl`, per-case `history.edn`, `nemesis-schedule.edn`,
+`nemesis-schedule-checker.log`, workload `checker.json`,
 `primary-observations.jsonl`, `single-primary-checker.json`,
 `acknowledged-write-checker.json`, `timeline-checker.json`,
 `old-primary-rejoin-checker.json`, `manual-switchover-checker.json`,
 `client-traffic-during-nemesis-checker.json`,
 `replication-traffic-during-nemesis-checker.json`,
 `dcs-traffic-during-nemesis-checker.json`,
+`acknowledged-op-ids.txt`, `final-primary-op-counts.tsv`,
 `pacman-cluster-snapshots.jsonl`, `pg-stat-replication.json`,
 `pg-stat-wal-receiver.jsonl`, nemesis logs, PACMAN cluster/history snapshots,
 Docker logs, PostgreSQL logs, and a small `index.html` for operator review.
 
+Make and CI Jepsen entrypoints now go through `jepsenctl`:
+`go run ./tools/jepsenctl run ci ...` for host execution and
+`go run ./tools/jepsenctl run docker ...` for Dockerized local execution.
+
+The Jepsen workload engine, nemesis scheduling, artifact collection, lab
+bootstrap/destroy calls, Docker Compose execution, and checker handoff logic now
+live in `jepsenctl`. The `final-primary-op-counts.tsv` file remains as an
+explicit acknowledged-write checker artifact, not as a shell handoff.
+
+`deploy/lab` remains the product-supported local lab interface for bootstrap,
+reset, destroy, and demo workflows. Jepsen calls that interface from Go instead
+of carrying a separate `jepsen/lib` shell library.
+
 This harness deliberately uses the existing `deploy/lab` topology, which is
 three PACMAN data nodes plus external etcd. The broader Jepsen plan in
 `docs/JEPSEN.md` still tracks the Patroni baseline, optional witness target, and
-Clojure/Jepsen checker port.
+broader Jepsen campaign plan.

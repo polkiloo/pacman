@@ -38,15 +38,34 @@ func newCasesCommand(stdout, stderr io.Writer) *cobra.Command {
 		Short: "work with Jepsen case registry",
 	}
 
+	cases.AddCommand(newCasesListCommand(stdout))
 	cases.AddCommand(newCasesValidateCommand(stdout, stderr))
 
 	return cases
 }
 
-func newCasesValidateCommand(stdout, stderr io.Writer) *cobra.Command {
-	options := casesValidateOptions{
-		listCases: "./jepsen/bin/list-cases",
+func newCasesListCommand(stdout io.Writer) *cobra.Command {
+	list := &cobra.Command{
+		Use:   "list",
+		Short: "list supported Jepsen cases",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 0 {
+				return fmt.Errorf("cases list does not accept arguments")
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			for _, testCase := range defaultJepsenCases() {
+				fmt.Fprintf(stdout, "%s %s %s\n", testCase.Slug, testCase.Spec, testCase.Description)
+			}
+			return nil
+		},
 	}
+	return list
+}
+
+func newCasesValidateCommand(stdout, stderr io.Writer) *cobra.Command {
+	options := casesValidateOptions{}
 
 	validate := &cobra.Command{
 		Use:   "validate",
@@ -94,8 +113,8 @@ func newCasesValidateCommand(stdout, stderr io.Writer) *cobra.Command {
 		},
 	}
 
-	validate.Flags().StringVar(&options.casesFile, "cases-file", "", "path to captured jepsen/bin/list-cases output")
-	validate.Flags().StringVar(&options.listCases, "list-cases", options.listCases, "path to jepsen/bin/list-cases")
+	validate.Flags().StringVar(&options.casesFile, "cases-file", "", "path to captured case registry output")
+	validate.Flags().StringVar(&options.listCases, "list-cases", options.listCases, "optional external case registry command")
 	validate.Flags().StringArrayVar(&options.makefiles, "makefile", nil, "Makefile path to scan for Jepsen case targets; may be repeated")
 
 	return validate
@@ -105,6 +124,13 @@ func loadCaseRegistry(options casesValidateOptions) ([]byte, error) {
 	if options.casesFile != "" {
 		return os.ReadFile(options.casesFile)
 	}
+	if options.listCases == "" {
+		var output bytes.Buffer
+		for _, testCase := range defaultJepsenCases() {
+			fmt.Fprintf(&output, "%s %s %s\n", testCase.Slug, testCase.Spec, testCase.Description)
+		}
+		return output.Bytes(), nil
+	}
 
 	cmd := exec.Command(options.listCases)
 	output, err := cmd.Output()
@@ -112,6 +138,30 @@ func loadCaseRegistry(options casesValidateOptions) ([]byte, error) {
 		return nil, fmt.Errorf("run %s: %w", options.listCases, err)
 	}
 	return output, nil
+}
+
+func defaultJepsenCases() []jepsenCase {
+	return []jepsenCase{
+		{Slug: "append-smoke-none", Spec: "append-smoke:none", Description: "Smoke append workload without nemesis."},
+		{Slug: "append-switchover-switchover", Spec: "append-switchover:switchover", Description: "Append workload while requesting a manual PACMAN switchover."},
+		{Slug: "append-failover-kill", Spec: "append-failover:kill", Description: "Append workload while killing current primary PostgreSQL."},
+		{Slug: "append-failover-packet", Spec: "append-failover:packet", Description: "Append workload while partitioning the current primary."},
+		{Slug: "append-failover-packet-kill", Spec: "append-failover:packet,kill", Description: "Append workload while partitioning and killing the current primary."},
+		{Slug: "append-failover-primary-dcs-partition", Spec: "append-failover:primary-dcs-partition", Description: "Append workload while isolating the current primary from DCS only."},
+		{Slug: "append-failover-primary-replication-partition", Spec: "append-failover:primary-replication-partition", Description: "Append workload while blocking primary replication traffic only."},
+		{Slug: "append-failover-failover-chain", Spec: "append-failover:failover-chain", Description: "Append workload while chaining manual failovers across all three data nodes."},
+		{Slug: "open-transaction-failover-kill", Spec: "open-transaction-failover:kill", Description: "Hold a transaction open while killing the current primary."},
+		{Slug: "vip-routing-switchover", Spec: "vip-routing:switchover", Description: "Verify vip-manager routes writes only to the current PACMAN primary during switchover."},
+		{Slug: "append-dcs-quorum-dcs-kill-one", Spec: "append-dcs-quorum:dcs-kill-one", Description: "Append workload while killing one etcd DCS member."},
+		{Slug: "append-dcs-quorum-dcs-lose-majority", Spec: "append-dcs-quorum:dcs-lose-majority", Description: "Append workload while killing two etcd DCS members."},
+		{Slug: "append-dcs-quorum-primary-dcs-majority-partition", Spec: "append-dcs-quorum:primary-dcs-majority-partition", Description: "Append workload while isolating the current primary from a DCS majority."},
+		{Slug: "append-dcs-quorum-dcs-full-restart", Spec: "append-dcs-quorum:dcs-full-restart", Description: "Append workload while restarting all etcd DCS members."},
+		{Slug: "append-dcs-quorum-dcs-slow-network", Spec: "append-dcs-quorum:dcs-slow-network", Description: "Append workload while adding latency to all etcd DCS members."},
+		{Slug: "single-key-register-packet", Spec: "single-key-register:packet", Description: "Register workload while partitioning the current primary."},
+		{Slug: "read-committed-txn-slow-network", Spec: "read-committed-txn:slow-network", Description: "Read committed transaction workload under latency and loss."},
+		{Slug: "serializable-txn-packet-kill", Spec: "serializable-txn:packet,kill", Description: "Serializable transaction workload under partition plus kill."},
+		{Slug: "append-failover-repeated-failure", Spec: "append-failover:repeated-failure", Description: "Append workload under slow network, partition, and kill sequence."},
+	}
 }
 
 func parseListCasesOutput(output []byte) ([]jepsenCase, error) {

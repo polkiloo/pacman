@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -26,6 +27,13 @@ func Run(args []string, stdout, stderr io.Writer) int {
 
 	root.SetArgs(args)
 	if err := root.Execute(); err != nil {
+		var exitErr commandExitError
+		if errors.As(err, &exitErr) {
+			if exitErr.message != "" {
+				fmt.Fprintln(stderr, exitErr.message)
+			}
+			return exitErr.code
+		}
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
@@ -67,7 +75,21 @@ Run with go run ./tools/jepsenctl <command> [args].
 	root.AddCommand(newCasesCommand(stdout, stderr))
 	root.AddCommand(newCheckersCommand())
 	root.AddCommand(newClusterCommand(stdout))
+	root.AddCommand(newNemesisCommand())
+	root.AddCommand(newRunCommand(stdout, stderr))
 	root.AddCommand(newVersionCommand(stdout))
 
 	return root
+}
+
+type commandExitError struct {
+	code    int
+	message string
+}
+
+func (err commandExitError) Error() string {
+	if err.message != "" {
+		return err.message
+	}
+	return fmt.Sprintf("command exited with status %d", err.code)
 }

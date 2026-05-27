@@ -1,9 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "${script_dir}/../.." && pwd)"
-
-cd "${repo_root}"
-go run ./tools/jepsenctl cases validate \
-  --list-cases "${script_dir}/list-cases"

@@ -49,29 +49,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Detect Jepsen harness
-        id: harness
-        run: |
-          if [ -d jepsen ]; then
-            echo "present=true" >>"${GITHUB_OUTPUT}"
-          else
-            echo "present=false" >>"${GITHUB_OUTPUT}"
-          fi
-
-      - name: Setup JDK
-        if: steps.harness.outputs.present == 'true'
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Install Leiningen
-        if: steps.harness.outputs.present == 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y leiningen
-          lein version
-
       - name: Run Jepsen smoke campaign
         run: make jepsen-smoke
 
@@ -95,29 +72,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Detect Jepsen harness
-        id: harness
-        run: |
-          if [ -d jepsen ]; then
-            echo "present=true" >>"${GITHUB_OUTPUT}"
-          else
-            echo "present=false" >>"${GITHUB_OUTPUT}"
-          fi
-
-      - name: Setup JDK
-        if: steps.harness.outputs.present == 'true'
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Install Leiningen
-        if: steps.harness.outputs.present == 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y leiningen
-          lein version
 
       - name: Run Jepsen nightly campaign
         run: make jepsen-nightly
