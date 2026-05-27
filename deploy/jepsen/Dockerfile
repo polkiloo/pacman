@@ -8,6 +8,7 @@ RUN go build -trimpath -ldflags="-s -w" -o /out/jepsenctl ./tools/jepsenctl
 FROM docker:27-cli
 
 RUN apk add --no-cache \
+	bash \
 	ca-certificates \
 	docker-cli-compose \
 	git
