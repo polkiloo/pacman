@@ -156,25 +156,6 @@ func runCICampaign(ctx context.Context, options runOptions, stdout, stderr io.Wr
 		return 0, summary.write(0)
 	}
 
-	if info, err := os.Stat(filepath.Join(jepsenDir, "lib")); err != nil || !info.IsDir() {
-		fmt.Fprintf(stderr, "Jepsen harness exists at %s, but %s is missing.\n", jepsenDir, filepath.Join(jepsenDir, "lib"))
-		fmt.Fprintln(stderr, "Add the campaign library before enabling this CI path for real execution.")
-		summary.note = fmt.Sprintf("Failed before campaign start because %s is missing.", filepath.Join(jepsenDir, "lib"))
-		if writeErr := summary.write(1); writeErr != nil {
-			return 1, writeErr
-		}
-		return 1, nil
-	}
-
-	if _, err := exec.LookPath("lein"); err != nil {
-		fmt.Fprintf(stderr, "Leiningen is required for Jepsen %s campaigns.\n", options.campaign)
-		summary.note = "Failed before campaign start because Leiningen is not installed."
-		if writeErr := summary.write(1); writeErr != nil {
-			return 1, writeErr
-		}
-		return 1, nil
-	}
-
 	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
 		return 1, fmt.Errorf("create Jepsen artifact directory: %w", err)
 	}
@@ -678,18 +659,7 @@ func finishHarnessCampaign(ctx context.Context, options harnessOptions, runDir, 
 }
 
 func (options harnessOptions) callHarness(ctx context.Context, body string) (int, error) {
-	script := "set -euo pipefail\n" +
-		"source " + shellLiteral(filepath.Join(options.jepsenDir, "lib", "docker-lab.sh")) + "\n" +
-		"source " + shellLiteral(filepath.Join(options.jepsenDir, "lib", "workloads.sh")) + "\n" +
-		body
-	return options.runner.Run(ctx, commandSpec{
-		name:   "bash",
-		args:   []string{"-lc", script},
-		dir:    options.repoRoot,
-		env:    options.env,
-		stdout: options.stdout,
-		stderr: options.stderr,
-	})
+	return newHarnessLab(options).dispatch(ctx, body)
 }
 
 func campaignCases(campaign string) []string {
