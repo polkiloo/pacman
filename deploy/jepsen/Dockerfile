@@ -6,6 +6,7 @@ RUN apk add --no-cache \
 	curl \
 	docker-cli-compose \
 	git \
+	go \
 	iproute2 \
 	iptables \
 	jq \

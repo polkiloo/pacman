@@ -304,11 +304,11 @@ make jepsen-docker-nightly
 Equivalent direct commands:
 
 ```bash
-scripts/local/run-jepsen-docker.sh smoke
-scripts/local/run-jepsen-docker.sh nightly
+go run ./tools/jepsenctl run docker smoke
+go run ./tools/jepsenctl run docker nightly
 ```
 
-The runner image includes JDK 21, Leiningen, Docker CLI/Compose, SSH client,
+The runner image includes Go, JDK 21, Leiningen, Docker CLI/Compose, SSH client,
 PostgreSQL client tools, and common network/process debugging tools. It is a
 Jepsen control node, not a PACMAN data node. The Make targets build the PACMAN
 runtime RPM into `bin/ansible-install-rpm/` before starting the runner so the
@@ -317,12 +317,13 @@ Docker lab can install the exact workspace build.
 The current harness lives in `jepsen/` and provides:
 
 ```text
-jepsen/bin/ci-smoke
-jepsen/bin/ci-nightly
+go run ./tools/jepsenctl run ci smoke
+go run ./tools/jepsenctl run ci nightly
+go run ./tools/jepsenctl run ci case <case-name|workload:nemesis>
 ```
 
-`ci-smoke` bootstraps the Docker Compose lab and runs the lab verification stage.
-`ci-nightly` bootstraps the same lab, verifies it, runs a planned switchover, and
+`run ci smoke` bootstraps the Docker Compose lab and runs the lab verification stage.
+`run ci nightly` bootstraps the same lab, verifies it, runs a planned switchover, and
 verifies it again. A missing `lein`, missing runner, checker failure, or lab
 bootstrap failure fails the command and preserves the same summary/artifact
 layout used by CI.
@@ -376,9 +377,9 @@ The GitHub Actions entry point is `.github/workflows/jepsen.yml`. It exposes:
 
 The workflow installs JDK and Leiningen only when a `jepsen/` harness directory is
 present. Until the harness lands, the jobs skip with a notice instead of turning
-the scheduled workflow red. Once the harness exists, it must provide executable
-campaign runners at `jepsen/bin/ci-smoke` and `jepsen/bin/ci-nightly`; missing
-runners fail the Jepsen workflow clearly.
+the scheduled workflow red. Once the harness exists, `jepsenctl` requires the
+Jepsen library directory and fails the workflow clearly if the harness is
+incomplete.
 
 Each campaign writes a concise CI summary to `bin/jepsen-ci/<campaign>/summary.md`
 and appends the same content to the GitHub Actions step summary. The summary

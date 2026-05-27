@@ -74,7 +74,7 @@ make jepsen-docker-case-append-failover-repeated-failure
 ```
 
 `make jepsen-check-case-targets` verifies every case listed by
-`jepsen/bin/list-cases` has both `jepsen-case-<name>` and
+`go run ./tools/jepsenctl cases list` has both `jepsen-case-<name>` and
 `jepsen-docker-case-<name>` Make targets, so the implemented MVP matrix remains
 runnable one case at a time.
 
@@ -82,7 +82,7 @@ The same target also accepts the explicit `workload:nemesis` form:
 
 ```bash
 PACMAN_JEPSEN_CASE='serializable-txn:packet,kill' make jepsen-docker-case
-./scripts/local/run-jepsen-docker.sh case serializable-txn:packet,kill
+go run ./tools/jepsenctl run docker case serializable-txn:packet,kill
 ```
 
 Override the case list when running manually:
@@ -160,12 +160,21 @@ Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
 `pg-stat-wal-receiver.jsonl`, nemesis logs, PACMAN cluster/history snapshots,
 Docker logs, PostgreSQL logs, and a small `index.html` for operator review.
 
-The runner intentionally keeps live PostgreSQL collection in shell. Shell owns
+Make and CI Jepsen entrypoints now go through `jepsenctl`:
+`go run ./tools/jepsenctl run ci ...` for host execution and
+`go run ./tools/jepsenctl run docker ...` for Dockerized local execution.
+
+The workload engine still keeps live PostgreSQL collection in shell. Shell owns
 Docker Compose service selection, `psql` execution, and lab credentials; Go
 checkers consume deterministic artifact files. `final-primary-op-counts.tsv`
 is the stable handoff from the final-primary SQL query into the Go
-acknowledged-write checker. Revisit this only if `jepsenctl` also takes over
-Docker/PostgreSQL orchestration.
+acknowledged-write checker. Revisit this as the remaining Jepsen workload and
+nemesis orchestration moves behind `jepsenctl`.
+
+Lab orchestration also remains in shell for now. `deploy/lab` is still the
+source of truth for bootstrap, reset, destroy, Docker Compose lifecycle, and
+container-local command execution. The remaining shell removal plan is tracked
+in `jepsen/TODO.md`.
 
 This harness deliberately uses the existing `deploy/lab` topology, which is
 three PACMAN data nodes plus external etcd. The broader Jepsen plan in

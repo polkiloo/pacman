@@ -168,9 +168,10 @@ surface.
 
 ## Go Automation Migration Plan
 
-Move brittle validation and checker logic to Go incrementally. Keep shell as the
-thin Docker/CI runner until the lab behavior is stable enough to justify a
-larger orchestration rewrite.
+Move brittle validation, checker logic, and runner entrypoints to Go
+incrementally. The Make/CI-facing runners now live in `jepsenctl`; the remaining
+shell is lower-level workload, nemesis, artifact collection, and lab
+orchestration code that needs a separate port.
 
 1. [x] Add a small Go CLI, `tools/jepsenctl`, with subcommands and table-driven
        tests.
@@ -179,11 +180,12 @@ larger orchestration rewrite.
          real complexity.
 
 2. [x] Move case registry validation to Go.
-   - [x] Parse `jepsen/bin/list-cases` output or a future structured registry.
+   - [x] Move the case registry into Go and expose it through
+         `go run ./tools/jepsenctl cases list`.
    - [x] Verify every case has `jepsen-case-<slug>` and
          `jepsen-docker-case-<slug>` Make targets.
-   - [x] Replace `jepsen/bin/check-case-targets` once the Go command is covered
-         by tests.
+   - [x] Replace `jepsen/bin/check-case-targets` with
+         `go run ./tools/jepsenctl cases validate`.
 
 3. [x] Move cluster-shape validation to Go.
    - [x] Read `pacman-cluster-before*.json`.
@@ -228,11 +230,36 @@ larger orchestration rewrite.
    - [x] Validate schedule entries against the selected `workload:nemesis`
          profile.
 
-7. [ ] Revisit lab orchestration after checker migration is stable.
-   - [ ] Decide whether `bootstrap/reset/destroy`, `docker compose exec`, and
+7. [x] Revisit lab orchestration after checker migration is stable.
+   - [x] Decide whether `bootstrap/reset/destroy`, `docker compose exec`, and
          nemesis execution should stay shell or move behind Go subcommands.
-   - [ ] Do not rewrite long-running Docker orchestration until the Go
+         Decision: keep them in shell for now. `deploy/lab` already owns
+         bootstrap/reset/destroy semantics, Docker Compose lifecycle, and
+         container-local command execution. Moving that into Go today would
+         duplicate working orchestration without improving the checker signal.
+         Revisit only if repeated failures show shell quoting, process
+         management, or Docker Compose interaction is the dominant maintenance
+         cost.
+   - [x] Do not rewrite long-running Docker orchestration until the Go
          validators have reduced real maintenance pain.
+
+8. [ ] Port remaining Jepsen shell workload orchestration to Go.
+   - [x] Replace Make/CI entrypoints `scripts/ci/run-jepsen.sh` and
+         `scripts/local/run-jepsen-docker.sh` with
+         `go run ./tools/jepsenctl run ci|docker ...`.
+   - [x] Move case listing and Make target validation behind
+         `go run ./tools/jepsenctl cases list|validate`.
+   - [x] Port `jepsen/bin/ci-smoke`, `jepsen/bin/ci-nightly`, and
+         `jepsen/bin/ci-case` campaign orchestration to Go.
+   - [ ] Port `jepsen/lib/docker-lab.sh` artifact collection, cluster
+         validation calls, lab bootstrap/destroy hooks, and EDN event writing
+         to Go.
+   - [ ] Port `jepsen/lib/workloads/*.sh` SQL workload generation, nemesis
+         execution, sampling, topology helpers, and remaining checker handoff
+         logic to Go.
+   - [ ] After the Go workload engine is complete, delete the replaced Jepsen
+         shell files and keep deploy/lab shell scripts only if they remain the
+         product-supported local lab interface.
 
 ## Definition of Done
 
