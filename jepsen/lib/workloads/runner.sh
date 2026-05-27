@@ -140,7 +140,7 @@ run_jepsen_case() {
   check_vip_write_routing "${workload}" "${nemesis}" "${case_dir}" || vip_routing_checker_status=$?
 
   local nemesis_schedule_checker_status=0
-  go run "${repo_root}/tools/jepsenctl" nemesis validate-schedule \
+  jepsenctl_cmd nemesis validate-schedule \
     --workload "${workload}" \
     --nemesis "${nemesis}" \
     --schedule-file "${case_dir}/nemesis-schedule.edn" \

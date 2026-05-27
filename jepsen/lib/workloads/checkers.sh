@@ -1,7 +1,7 @@
 check_single_writable_primary() {
   local case_dir=$1
 
-  go run "${repo_root}/tools/jepsenctl" checkers single-primary \
+  jepsenctl_cmd checkers single-primary \
     --case-dir "${case_dir}"
 }
 
@@ -57,7 +57,7 @@ ORDER BY op_id;
     return 1
   fi
 
-  go run "${repo_root}/tools/jepsenctl" checkers acknowledged-write \
+  jepsenctl_cmd checkers acknowledged-write \
     --workload "${workload}" \
     --run-id "${run_id}" \
     --case-dir "${case_dir}" \
@@ -70,7 +70,7 @@ ORDER BY op_id;
 check_timeline_convergence() {
   local case_dir=$1
 
-  go run "${repo_root}/tools/jepsenctl" checkers timeline \
+  jepsenctl_cmd checkers timeline \
     --case-dir "${case_dir}"
 }
 
@@ -78,7 +78,7 @@ check_old_primary_rejoin_after_failover() {
   local case_dir=$1
   local nemesis=${2:-}
 
-  go run "${repo_root}/tools/jepsenctl" checkers old-primary-rejoin \
+  jepsenctl_cmd checkers old-primary-rejoin \
     --case-dir "${case_dir}" \
     --nemesis "${nemesis}"
 }
@@ -87,7 +87,7 @@ check_manual_switchover() {
   local nemesis=$1
   local case_dir=$2
 
-  go run "${repo_root}/tools/jepsenctl" checkers manual-switchover \
+  jepsenctl_cmd checkers manual-switchover \
     --case-dir "${case_dir}" \
     --nemesis "${nemesis}"
 }
@@ -199,7 +199,7 @@ check_dcs_quorum_during_nemesis() {
   local nemesis=$1
   local case_dir=$2
 
-  go run "${repo_root}/tools/jepsenctl" checkers dcs-quorum \
+  jepsenctl_cmd checkers dcs-quorum \
     --nemesis "${nemesis}" \
     --case-dir "${case_dir}" \
     --min-slow-latency-ms "${jepsen_dcs_slow_min_latency_ms}"
@@ -309,7 +309,7 @@ check_vip_write_routing() {
   local nemesis=$2
   local case_dir=$3
 
-  go run "${repo_root}/tools/jepsenctl" checkers vip-routing \
+  jepsenctl_cmd checkers vip-routing \
     --workload "${workload}" \
     --case-dir "${case_dir}" \
     --nemesis "${nemesis}"

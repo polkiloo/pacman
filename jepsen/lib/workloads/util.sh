@@ -35,3 +35,12 @@ append_jsonl() {
     printf '}\n'
   } >>"${path}"
 }
+
+jepsenctl_cmd() {
+  if command -v jepsenctl >/dev/null 2>&1; then
+    jepsenctl "$@"
+    return $?
+  fi
+
+  go run "${repo_root}/tools/jepsenctl" "$@"
+}

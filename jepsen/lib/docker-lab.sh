@@ -52,14 +52,14 @@ verify_three_data_node_cluster() {
   fi
 
   if [[ -n "${output_file}" ]]; then
-    go run "${repo_root}/tools/jepsenctl" cluster validate "${output_file}"
+    jepsenctl_cmd cluster validate "${output_file}"
   else
     local temp_file
     local status
     temp_file="$(mktemp)"
     printf '%s\n' "${output}" >"${temp_file}"
     status=0
-    go run "${repo_root}/tools/jepsenctl" cluster validate "${temp_file}" || status=$?
+    jepsenctl_cmd cluster validate "${temp_file}" || status=$?
     rm -f "${temp_file}"
     return "${status}"
   fi

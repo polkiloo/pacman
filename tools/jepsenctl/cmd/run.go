@@ -135,7 +135,7 @@ func runCICampaign(ctx context.Context, options runOptions, stdout, stderr io.Wr
 	ciArtifactDir := envOrDefault("PACMAN_JEPSEN_CI_ARTIFACT_DIR", filepath.Join(repoRoot, "bin", "jepsen-ci", options.campaign))
 	summaryPath := envOrDefault("PACMAN_JEPSEN_SUMMARY_PATH", filepath.Join(ciArtifactDir, "summary.md"))
 	artifactIndexPath := filepath.Join(ciArtifactDir, "artifact-index.txt")
-	runnerPath := "go run ./tools/jepsenctl run ci " + options.campaign
+	runnerPath := "jepsenctl run ci " + options.campaign
 
 	summary := ciSummary{
 		options:           options,
@@ -848,7 +848,7 @@ func runDockerCampaign(ctx context.Context, options runOptions, stdout, stderr i
 
 	dockerArgs = append(dockerArgs,
 		image,
-		"go", "run", "./tools/jepsenctl", "run", "ci", options.campaign,
+		"jepsenctl", "run", "ci", options.campaign,
 	)
 	if options.campaign == "case" {
 		dockerArgs = append(dockerArgs, options.caseName)

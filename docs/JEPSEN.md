@@ -308,11 +308,12 @@ go run ./tools/jepsenctl run docker smoke
 go run ./tools/jepsenctl run docker nightly
 ```
 
-The runner image includes Go, JDK 21, Leiningen, Docker CLI/Compose, SSH client,
-PostgreSQL client tools, and common network/process debugging tools. It is a
-Jepsen control node, not a PACMAN data node. The Make targets build the PACMAN
-runtime RPM into `bin/ansible-install-rpm/` before starting the runner so the
-Docker lab can install the exact workspace build.
+The runner image includes a compiled `jepsenctl` binary, JDK 21, Leiningen,
+Docker CLI/Compose, SSH client, PostgreSQL client tools, and common
+network/process debugging tools. It is a Jepsen control node, not a PACMAN data
+node. The Make targets build the PACMAN runtime RPM into
+`bin/ansible-install-rpm/` before starting the runner so the Docker lab can
+install the exact workspace build.
 
 The current harness lives in `jepsen/` and provides:
 
