@@ -216,8 +216,10 @@ func (lab *harnessLab) stopPacmanNodeRuntime(ctx context.Context, service string
 		"runuser -u postgres -- /usr/pgsql-17/bin/pg_ctl -D /var/lib/pgsql/17/data -m immediate stop || true",
 	}
 	for _, command := range commands {
-		if _, status, err := lab.composeExec(ctx, service, "/bin/sh", "-lc", command); err != nil || status != 0 {
-			return fmt.Errorf("stop runtime %s status=%d err=%v", service, status, err)
+		if _, status, err := lab.composeExec(ctx, service, "/bin/sh", "-lc", command); err != nil {
+			return fmt.Errorf("stop runtime %s status=%d: %w", service, status, err)
+		} else if status != 0 {
+			return fmt.Errorf("stop runtime %s status=%d", service, status)
 		}
 	}
 	return nil
@@ -229,8 +231,10 @@ func (lab *harnessLab) startPacmanNodeRuntime(ctx context.Context, service strin
 		"nohup /usr/local/bin/vip-manager --config /etc/pacman/vip-manager.yml </dev/null >>/var/log/pacman/vip-manager.log 2>&1 &",
 	}
 	for _, command := range commands {
-		if _, status, err := lab.composeExec(ctx, service, "/bin/sh", "-lc", command); err != nil || status != 0 {
-			return fmt.Errorf("start runtime %s status=%d err=%v", service, status, err)
+		if _, status, err := lab.composeExec(ctx, service, "/bin/sh", "-lc", command); err != nil {
+			return fmt.Errorf("start runtime %s status=%d: %w", service, status, err)
+		} else if status != 0 {
+			return fmt.Errorf("start runtime %s status=%d", service, status)
 		}
 	}
 	return nil
