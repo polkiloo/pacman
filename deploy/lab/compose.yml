@@ -14,6 +14,8 @@ services:
     build:
       context: ../..
       dockerfile: test/docker/pacman-ansible-install.Dockerfile
+      args:
+        PACMAN_LAB_BASE_IMAGE: ${PACMAN_LAB_BASE_IMAGE:-rockylinux:9}
     container_name: pacman-lab-dcs
     hostname: pacman-dcs
     working_dir: /workspace
@@ -43,6 +45,8 @@ services:
     build:
       context: ../..
       dockerfile: test/docker/pacman-ansible-install.Dockerfile
+      args:
+        PACMAN_LAB_BASE_IMAGE: ${PACMAN_LAB_BASE_IMAGE:-rockylinux:9}
     container_name: pacman-lab-dcs-2
     hostname: pacman-dcs-2
     working_dir: /workspace
@@ -70,6 +74,8 @@ services:
     build:
       context: ../..
       dockerfile: test/docker/pacman-ansible-install.Dockerfile
+      args:
+        PACMAN_LAB_BASE_IMAGE: ${PACMAN_LAB_BASE_IMAGE:-rockylinux:9}
     container_name: pacman-lab-dcs-3
     hostname: pacman-dcs-3
     working_dir: /workspace
@@ -97,6 +103,8 @@ services:
     build:
       context: ../..
       dockerfile: test/docker/pacman-ansible-install.Dockerfile
+      args:
+        PACMAN_LAB_BASE_IMAGE: ${PACMAN_LAB_BASE_IMAGE:-rockylinux:9}
     container_name: pacman-lab-primary
     hostname: pacman-primary
     working_dir: /workspace
@@ -132,6 +140,8 @@ services:
     build:
       context: ../..
       dockerfile: test/docker/pacman-ansible-install.Dockerfile
+      args:
+        PACMAN_LAB_BASE_IMAGE: ${PACMAN_LAB_BASE_IMAGE:-rockylinux:9}
     container_name: pacman-lab-replica
     hostname: pacman-replica
     working_dir: /workspace
@@ -167,6 +177,8 @@ services:
     build:
       context: ../..
       dockerfile: test/docker/pacman-ansible-install.Dockerfile
+      args:
+        PACMAN_LAB_BASE_IMAGE: ${PACMAN_LAB_BASE_IMAGE:-rockylinux:9}
     container_name: pacman-lab-replica-2
     hostname: pacman-replica-2
     working_dir: /workspace

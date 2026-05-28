@@ -15,7 +15,35 @@ rpm: rpm-builder-image
 		/workspace/packaging/rpm/build-rpm.sh
 
 rpm-builder-image:
-	$(CONTAINER_RUNTIME) build -f packaging/rpm/Containerfile -t $(RPM_BUILDER_IMAGE) .
+	@if ! $(CONTAINER_RUNTIME) image inspect $(RPM_BUILDER_BASE_IMAGE) >/dev/null 2>&1; then \
+		attempt=1; \
+		while true; do \
+			if $(CONTAINER_RUNTIME) pull $(RPM_BUILDER_BASE_IMAGE); then \
+				break; \
+			fi; \
+			if [ "$$attempt" -ge "$(RPM_BUILDER_DOCKER_RETRY_ATTEMPTS)" ]; then \
+				exit 1; \
+			fi; \
+			printf 'pull %s failed on attempt %s/%s\n' "$(RPM_BUILDER_BASE_IMAGE)" "$$attempt" "$(RPM_BUILDER_DOCKER_RETRY_ATTEMPTS)" >&2; \
+			attempt=$$((attempt + 1)); \
+			sleep "$(RPM_BUILDER_DOCKER_RETRY_DELAY_SECONDS)"; \
+		done; \
+	fi
+	@attempt=1; \
+	while true; do \
+		if $(CONTAINER_RUNTIME) build \
+			--build-arg RPM_BUILDER_BASE_IMAGE=$(RPM_BUILDER_BASE_IMAGE) \
+			-f packaging/rpm/Containerfile \
+			-t $(RPM_BUILDER_IMAGE) .; then \
+			break; \
+		fi; \
+		if [ "$$attempt" -ge "$(RPM_BUILDER_DOCKER_RETRY_ATTEMPTS)" ]; then \
+			exit 1; \
+		fi; \
+		printf 'build %s failed on attempt %s/%s\n' "$(RPM_BUILDER_IMAGE)" "$$attempt" "$(RPM_BUILDER_DOCKER_RETRY_ATTEMPTS)" >&2; \
+		attempt=$$((attempt + 1)); \
+		sleep "$(RPM_BUILDER_DOCKER_RETRY_DELAY_SECONDS)"; \
+	done
 
 rpm-validate:
 	rm -rf $(RPM_VALIDATE_RELEASE1_DIR) $(RPM_VALIDATE_RELEASE2_DIR)
