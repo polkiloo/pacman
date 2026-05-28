@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -35,7 +36,7 @@ func (lab *harnessLab) pacmanClusterStatusJSON(ctx context.Context, service stri
 	if err != nil || status != 0 {
 		return "", fmt.Errorf("cluster status from %s failed: %s", service, strings.TrimSpace(output))
 	}
-	jsonText := lastJSONObject(output)
+	jsonText := clusterStatusJSONObject(output)
 	if jsonText == "" {
 		return "", fmt.Errorf("cluster status from %s did not contain JSON object: %s", service, output)
 	}
@@ -70,6 +71,27 @@ func lastJSONObject(output string) string {
 		}
 	}
 	return last
+}
+
+func clusterStatusJSONObject(output string) string {
+	for index, char := range output {
+		if char != '{' {
+			continue
+		}
+		decoder := json.NewDecoder(strings.NewReader(output[index:]))
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			continue
+		}
+		var status clusterStatus
+		if err := json.Unmarshal(raw, &status); err != nil {
+			continue
+		}
+		if status.Phase != "" || status.CurrentPrimary != "" || len(status.Members) > 0 {
+			return string(bytes.TrimSpace(raw))
+		}
+	}
+	return ""
 }
 
 func (lab *harnessLab) currentPrimaryName(ctx context.Context) string {

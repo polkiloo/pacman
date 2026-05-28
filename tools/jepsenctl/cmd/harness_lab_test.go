@@ -107,6 +107,28 @@ func TestHarnessFileAndJSONHelpers(t *testing.T) {
 	if got := lastJSONObject("noise\n{\"first\":true}\ntext\n{\"last\":true}\n"); got != `{"last":true}` {
 		t.Fatalf("last json object: got %q", got)
 	}
+	clusterOutput := `{
+  "clusterName": "alpha",
+  "phase": "healthy",
+  "currentPrimary": "alpha-1",
+  "members": [
+    {"name": "alpha-1", "role": "primary", "state": "running", "healthy": true},
+    {"name": "alpha-2", "role": "replica", "state": "streaming", "healthy": true},
+    {"name": "alpha-3", "role": "replica", "state": "streaming", "healthy": true}
+  ]
+}
+{"time":"2026-05-27T20:32:48Z","msg":"completed pacmanctl command"}`
+	clusterJSON := clusterStatusJSONObject(clusterOutput)
+	var status clusterStatus
+	if err := json.Unmarshal([]byte(clusterJSON), &status); err != nil {
+		t.Fatalf("decode extracted cluster json: %v\n%s", err, clusterJSON)
+	}
+	if status.CurrentPrimary != "alpha-1" || len(status.Members) != 3 {
+		t.Fatalf("extracted wrong json object: %#v", status)
+	}
+	if got := clusterStatusJSONObject(`{"time":"2026-05-27T20:32:48Z","msg":"completed pacmanctl command"}`); got != "" {
+		t.Fatalf("log-only json should not be treated as cluster status: %s", got)
+	}
 
 	jsonlPath := filepath.Join(dir, "rows.jsonl")
 	appendJSONL(jsonlPath, map[string]any{"ok": true})
