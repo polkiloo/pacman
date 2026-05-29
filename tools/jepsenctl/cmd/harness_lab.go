@@ -32,8 +32,14 @@ type harnessConfig struct {
 	defaultDuration              time.Duration
 	defaultClients               int
 	defaultKeys                  int
+	clusterVerifyTimeout         time.Duration
+	clusterVerifyInterval        time.Duration
 	nemesisHold                  time.Duration
 	postNemesisSettle            time.Duration
+	timelineConvergenceTimeout   time.Duration
+	timelineConvergenceInterval  time.Duration
+	workloadVisibilityTimeout    time.Duration
+	workloadVisibilityInterval   time.Duration
 	primarySampleInterval        time.Duration
 	appendSwitchoverOpDelay      time.Duration
 	dcsKillService               string
@@ -73,8 +79,14 @@ func newHarnessLab(options harnessOptions) *harnessLab {
 		defaultDuration:              time.Duration(envInt("PACMAN_JEPSEN_WORKLOAD_DURATION_SECONDS", 20)) * time.Second,
 		defaultClients:               envInt("PACMAN_JEPSEN_WORKLOAD_CLIENTS", 3),
 		defaultKeys:                  envInt("PACMAN_JEPSEN_WORKLOAD_KEYS", 3),
+		clusterVerifyTimeout:         time.Duration(envInt("PACMAN_JEPSEN_CLUSTER_VERIFY_TIMEOUT_SECONDS", 120)) * time.Second,
+		clusterVerifyInterval:        time.Duration(envInt("PACMAN_JEPSEN_CLUSTER_VERIFY_INTERVAL_SECONDS", 2)) * time.Second,
 		nemesisHold:                  time.Duration(envInt("PACMAN_JEPSEN_NEMESIS_HOLD_SECONDS", 8)) * time.Second,
 		postNemesisSettle:            time.Duration(envInt("PACMAN_JEPSEN_POST_NEMESIS_SETTLE_SECONDS", 10)) * time.Second,
+		timelineConvergenceTimeout:   time.Duration(envInt("PACMAN_JEPSEN_TIMELINE_CONVERGENCE_TIMEOUT_SECONDS", 90)) * time.Second,
+		timelineConvergenceInterval:  time.Duration(envInt("PACMAN_JEPSEN_TIMELINE_CONVERGENCE_INTERVAL_SECONDS", 2)) * time.Second,
+		workloadVisibilityTimeout:    time.Duration(envInt("PACMAN_JEPSEN_WORKLOAD_VISIBILITY_TIMEOUT_SECONDS", 60)) * time.Second,
+		workloadVisibilityInterval:   time.Duration(envInt("PACMAN_JEPSEN_WORKLOAD_VISIBILITY_INTERVAL_SECONDS", 2)) * time.Second,
 		primarySampleInterval:        time.Duration(envInt("PACMAN_JEPSEN_PRIMARY_SAMPLE_INTERVAL_SECONDS", 1)) * time.Second,
 		appendSwitchoverOpDelay:      time.Duration(envInt("PACMAN_JEPSEN_APPEND_SWITCHOVER_OP_DELAY_SECONDS", 1)) * time.Second,
 		dcsKillService:               envOrDefault("PACMAN_JEPSEN_DCS_KILL_SERVICE", "pacman-dcs-2"),

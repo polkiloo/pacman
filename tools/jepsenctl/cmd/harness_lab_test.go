@@ -3,11 +3,13 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHarnessCommandParsing(t *testing.T) {
@@ -141,6 +143,18 @@ func TestHarnessFileAndJSONHelpers(t *testing.T) {
 		t.Fatalf("sample count: got %d want 1", got)
 	}
 
+	schedulePath := filepath.Join(dir, "campaign-schedule.edn")
+	caseSchedulePath := filepath.Join(dir, "case-schedule.edn")
+	writeTestFile(t, schedulePath, "old\n")
+	offset := fileSize(schedulePath)
+	appendFile(schedulePath, "new\n")
+	if err := copyScheduleTail(schedulePath, caseSchedulePath, offset); err != nil {
+		t.Fatalf("copy schedule tail: %v", err)
+	}
+	if got := mustRead(caseSchedulePath); got != "new\n" {
+		t.Fatalf("case schedule: got %q want only new entry", got)
+	}
+
 	jsonPath := filepath.Join(dir, "value.json")
 	writeJSON(jsonPath, map[string]any{"name": "alpha"})
 	var decoded map[string]string
@@ -153,6 +167,39 @@ func TestHarnessFileAndJSONHelpers(t *testing.T) {
 	}
 	if decoded["name"] != "alpha" {
 		t.Fatalf("decoded json: %#v", decoded)
+	}
+}
+
+func TestVerifyThreeDataNodeClusterWaitsForHealthyShape(t *testing.T) {
+	dir := t.TempDir()
+	runner := &scriptedRunner{outputs: []string{
+		`{"phase":"initializing","currentPrimary":"","members":[]}`,
+		validClusterStatusJSON(),
+	}}
+	lab := newHarnessLab(harnessOptions{
+		repoRoot: dir,
+		runner:   runner,
+	})
+	lab.cfg.clusterVerifyTimeout = 200 * time.Millisecond
+	lab.cfg.clusterVerifyInterval = time.Millisecond
+
+	outputFile := filepath.Join(dir, "pacman-cluster-before.json")
+	if err := lab.verifyThreeDataNodeCluster(context.Background(), outputFile); err != nil {
+		t.Fatalf("verify cluster: %v", err)
+	}
+	if runner.calls < 2 {
+		t.Fatalf("runner calls: got %d want at least 2", runner.calls)
+	}
+	data, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatalf("read output file: %v", err)
+	}
+	var status clusterStatus
+	if err := json.Unmarshal(data, &status); err != nil {
+		t.Fatalf("decode output file: %v", err)
+	}
+	if status.CurrentPrimary != "alpha-1" {
+		t.Fatalf("current primary: got %q want alpha-1", status.CurrentPrimary)
 	}
 }
 
@@ -177,4 +224,23 @@ func TestHarnessSmallProfileHelpers(t *testing.T) {
 	if got := maxDuration(2, 1); got != 2 {
 		t.Fatalf("max duration: got %s", got)
 	}
+}
+
+type scriptedRunner struct {
+	outputs []string
+	calls   int
+}
+
+func (runner *scriptedRunner) Run(_ context.Context, spec commandSpec) (int, error) {
+	output := ""
+	if runner.calls < len(runner.outputs) {
+		output = runner.outputs[runner.calls]
+	} else if len(runner.outputs) > 0 {
+		output = runner.outputs[len(runner.outputs)-1]
+	}
+	runner.calls++
+	if spec.stdout != nil {
+		fmt.Fprint(spec.stdout, output)
+	}
+	return 0, nil
 }

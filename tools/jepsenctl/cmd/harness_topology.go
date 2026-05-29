@@ -8,10 +8,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 func (lab *harnessLab) verifyThreeDataNodeCluster(ctx context.Context, outputFile string) error {
-	output, err := lab.pacmanClusterStatusJSON(ctx, "pacman-primary")
+	output, err := lab.waitForThreeDataNodeCluster(ctx)
 	if err != nil {
 		return err
 	}
@@ -26,6 +27,46 @@ func (lab *harnessLab) verifyThreeDataNodeCluster(ctx context.Context, outputFil
 		return err
 	}
 	return validateClusterStatus(status)
+}
+
+func (lab *harnessLab) waitForThreeDataNodeCluster(ctx context.Context) (string, error) {
+	deadline := time.Now().Add(lab.cfg.clusterVerifyTimeout)
+	var lastJSON string
+	var lastErr error
+
+	for {
+		for _, service := range []string{"pacman-primary", "pacman-replica", "pacman-replica-2"} {
+			output, err := lab.pacmanClusterStatusJSON(ctx, service)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			lastJSON = output
+			var status clusterStatus
+			if err := json.Unmarshal([]byte(output), &status); err != nil {
+				lastErr = err
+				continue
+			}
+			if err := validateClusterStatus(status); err != nil {
+				lastErr = err
+				continue
+			}
+			return output, nil
+		}
+
+		if time.Now().After(deadline) {
+			if lastJSON != "" {
+				return "", fmt.Errorf("timed out waiting for healthy three-data-node cluster; last status: %s; last error: %w", lastJSON, lastErr)
+			}
+			return "", fmt.Errorf("timed out waiting for healthy three-data-node cluster: %w", lastErr)
+		}
+
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(lab.cfg.clusterVerifyInterval):
+		}
+	}
 }
 
 func (lab *harnessLab) pacmanClusterStatusJSON(ctx context.Context, service string) (string, error) {

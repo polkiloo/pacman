@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -51,10 +52,20 @@ func (lab *harnessLab) samplePrimaryState(ctx context.Context, sampleID int, obs
 with local as (
   select
     pg_is_in_recovery() as in_recovery,
-    case when pg_is_in_recovery() then null else pg_current_wal_lsn()::text end as write_lsn,
-    pg_last_wal_replay_lsn()::text as replay_lsn
+    case when pg_is_in_recovery() then null else pg_current_wal_lsn() end as write_lsn,
+    pg_last_wal_replay_lsn() as replay_lsn
+),
+observed as (
+  select in_recovery, coalesce(write_lsn, replay_lsn) as lsn from local
 )
-select local.in_recovery, 0, coalesce(local.write_lsn, local.replay_lsn, '') from local;`)
+select
+  in_recovery,
+  case
+    when lsn is null then 0
+    else ('x' || substr(pg_walfile_name(lsn), 1, 8))::bit(32)::int
+  end as timeline,
+  coalesce(lsn::text, '')
+from observed;`)
 		if err != nil {
 			appendJSONL(observationFile, map[string]any{
 				"sampleId":   sampleID,
@@ -72,6 +83,10 @@ select local.in_recovery, 0, coalesce(local.write_lsn, local.replay_lsn, '') fro
 		}
 		parts := strings.Split(lastNonEmptyLine(output), "\t")
 		inRecovery := len(parts) > 0 && parts[0] == "t"
+		timeline := 0
+		if len(parts) > 1 {
+			timeline, _ = strconv.Atoi(parts[1])
+		}
 		lsn := ""
 		if len(parts) > 2 {
 			lsn = parts[2]
@@ -84,7 +99,7 @@ select local.in_recovery, 0, coalesce(local.write_lsn, local.replay_lsn, '') fro
 			"reachable":  true,
 			"writable":   !inRecovery,
 			"inRecovery": inRecovery,
-			"timeline":   0,
+			"timeline":   timeline,
 			"lsn":        lsn,
 			"error":      "",
 		})

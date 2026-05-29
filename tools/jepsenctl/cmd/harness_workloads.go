@@ -314,9 +314,24 @@ func (lab *harnessLab) vipHolder(ctx context.Context) string {
 
 func (lab *harnessLab) checkAppendWorkload(ctx context.Context, runID, caseDir string) error {
 	expected := countLines(filepath.Join(caseDir, "acknowledged-op-ids.txt"))
-	actual := lab.queryInt(ctx, "pacman-primary", fmt.Sprintf("SELECT count(*) FROM jepsen.append_values WHERE run_id = %s;", sqlLiteral(runID)))
-	duplicates := lab.queryInt(ctx, "pacman-primary", fmt.Sprintf("SELECT count(*) FROM (SELECT op_id FROM jepsen.append_values WHERE run_id = %s GROUP BY op_id HAVING count(*) > 1) dup;", sqlLiteral(runID)))
-	writeJSON(filepath.Join(caseDir, "checker.json"), map[string]any{"checker": "append", "expectedAcknowledged": expected, "actualRows": actual, "duplicateOpIds": duplicates})
+	_ = lab.waitForWorkloadRows(ctx, "jepsen.append_values", runID, expected)
+	finalPrimary, finalService := lab.finalPrimaryService(ctx)
+	actual, actualErr := lab.queryIntResult(ctx, finalService, fmt.Sprintf("SELECT count(*) FROM jepsen.append_values WHERE run_id = %s;", sqlLiteral(runID)))
+	duplicates, duplicateErr := lab.queryIntResult(ctx, finalService, fmt.Sprintf("SELECT count(*) FROM (SELECT op_id FROM jepsen.append_values WHERE run_id = %s GROUP BY op_id HAVING count(*) > 1) dup;", sqlLiteral(runID)))
+	result := map[string]any{"checker": "append", "expectedAcknowledged": expected, "actualRows": actual, "duplicateOpIds": duplicates, "finalPrimary": finalPrimary, "finalPrimaryService": finalService}
+	if actualErr != nil {
+		result["actualError"] = actualErr.Error()
+	}
+	if duplicateErr != nil {
+		result["duplicateError"] = duplicateErr.Error()
+	}
+	writeJSON(filepath.Join(caseDir, "checker.json"), result)
+	if actualErr != nil {
+		return fmt.Errorf("append checker failed querying final primary %s: %w", finalPrimary, actualErr)
+	}
+	if duplicateErr != nil {
+		return fmt.Errorf("append checker failed querying duplicates on final primary %s: %w", finalPrimary, duplicateErr)
+	}
 	if expected <= 0 || actual != expected || duplicates != 0 {
 		return fmt.Errorf("append checker failed expected=%d actual=%d duplicates=%d", expected, actual, duplicates)
 	}
@@ -325,9 +340,24 @@ func (lab *harnessLab) checkAppendWorkload(ctx context.Context, runID, caseDir s
 
 func (lab *harnessLab) checkRegisterWorkload(ctx context.Context, runID, caseDir string) error {
 	expected := countLines(filepath.Join(caseDir, "acknowledged-op-ids.txt"))
-	actual := lab.queryInt(ctx, "pacman-primary", fmt.Sprintf("SELECT count(*) FROM jepsen.register_values WHERE run_id = %s;", sqlLiteral(runID)))
-	maxValue := lab.queryInt(ctx, "pacman-primary", fmt.Sprintf("SELECT COALESCE(max(value), 0) FROM jepsen.register_values WHERE run_id = %s;", sqlLiteral(runID)))
-	writeJSON(filepath.Join(caseDir, "checker.json"), map[string]any{"checker": "single-key-register", "expectedAcknowledged": expected, "actualRows": actual, "maxValue": maxValue})
+	_ = lab.waitForWorkloadRows(ctx, "jepsen.register_values", runID, expected)
+	finalPrimary, finalService := lab.finalPrimaryService(ctx)
+	actual, actualErr := lab.queryIntResult(ctx, finalService, fmt.Sprintf("SELECT count(*) FROM jepsen.register_values WHERE run_id = %s;", sqlLiteral(runID)))
+	maxValue, maxErr := lab.queryIntResult(ctx, finalService, fmt.Sprintf("SELECT COALESCE(max(value), 0) FROM jepsen.register_values WHERE run_id = %s;", sqlLiteral(runID)))
+	result := map[string]any{"checker": "single-key-register", "expectedAcknowledged": expected, "actualRows": actual, "maxValue": maxValue, "finalPrimary": finalPrimary, "finalPrimaryService": finalService}
+	if actualErr != nil {
+		result["actualError"] = actualErr.Error()
+	}
+	if maxErr != nil {
+		result["maxError"] = maxErr.Error()
+	}
+	writeJSON(filepath.Join(caseDir, "checker.json"), result)
+	if actualErr != nil {
+		return fmt.Errorf("register checker failed querying final primary %s: %w", finalPrimary, actualErr)
+	}
+	if maxErr != nil {
+		return fmt.Errorf("register checker failed querying max on final primary %s: %w", finalPrimary, maxErr)
+	}
 	if expected <= 0 || actual != expected || maxValue < expected {
 		return fmt.Errorf("register checker failed expected=%d actual=%d max=%d", expected, actual, maxValue)
 	}
@@ -336,9 +366,24 @@ func (lab *harnessLab) checkRegisterWorkload(ctx context.Context, runID, caseDir
 
 func (lab *harnessLab) checkTxnWorkload(ctx context.Context, runID, caseDir, checker string) error {
 	expected := countLines(filepath.Join(caseDir, "acknowledged-op-ids.txt"))
-	opCount := lab.queryInt(ctx, "pacman-primary", fmt.Sprintf("SELECT count(*) FROM jepsen.txn_ops WHERE run_id = %s;", sqlLiteral(runID)))
-	total := lab.queryInt(ctx, "pacman-primary", fmt.Sprintf("SELECT COALESCE(sum(balance), 0) FROM jepsen.txn_accounts WHERE run_id = %s;", sqlLiteral(runID)))
-	writeJSON(filepath.Join(caseDir, "checker.json"), map[string]any{"checker": checker, "expectedAcknowledged": expected, "actualOps": opCount, "accountTotal": total})
+	_ = lab.waitForWorkloadRows(ctx, "jepsen.txn_ops", runID, expected)
+	finalPrimary, finalService := lab.finalPrimaryService(ctx)
+	opCount, opErr := lab.queryIntResult(ctx, finalService, fmt.Sprintf("SELECT count(*) FROM jepsen.txn_ops WHERE run_id = %s;", sqlLiteral(runID)))
+	total, totalErr := lab.queryIntResult(ctx, finalService, fmt.Sprintf("SELECT COALESCE(sum(balance), 0) FROM jepsen.txn_accounts WHERE run_id = %s;", sqlLiteral(runID)))
+	result := map[string]any{"checker": checker, "expectedAcknowledged": expected, "actualOps": opCount, "accountTotal": total, "finalPrimary": finalPrimary, "finalPrimaryService": finalService}
+	if opErr != nil {
+		result["actualOpsError"] = opErr.Error()
+	}
+	if totalErr != nil {
+		result["accountTotalError"] = totalErr.Error()
+	}
+	writeJSON(filepath.Join(caseDir, "checker.json"), result)
+	if opErr != nil {
+		return fmt.Errorf("txn checker failed querying ops on final primary %s: %w", finalPrimary, opErr)
+	}
+	if totalErr != nil {
+		return fmt.Errorf("txn checker failed querying total on final primary %s: %w", finalPrimary, totalErr)
+	}
 	if expected <= 0 || opCount != expected || total != expected {
 		return fmt.Errorf("txn checker failed expected=%d ops=%d total=%d", expected, opCount, total)
 	}
@@ -346,12 +391,58 @@ func (lab *harnessLab) checkTxnWorkload(ctx context.Context, runID, caseDir, che
 }
 
 func (lab *harnessLab) queryInt(ctx context.Context, service, sql string) int {
-	output, err := lab.psqlService(ctx, service, sql)
+	value, err := lab.queryIntResult(ctx, service, sql)
 	if err != nil {
 		return 0
 	}
-	value, _ := strconv.Atoi(strings.TrimSpace(lastNonEmptyLine(output)))
 	return value
+}
+
+func (lab *harnessLab) queryIntResult(ctx context.Context, service, sql string) (int, error) {
+	output, err := lab.psqlService(ctx, service, sql)
+	if err != nil {
+		return 0, err
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(lastNonEmptyLine(output)))
+	if err != nil {
+		return 0, fmt.Errorf("parse integer query result %q: %w", lastNonEmptyLine(output), err)
+	}
+	return value, nil
+}
+
+func (lab *harnessLab) finalPrimaryService(ctx context.Context) (string, string) {
+	finalPrimary := lab.currentPrimaryName(ctx)
+	if finalPrimary == "" || finalPrimary == "unknown" {
+		finalPrimary = "alpha-1"
+	}
+	finalService := serviceForMember(finalPrimary)
+	if finalService == "" {
+		finalService = "pacman-primary"
+	}
+	return finalPrimary, finalService
+}
+
+func (lab *harnessLab) waitForWorkloadRows(ctx context.Context, table, runID string, expected int) bool {
+	if expected <= 0 || lab.cfg.workloadVisibilityTimeout <= 0 {
+		return false
+	}
+	deadline := time.Now().Add(lab.cfg.workloadVisibilityTimeout)
+	query := fmt.Sprintf("SELECT count(*) FROM %s WHERE run_id = %s;", table, sqlLiteral(runID))
+	for {
+		_, finalService := lab.finalPrimaryService(ctx)
+		actual, err := lab.queryIntResult(ctx, finalService, query)
+		if err == nil && actual >= expected {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(lab.cfg.workloadVisibilityInterval):
+		}
+	}
 }
 
 func countLines(path string) int {

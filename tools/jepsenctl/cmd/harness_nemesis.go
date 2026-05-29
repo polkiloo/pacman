@@ -12,9 +12,9 @@ import (
 func (lab *harnessLab) runNemesisProfile(ctx context.Context, profile, caseDir, scheduleFile string, duration time.Duration) *nemesisRun {
 	run := &nemesisRun{done: make(chan struct{})}
 	if profile == "none" {
-		_, _ = writeEDNEvent(scheduleFile, "none", "start", `"none"`)
+		writeNemesisScheduleEvent(scheduleFile, "none", "start", `:target "none"`)
 		_ = lab.captureClusterSnapshot(ctx, caseDir, "during-nemesis", profile, "", "")
-		_, _ = writeEDNEvent(scheduleFile, "none", "stop", `"none"`)
+		writeNemesisScheduleEvent(scheduleFile, "none", "stop", `:target "none" :result :ok`)
 		_ = lab.captureClusterSnapshot(ctx, caseDir, "after-nemesis", profile, "", "")
 		close(run.done)
 		return run
@@ -42,9 +42,7 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 	peers := peerServicesForMember(member)
 	logFile := filepath.Join(caseDir, "nemesis.log")
 	log := func(format string, args ...any) { appendFile(logFile, fmt.Sprintf(format+"\n", args...)) }
-	event := func(name, action, value string) {
-		appendFile(scheduleFile, fmt.Sprintf("{:time %q :nemesis :%s :action :%s %s}\n", time.Now().UTC().Format(time.RFC3339), name, action, value))
-	}
+	event := func(name, action, value string) { writeNemesisScheduleEvent(scheduleFile, name, action, value) }
 
 	switch profile {
 	case "kill":
@@ -143,6 +141,10 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 		log("unsupported nemesis profile: %s", profile)
 	}
 	_ = lab.captureClusterSnapshot(ctx, caseDir, "after-nemesis", profile, member, service)
+}
+
+func writeNemesisScheduleEvent(scheduleFile, name, action, value string) {
+	appendFile(scheduleFile, fmt.Sprintf("{:time %q :nemesis :%s :action :%s %s}\n", time.Now().UTC().Format(time.RFC3339), name, action, value))
 }
 
 func maxDuration(a, b time.Duration) time.Duration {

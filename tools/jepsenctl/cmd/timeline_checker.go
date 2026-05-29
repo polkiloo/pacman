@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -182,6 +183,23 @@ func checkTimelineConvergence(observations []primaryObservation) timelineChecker
 	}
 	replicasConverged := len(replicaTimelineViolations) == 0
 
+	var problems []string
+	if len(initialWritable) != 1 {
+		problems = append(problems, fmt.Sprintf("initial writable member count is %d, want 1", len(initialWritable)))
+	}
+	if len(finalWritable) != 1 {
+		problems = append(problems, fmt.Sprintf("final writable member count is %d, want 1", len(finalWritable)))
+	}
+	if !timelineAdvanced {
+		problems = append(problems, "timeline did not advance after promotion")
+	}
+	if !replicasConverged {
+		problems = append(problems, fmt.Sprintf("replica timeline violations: %d", len(replicaTimelineViolations)))
+	}
+	if !oldPrimarySafe {
+		problems = append(problems, "old primary is still unsafe")
+	}
+
 	result.Valid = len(samples) > 0 &&
 		len(initialWritable) == 1 &&
 		len(finalWritable) == 1 &&
@@ -196,6 +214,9 @@ func checkTimelineConvergence(observations []primaryObservation) timelineChecker
 	result.OldPrimarySafe = oldPrimarySafe
 	result.ReplicaTimelineViolations = replicaTimelineViolations
 	result.OldPrimaryFinalState = oldPrimaryFinalState
+	if !result.Valid {
+		result.Error = strings.Join(problems, "; ")
+	}
 	return result
 }
 

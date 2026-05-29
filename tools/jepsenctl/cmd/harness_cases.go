@@ -98,6 +98,7 @@ func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, c
 	caseHistory := filepath.Join(caseDir, "history.edn")
 	_, _ = writeEDNEvent(campaignHistory, workload+"/"+nemesis, "invoke", fmt.Sprintf("%q", runID))
 	writeCaseEvent(caseHistory, ":case", "invoke", "workload", fmt.Sprintf("{:workload %q :nemesis %q :run-id %q}", workload, nemesis, runID))
+	scheduleOffset := fileSize(scheduleFile)
 	_ = lab.captureClusterSnapshot(ctx, caseDir, "before-nemesis", nemesis, "", "")
 	_ = lab.samplePrimaryState(ctx, 0, filepath.Join(caseDir, "primary-observations.jsonl"))
 
@@ -105,11 +106,13 @@ func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, c
 	nemesisRun := lab.runNemesisProfile(ctx, nemesis, caseDir, scheduleFile, lab.cfg.defaultDuration)
 	workloadStatus := lab.runWorkloadProfile(ctx, workload, runID, caseDir)
 	nemesisRun.wait()
-	_ = copyScheduleTail(scheduleFile, filepath.Join(caseDir, "nemesis-schedule.edn"))
+	_ = copyScheduleTail(scheduleFile, filepath.Join(caseDir, "nemesis-schedule.edn"), scheduleOffset)
 	lab.settleAfterNemesis(caseDir, nemesis)
+	observationFile := filepath.Join(caseDir, primaryObservationFile)
+	_ = lab.waitForTimelineConvergence(ctx, observationFile)
 	sampler.stop()
 	_ = lab.captureClusterSnapshot(ctx, caseDir, "after-settle", nemesis, "", "")
-	_ = lab.samplePrimaryState(ctx, 1000000000, filepath.Join(caseDir, "primary-observations.jsonl"))
+	_ = lab.samplePrimaryState(ctx, 1000000000, observationFile)
 	_ = lab.capturePGStatReplication(ctx, caseDir, "final")
 	_ = lab.capturePGStatWalReceiver(ctx, caseDir, "final")
 
@@ -196,10 +199,49 @@ func mustRead(path string) string {
 	return string(data)
 }
 
-func copyScheduleTail(scheduleFile, caseScheduleFile string) error {
+func copyScheduleTail(scheduleFile, caseScheduleFile string, offset int64) error {
 	data, err := os.ReadFile(scheduleFile)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(caseScheduleFile, data, 0o644)
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > int64(len(data)) {
+		offset = int64(len(data))
+	}
+	return os.WriteFile(caseScheduleFile, data[offset:], 0o644)
+}
+
+func (lab *harnessLab) waitForTimelineConvergence(ctx context.Context, observationFile string) bool {
+	if lab.cfg.timelineConvergenceTimeout <= 0 {
+		return false
+	}
+	deadline := time.Now().Add(lab.cfg.timelineConvergenceTimeout)
+	sampleID := 900000000
+	for {
+		_ = lab.samplePrimaryState(ctx, sampleID, observationFile)
+		sampleID++
+
+		observations, err := readPrimaryObservations(observationFile)
+		if err == nil && checkTimelineConvergence(observations).Valid {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(lab.cfg.timelineConvergenceInterval):
+		}
+	}
+}
+
+func fileSize(path string) int64 {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
 }
