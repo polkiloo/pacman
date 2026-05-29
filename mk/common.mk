@@ -26,6 +26,7 @@ GOBIN := $(shell $(GO) env GOPATH)/bin
 endif
 
 GOLANGCI_LINT ?= $(GOBIN)/golangci-lint
+GOLANGCI_LINT_CACHE ?= $(CURDIR)/.cache/golangci-lint
 COVERAGE_OUT ?= coverage.out
 COVERAGE_MIN ?= 90.0
 PACMAN_TEST_IMAGE ?= pacman-test:local

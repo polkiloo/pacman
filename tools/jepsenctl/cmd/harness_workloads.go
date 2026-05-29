@@ -390,14 +390,6 @@ func (lab *harnessLab) checkTxnWorkload(ctx context.Context, runID, caseDir, che
 	return nil
 }
 
-func (lab *harnessLab) queryInt(ctx context.Context, service, sql string) int {
-	value, err := lab.queryIntResult(ctx, service, sql)
-	if err != nil {
-		return 0
-	}
-	return value
-}
-
 func (lab *harnessLab) queryIntResult(ctx context.Context, service, sql string) (int, error) {
 	output, err := lab.psqlService(ctx, service, sql)
 	if err != nil {

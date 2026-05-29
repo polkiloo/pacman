@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"io/fs"
@@ -12,13 +13,20 @@ import (
 )
 
 func main() {
-	if err := run(os.Stdout, "."); err != nil {
+	format := flag.String("format", "import", "output format: import or pattern")
+	flag.Parse()
+
+	if err := run(os.Stdout, ".", *format); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(w io.Writer, root string) error {
+func run(w io.Writer, root, format string) error {
+	if format != "import" && format != "pattern" {
+		return fmt.Errorf("unsupported package list format %q", format)
+	}
+
 	rootAbs, err := filepath.Abs(root)
 	if err != nil {
 		return err
@@ -40,11 +48,17 @@ func run(w io.Writer, root string) error {
 			return err
 		}
 
-		importPath := module
-		if rel != "." {
-			importPath += "/" + filepath.ToSlash(rel)
+		item := "./" + filepath.ToSlash(rel)
+		if rel == "." {
+			item = "."
 		}
-		if _, err := fmt.Fprintln(w, importPath); err != nil {
+		if format == "import" {
+			item = module
+			if rel != "." {
+				item += "/" + filepath.ToSlash(rel)
+			}
+		}
+		if _, err := fmt.Fprintln(w, item); err != nil {
 			return err
 		}
 	}
