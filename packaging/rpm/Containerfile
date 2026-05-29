@@ -3,6 +3,7 @@ FROM ${RPM_BUILDER_BASE_IMAGE}
 
 ARG TARGETARCH
 ARG GO_VERSION=1.26.1
+ARG NFPM_VERSION=v2.46.3
 
 RUN set -eux; \
     case "${TARGETARCH:-amd64}" in \
@@ -33,11 +34,10 @@ RUN set -eux; \
         postgresql17 \
         postgresql17-devel \
         redhat-rpm-config \
-        rpm-build \
-        systemd-rpm-macros \
         tar \
         which; \
     curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" | tar -C /usr/local -xz; \
+    GOBIN=/usr/local/bin /usr/local/go/bin/go install "github.com/goreleaser/nfpm/v2/cmd/nfpm@${NFPM_VERSION}"; \
     dnf clean all; \
     rm -rf /var/cache/dnf
 

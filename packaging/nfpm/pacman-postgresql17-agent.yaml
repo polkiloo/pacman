@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://nfpm.goreleaser.com/schema.json
+name: pacman-postgresql17-agent
+arch: ${NFPM_ARCH}
+platform: linux
+version: ${RPM_VERSION}
+version_schema: none
+release: ${RPM_RELEASE}
+section: database
+priority: optional
+maintainer: PACMAN Maintainers <maintainers@pacman.local>
+vendor: PACMAN
+homepage: https://github.com/polkiloo/pacman
+license: Apache-2.0
+description: |-
+  PostgreSQL 17 extension assets for PACMAN background-worker mode.
+depends:
+  - pacman = ${RPM_VERSION}-${RPM_RELEASE}
+  - postgresql17-server
+rpm:
+  group: Applications/Databases
+  compression: gzip
+contents:
+  - src: build/nfpm/pacman-postgresql17-agent/usr/pgsql-17/lib/pacman_agent.so
+    dst: /usr/pgsql-17/lib/pacman_agent.so
+    file_info:
+      mode: 0755
+  - src: build/nfpm/pacman-postgresql17-agent/usr/pgsql-17/share/extension/pacman_agent.control
+    dst: /usr/pgsql-17/share/extension/pacman_agent.control
+    file_info:
+      mode: 0644
+  - src: build/nfpm/pacman-postgresql17-agent/usr/pgsql-17/share/extension/pacman_agent--0.1.0.sql
+    dst: /usr/pgsql-17/share/extension/pacman_agent--0.1.0.sql
+    file_info:
+      mode: 0644
