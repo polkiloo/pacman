@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseRunOptions(t *testing.T) {
@@ -125,8 +126,47 @@ func TestDockerCampaignEnvPrefersExplicitCase(t *testing.T) {
 	}
 }
 
+func TestPullDockerImageWithRetries(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	runner := &retryRecordingRunner{statuses: []int{1, 0}}
+
+	status, err := pullDockerImageWithRetries(context.Background(), runner, "false", &stdout, &stderr, "docker:27-cli", 2, time.Nanosecond)
+	if err != nil {
+		t.Fatalf("pull image: %v", err)
+	}
+	if status != 0 {
+		t.Fatalf("status: got %d want 0", status)
+	}
+	if runner.calls != 2 {
+		t.Fatalf("calls: got %d want 2", runner.calls)
+	}
+	if !strings.Contains(stderr.String(), "pull docker:27-cli failed on attempt 1/2") {
+		t.Fatalf("stderr: got %q want retry message", stderr.String())
+	}
+}
+
 type recordingRunner struct{}
 
 func (recordingRunner) Run(context.Context, commandSpec) (int, error) {
 	return 99, nil
+}
+
+type retryRecordingRunner struct {
+	statuses []int
+	calls    int
+}
+
+func (runner *retryRecordingRunner) Run(_ context.Context, spec commandSpec) (int, error) {
+	runner.calls++
+	if len(spec.args) < 2 || spec.args[0] != "pull" {
+		return 1, nil
+	}
+	index := runner.calls - 1
+	if index >= len(runner.statuses) {
+		index = len(runner.statuses) - 1
+	}
+	return runner.statuses[index], nil
 }
