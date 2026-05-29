@@ -1,8 +1,9 @@
-FULL_COVERAGE_PACKAGE_LIST_CMD = $(GO) list ./... | grep -v '/test/'
+GO_PACKAGE_LIST_CMD = $(GO) run ./tools/pkglist
+FULL_COVERAGE_PACKAGE_LIST_CMD = $(GO_PACKAGE_LIST_CMD) | grep -v '/test/'
 # The threshold gate is intentionally unit-test scoped. Thin entrypoints and
 # distributed/container-driven orchestration paths are validated by dedicated
 # conformance and integration targets instead of this fast unit threshold.
-COVERAGE_CHECK_PACKAGE_LIST_CMD = $(GO) list ./... | grep -v '/test/' | grep -v '^github.com/polkiloo/pacman/cmd/' | grep -v '^github.com/polkiloo/pacman/tools/jepsenctl' | grep -v '^github.com/polkiloo/pacman/internal/controlplane$$' | grep -v '^github.com/polkiloo/pacman/internal/dcs/dcstest$$' | grep -v '^github.com/polkiloo/pacman/internal/dcs/etcd$$' | grep -v '^github.com/polkiloo/pacman/internal/dcs/raft$$'
+COVERAGE_CHECK_PACKAGE_LIST_CMD = $(GO_PACKAGE_LIST_CMD) | grep -v '/test/' | grep -v '^github.com/polkiloo/pacman/cmd/' | grep -v '^github.com/polkiloo/pacman/tools/jepsenctl' | grep -v '^github.com/polkiloo/pacman/tools/pkglist' | grep -v '^github.com/polkiloo/pacman/tools/rpmctl' | grep -v '^github.com/polkiloo/pacman/internal/controlplane$$' | grep -v '^github.com/polkiloo/pacman/internal/dcs/dcstest$$' | grep -v '^github.com/polkiloo/pacman/internal/dcs/etcd$$' | grep -v '^github.com/polkiloo/pacman/internal/dcs/raft$$'
 
 .PHONY: fmt test coverage coverage-check lint lint-install tidy openapi-codegen-check
 
