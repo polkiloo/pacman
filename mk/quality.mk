@@ -1,16 +1,29 @@
-FULL_COVERAGE_PACKAGE_LIST_CMD = $(GO) list ./... | grep -v '/test/'
+GO_PACKAGE_LIST_CMD = $(GO) run ./tools/pkglist
+GO_DEFAULT_PACKAGE_LIST_CMD = $(GO_PACKAGE_LIST_CMD) | grep -v '^github.com/polkiloo/pacman/test/integration$$' | grep -v '^github.com/polkiloo/pacman/test/installintegration$$'
+GO_DEFAULT_PACKAGE_PATTERN_CMD = $(GO_PACKAGE_LIST_CMD) -format=pattern | grep -v '^./test/integration$$' | grep -v '^./test/installintegration$$'
+FULL_COVERAGE_PACKAGE_LIST_CMD = $(GO_PACKAGE_LIST_CMD) | grep -v '/test/'
 # The threshold gate is intentionally unit-test scoped. Thin entrypoints and
 # distributed/container-driven orchestration paths are validated by dedicated
 # conformance and integration targets instead of this fast unit threshold.
-COVERAGE_CHECK_PACKAGE_LIST_CMD = $(GO) list ./... | grep -v '/test/' | grep -v '^github.com/polkiloo/pacman/cmd/' | grep -v '^github.com/polkiloo/pacman/tools/jepsenctl' | grep -v '^github.com/polkiloo/pacman/internal/controlplane$$' | grep -v '^github.com/polkiloo/pacman/internal/dcs/dcstest$$' | grep -v '^github.com/polkiloo/pacman/internal/dcs/etcd$$' | grep -v '^github.com/polkiloo/pacman/internal/dcs/raft$$'
+COVERAGE_CHECK_PACKAGE_LIST_CMD = $(GO_PACKAGE_LIST_CMD) | grep -v '/test/' | grep -v '^github.com/polkiloo/pacman/cmd/' | grep -v '^github.com/polkiloo/pacman/tools/jepsenctl' | grep -v '^github.com/polkiloo/pacman/tools/pkglist' | grep -v '^github.com/polkiloo/pacman/tools/rpmctl' | grep -v '^github.com/polkiloo/pacman/internal/controlplane$$' | grep -v '^github.com/polkiloo/pacman/internal/dcs/dcstest$$' | grep -v '^github.com/polkiloo/pacman/internal/dcs/etcd$$' | grep -v '^github.com/polkiloo/pacman/internal/dcs/raft$$'
 
 .PHONY: fmt test coverage coverage-check lint lint-install tidy openapi-codegen-check
 
 fmt:
-	$(GO) fmt ./...
+	@set -- $$($(GO_DEFAULT_PACKAGE_LIST_CMD)); \
+	if [ "$$#" -eq 0 ]; then \
+		echo "failed to resolve Go package list" >&2; \
+		exit 1; \
+	fi; \
+	$(GO) fmt "$$@"
 
 test:
-	$(GO) test ./...
+	@set -- $$($(GO_DEFAULT_PACKAGE_LIST_CMD)); \
+	if [ "$$#" -eq 0 ]; then \
+		echo "failed to resolve Go package list" >&2; \
+		exit 1; \
+	fi; \
+	$(GO) test "$$@"
 
 coverage:
 	@set -- $$($(FULL_COVERAGE_PACKAGE_LIST_CMD)); \
@@ -36,7 +49,12 @@ coverage-check:
 	fi
 
 lint:
-	$(GOLANGCI_LINT) run
+	@set -- $$($(GO_DEFAULT_PACKAGE_PATTERN_CMD)); \
+	if [ "$$#" -eq 0 ]; then \
+		echo "failed to resolve Go package list" >&2; \
+		exit 1; \
+	fi; \
+	GOLANGCI_LINT_CACHE=$(GOLANGCI_LINT_CACHE) $(GOLANGCI_LINT) run "$$@"
 
 lint-install:
 	$(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@latest

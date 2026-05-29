@@ -8,6 +8,7 @@ compose_file="${lab_dir}/compose.yml"
 runtime_dir="${lab_dir}/.local"
 rpm_dir="${PACMAN_LAB_RPM_DIR:-${repo_root}/bin/ansible-install-rpm}"
 lab_image="${PACMAN_LAB_IMAGE:-pacman-lab:local}"
+lab_base_image="${PACMAN_LAB_BASE_IMAGE:-rockylinux:9}"
 vip_address="${PACMAN_LAB_VIP_ADDRESS:-172.28.0.100}"
 auto_prepare="${PACMAN_LAB_AUTO_PREPARE:-true}"
 prometheus_internal_url="${PACMAN_LAB_PROMETHEUS_INTERNAL_URL:-http://prometheus:9090/-/ready}"
@@ -19,6 +20,7 @@ grafana_admin_password="${PACMAN_LAB_GRAFANA_ADMIN_PASSWORD:-pacman-demo}"
 wait_for_observability="${PACMAN_LAB_WAIT_FOR_OBSERVABILITY:-true}"
 
 export PACMAN_LAB_IMAGE="${lab_image}"
+export PACMAN_LAB_BASE_IMAGE="${lab_base_image}"
 
 dcs_services=(pacman-dcs pacman-dcs-2 pacman-dcs-3)
 dcs_members=(alpha-dcs alpha-dcs-2 alpha-dcs-3)
@@ -79,6 +81,41 @@ compose_exec_detached() {
   local service=$1
   shift
   docker compose -f "${compose_file}" exec -d "${service}" "$@"
+}
+
+retry_command() {
+  local label=$1
+  shift
+  local attempts=${PACMAN_LAB_DOCKER_RETRY_ATTEMPTS:-5}
+  local delay=${PACMAN_LAB_DOCKER_RETRY_DELAY_SECONDS:-10}
+  local attempt
+
+  for ((attempt=1; attempt<=attempts; attempt++)); do
+    if "$@"; then
+      return 0
+    fi
+
+    printf '%s failed on attempt %s/%s\n' "${label}" "${attempt}" "${attempts}" >&2
+    if [[ "${attempt}" -lt "${attempts}" ]]; then
+      sleep "${delay}"
+    fi
+  done
+
+  return 1
+}
+
+ensure_lab_base_image() {
+  if docker image inspect "${lab_base_image}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  retry_command "pull ${lab_base_image}" docker pull "${lab_base_image}"
+}
+
+start_compose_lab() {
+  ensure_lab_base_image
+  retry_command "build ${lab_image}" docker compose -f "${compose_file}" build
+  docker compose -f "${compose_file}" up -d --no-build
 }
 
 apply_playbook() {
@@ -243,7 +280,7 @@ main() {
   "${script_dir}/prepare-runtime-dirs.sh"
   write_generated_vars "${rpm_path}"
 
-  docker compose -f "${compose_file}" up -d --build
+  start_compose_lab
 
   apply_playbook pacman-dcs alpha-dcs
   apply_playbook pacman-dcs-2 alpha-dcs-2

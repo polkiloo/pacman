@@ -95,8 +95,13 @@ func validateClusterStatusFile(path string) error {
 		return fmt.Errorf("read cluster status %s: %w", path, err)
 	}
 
+	clusterJSON := clusterStatusJSONObject(string(data))
+	if clusterJSON == "" {
+		return fmt.Errorf("parse cluster status %s: no PACMAN cluster JSON object found", path)
+	}
+
 	var status clusterStatus
-	if err := json.Unmarshal(data, &status); err != nil {
+	if err := json.Unmarshal([]byte(clusterJSON), &status); err != nil {
 		return fmt.Errorf("parse cluster status %s: %w", path, err)
 	}
 

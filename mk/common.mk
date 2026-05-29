@@ -4,6 +4,13 @@ BIN_DIR ?= ./bin
 GOBIN ?= $(shell $(GO) env GOBIN)
 CONTAINER_RUNTIME ?= docker
 RPM_BUILDER_IMAGE ?= pacman-rpm-builder:el9
+RPM_BUILDER_BASE_IMAGE ?= rockylinux:9
+RPM_BUILDER_DOCKER_RETRY_ATTEMPTS ?= 5
+RPM_BUILDER_DOCKER_RETRY_DELAY_SECONDS ?= 10
+RPM_BUILDER_GOMODCACHE ?= $(CURDIR)/bin/rpm-gomodcache
+RPM_BUILDER_GO_RETRY_ATTEMPTS ?= 5
+RPM_BUILDER_GO_RETRY_DELAY_SECONDS ?= 10
+NFPM_VERSION ?= v2.46.3
 RPM_OUTPUT_DIR ?= $(CURDIR)/bin/rpm
 RPM_VERSION ?= 0.1.0
 RPM_RELEASE ?= 1
@@ -19,6 +26,7 @@ GOBIN := $(shell $(GO) env GOPATH)/bin
 endif
 
 GOLANGCI_LINT ?= $(GOBIN)/golangci-lint
+GOLANGCI_LINT_CACHE ?= $(CURDIR)/.cache/golangci-lint
 COVERAGE_OUT ?= coverage.out
 COVERAGE_MIN ?= 90.0
 PACMAN_TEST_IMAGE ?= pacman-test:local

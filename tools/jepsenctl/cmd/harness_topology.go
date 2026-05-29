@@ -2,15 +2,17 @@ package cmd
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 func (lab *harnessLab) verifyThreeDataNodeCluster(ctx context.Context, outputFile string) error {
-	output, err := lab.pacmanClusterStatusJSON(ctx, "pacman-primary")
+	output, err := lab.waitForThreeDataNodeCluster(ctx)
 	if err != nil {
 		return err
 	}
@@ -27,6 +29,46 @@ func (lab *harnessLab) verifyThreeDataNodeCluster(ctx context.Context, outputFil
 	return validateClusterStatus(status)
 }
 
+func (lab *harnessLab) waitForThreeDataNodeCluster(ctx context.Context) (string, error) {
+	deadline := time.Now().Add(lab.cfg.clusterVerifyTimeout)
+	var lastJSON string
+	var lastErr error
+
+	for {
+		for _, service := range []string{"pacman-primary", "pacman-replica", "pacman-replica-2"} {
+			output, err := lab.pacmanClusterStatusJSON(ctx, service)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			lastJSON = output
+			var status clusterStatus
+			if err := json.Unmarshal([]byte(output), &status); err != nil {
+				lastErr = err
+				continue
+			}
+			if err := validateClusterStatus(status); err != nil {
+				lastErr = err
+				continue
+			}
+			return output, nil
+		}
+
+		if time.Now().After(deadline) {
+			if lastJSON != "" {
+				return "", fmt.Errorf("timed out waiting for healthy three-data-node cluster; last status: %s; last error: %w", lastJSON, lastErr)
+			}
+			return "", fmt.Errorf("timed out waiting for healthy three-data-node cluster: %w", lastErr)
+		}
+
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(lab.cfg.clusterVerifyInterval):
+		}
+	}
+}
+
 func (lab *harnessLab) pacmanClusterStatusJSON(ctx context.Context, service string) (string, error) {
 	output, status, err := lab.composeExec(ctx, service, "env",
 		"PACMANCTL_API_URL=http://"+service+":8080",
@@ -35,7 +77,7 @@ func (lab *harnessLab) pacmanClusterStatusJSON(ctx context.Context, service stri
 	if err != nil || status != 0 {
 		return "", fmt.Errorf("cluster status from %s failed: %s", service, strings.TrimSpace(output))
 	}
-	jsonText := lastJSONObject(output)
+	jsonText := clusterStatusJSONObject(output)
 	if jsonText == "" {
 		return "", fmt.Errorf("cluster status from %s did not contain JSON object: %s", service, output)
 	}
@@ -70,6 +112,27 @@ func lastJSONObject(output string) string {
 		}
 	}
 	return last
+}
+
+func clusterStatusJSONObject(output string) string {
+	for index, char := range output {
+		if char != '{' {
+			continue
+		}
+		decoder := json.NewDecoder(strings.NewReader(output[index:]))
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			continue
+		}
+		var status clusterStatus
+		if err := json.Unmarshal(raw, &status); err != nil {
+			continue
+		}
+		if status.Phase != "" || status.CurrentPrimary != "" || len(status.Members) > 0 {
+			return string(bytes.TrimSpace(raw))
+		}
+	}
+	return ""
 }
 
 func (lab *harnessLab) currentPrimaryName(ctx context.Context) string {

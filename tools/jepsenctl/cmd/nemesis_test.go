@@ -18,6 +18,15 @@ func TestValidateNemesisSchedule(t *testing.T) {
 		wantErr  []string
 	}{
 		{
+			name:     "accepts none start and stop",
+			workload: "append-smoke",
+			nemesis:  "none",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :none :action :start :target "none"}
+{:time "2026-05-01T00:00:02Z" :nemesis :none :action :stop :target "none" :result :ok}
+`,
+		},
+		{
 			name:     "accepts kill start and stop",
 			workload: "append-failover",
 			nemesis:  "kill",

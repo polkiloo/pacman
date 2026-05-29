@@ -336,6 +336,9 @@ Useful overrides:
 ```bash
 PACMAN_JEPSEN_DOCKER_BUILD=false make jepsen-docker-smoke
 PACMAN_JEPSEN_DOCKER_IMAGE=pacman-jepsen-runner:dev make jepsen-docker-smoke
+PACMAN_JEPSEN_DOCKER_BASE_IMAGE=docker:27-cli make jepsen-docker-smoke
+PACMAN_JEPSEN_GO_BASE_IMAGE=golang:1.26.1-alpine make jepsen-docker-smoke
+PACMAN_JEPSEN_DOCKER_PULL_ATTEMPTS=8 make jepsen-docker-smoke
 PACMAN_JEPSEN_DOCKER_DRY_RUN=true make jepsen-docker-smoke
 ```
 

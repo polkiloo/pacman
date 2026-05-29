@@ -769,18 +769,28 @@ func runDockerCampaign(ctx context.Context, options runOptions, stdout, stderr i
 
 	image := envOrDefault("PACMAN_JEPSEN_DOCKER_IMAGE", "pacman-jepsen-runner:local")
 	dockerfile := envOrDefault("PACMAN_JEPSEN_DOCKERFILE", filepath.Join(repoRoot, "deploy", "jepsen", "Dockerfile"))
+	goBaseImage := envOrDefault("PACMAN_JEPSEN_GO_BASE_IMAGE", "golang:1.26.1-alpine")
+	dockerBaseImage := envOrDefault("PACMAN_JEPSEN_DOCKER_BASE_IMAGE", "docker:27-cli")
 	buildImage := envOrDefault("PACMAN_JEPSEN_DOCKER_BUILD", "true")
 	dryRun := envOrDefault("PACMAN_JEPSEN_DOCKER_DRY_RUN", "false")
 	dockerSock := envOrDefault("PACMAN_JEPSEN_DOCKER_SOCKET", "/var/run/docker.sock")
+	pullAttempts := envInt("PACMAN_JEPSEN_DOCKER_PULL_ATTEMPTS", 5)
+	pullRetryDelay := time.Duration(envInt("PACMAN_JEPSEN_DOCKER_PULL_RETRY_DELAY_SECONDS", 10)) * time.Second
 
 	if _, err := exec.LookPath("docker"); err != nil {
 		return 1, fmt.Errorf("docker is required to run local Jepsen campaigns in containers")
 	}
 
 	if buildImage != "false" {
+		for _, baseImage := range []string{goBaseImage, dockerBaseImage} {
+			status, err := pullDockerImageWithRetries(ctx, runner, dryRun, stdout, stderr, baseImage, pullAttempts, pullRetryDelay)
+			if err != nil || status != 0 {
+				return status, err
+			}
+		}
 		status, err := runMaybeDry(ctx, runner, dryRun, stdout, stderr, commandSpec{
 			name:   "docker",
-			args:   []string{"build", "-f", dockerfile, "-t", image, repoRoot},
+			args:   []string{"build", "--build-arg", "PACMAN_JEPSEN_GO_BASE_IMAGE=" + goBaseImage, "--build-arg", "PACMAN_JEPSEN_DOCKER_BASE_IMAGE=" + dockerBaseImage, "-f", dockerfile, "-t", image, repoRoot},
 			stdout: stdout,
 			stderr: stderr,
 		})
@@ -830,6 +840,35 @@ func runDockerCampaign(ctx context.Context, options runOptions, stdout, stderr i
 		stdout: stdout,
 		stderr: stderr,
 	})
+}
+
+func pullDockerImageWithRetries(ctx context.Context, runner commandRunner, dryRun string, stdout, stderr io.Writer, image string, attempts int, delay time.Duration) (int, error) {
+	if attempts < 1 {
+		attempts = 1
+	}
+	var status int
+	var err error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		status, err = runMaybeDry(ctx, runner, dryRun, stdout, stderr, commandSpec{
+			name:   "docker",
+			args:   []string{"pull", image},
+			stdout: stdout,
+			stderr: stderr,
+		})
+		if err == nil && status == 0 {
+			return 0, nil
+		}
+		if dryRun == "true" || attempt == attempts {
+			break
+		}
+		fmt.Fprintf(stderr, "pull %s failed on attempt %d/%d; retrying\n", image, attempt, attempts)
+		select {
+		case <-ctx.Done():
+			return 1, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+	return status, err
 }
 
 func dockerCampaignEnv(repoRoot, campaign, caseName string) map[string]string {

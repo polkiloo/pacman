@@ -3,11 +3,13 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHarnessCommandParsing(t *testing.T) {
@@ -107,6 +109,28 @@ func TestHarnessFileAndJSONHelpers(t *testing.T) {
 	if got := lastJSONObject("noise\n{\"first\":true}\ntext\n{\"last\":true}\n"); got != `{"last":true}` {
 		t.Fatalf("last json object: got %q", got)
 	}
+	clusterOutput := `{
+  "clusterName": "alpha",
+  "phase": "healthy",
+  "currentPrimary": "alpha-1",
+  "members": [
+    {"name": "alpha-1", "role": "primary", "state": "running", "healthy": true},
+    {"name": "alpha-2", "role": "replica", "state": "streaming", "healthy": true},
+    {"name": "alpha-3", "role": "replica", "state": "streaming", "healthy": true}
+  ]
+}
+{"time":"2026-05-27T20:32:48Z","msg":"completed pacmanctl command"}`
+	clusterJSON := clusterStatusJSONObject(clusterOutput)
+	var status clusterStatus
+	if err := json.Unmarshal([]byte(clusterJSON), &status); err != nil {
+		t.Fatalf("decode extracted cluster json: %v\n%s", err, clusterJSON)
+	}
+	if status.CurrentPrimary != "alpha-1" || len(status.Members) != 3 {
+		t.Fatalf("extracted wrong json object: %#v", status)
+	}
+	if got := clusterStatusJSONObject(`{"time":"2026-05-27T20:32:48Z","msg":"completed pacmanctl command"}`); got != "" {
+		t.Fatalf("log-only json should not be treated as cluster status: %s", got)
+	}
 
 	jsonlPath := filepath.Join(dir, "rows.jsonl")
 	appendJSONL(jsonlPath, map[string]any{"ok": true})
@@ -117,6 +141,18 @@ func TestHarnessFileAndJSONHelpers(t *testing.T) {
 	}
 	if got := countSamples(rows, func(row map[string]any) bool { return row["ok"] == true }); got != 1 {
 		t.Fatalf("sample count: got %d want 1", got)
+	}
+
+	schedulePath := filepath.Join(dir, "campaign-schedule.edn")
+	caseSchedulePath := filepath.Join(dir, "case-schedule.edn")
+	writeTestFile(t, schedulePath, "old\n")
+	offset := fileSize(schedulePath)
+	appendFile(schedulePath, "new\n")
+	if err := copyScheduleTail(schedulePath, caseSchedulePath, offset); err != nil {
+		t.Fatalf("copy schedule tail: %v", err)
+	}
+	if got := mustRead(caseSchedulePath); got != "new\n" {
+		t.Fatalf("case schedule: got %q want only new entry", got)
 	}
 
 	jsonPath := filepath.Join(dir, "value.json")
@@ -131,6 +167,39 @@ func TestHarnessFileAndJSONHelpers(t *testing.T) {
 	}
 	if decoded["name"] != "alpha" {
 		t.Fatalf("decoded json: %#v", decoded)
+	}
+}
+
+func TestVerifyThreeDataNodeClusterWaitsForHealthyShape(t *testing.T) {
+	dir := t.TempDir()
+	runner := &scriptedRunner{outputs: []string{
+		`{"phase":"initializing","currentPrimary":"","members":[]}`,
+		validClusterStatusJSON(),
+	}}
+	lab := newHarnessLab(harnessOptions{
+		repoRoot: dir,
+		runner:   runner,
+	})
+	lab.cfg.clusterVerifyTimeout = 200 * time.Millisecond
+	lab.cfg.clusterVerifyInterval = time.Millisecond
+
+	outputFile := filepath.Join(dir, "pacman-cluster-before.json")
+	if err := lab.verifyThreeDataNodeCluster(context.Background(), outputFile); err != nil {
+		t.Fatalf("verify cluster: %v", err)
+	}
+	if runner.calls < 2 {
+		t.Fatalf("runner calls: got %d want at least 2", runner.calls)
+	}
+	data, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatalf("read output file: %v", err)
+	}
+	var status clusterStatus
+	if err := json.Unmarshal(data, &status); err != nil {
+		t.Fatalf("decode output file: %v", err)
+	}
+	if status.CurrentPrimary != "alpha-1" {
+		t.Fatalf("current primary: got %q want alpha-1", status.CurrentPrimary)
 	}
 }
 
@@ -155,4 +224,23 @@ func TestHarnessSmallProfileHelpers(t *testing.T) {
 	if got := maxDuration(2, 1); got != 2 {
 		t.Fatalf("max duration: got %s", got)
 	}
+}
+
+type scriptedRunner struct {
+	outputs []string
+	calls   int
+}
+
+func (runner *scriptedRunner) Run(_ context.Context, spec commandSpec) (int, error) {
+	output := ""
+	if runner.calls < len(runner.outputs) {
+		output = runner.outputs[runner.calls]
+	} else if len(runner.outputs) > 0 {
+		output = runner.outputs[len(runner.outputs)-1]
+	}
+	runner.calls++
+	if spec.stdout != nil {
+		fmt.Fprint(spec.stdout, output)
+	}
+	return 0, nil
 }
