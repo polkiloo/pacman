@@ -66,6 +66,12 @@ type primarySampler struct {
 }
 
 func newHarnessLab(options harnessOptions) *harnessLab {
+	if options.target.Name == "" {
+		target, err := resolveJepsenTarget(defaultJepsenTarget)
+		if err == nil {
+			options.target = target
+		}
+	}
 	cfg := harnessConfig{
 		composeFile:                  filepath.Join(options.repoRoot, "deploy", "lab", "compose.yml"),
 		pgClientService:              envOrDefault("PACMAN_JEPSEN_PG_CLIENT_SERVICE", "pacman-primary"),

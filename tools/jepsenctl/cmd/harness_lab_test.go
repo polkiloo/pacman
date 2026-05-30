@@ -39,7 +39,11 @@ func TestHarnessDispatchValidationAndResultsFile(t *testing.T) {
 	t.Parallel()
 
 	runDir := t.TempDir()
-	lab := newHarnessLab(harnessOptions{runOptions: runOptions{campaign: "case"}})
+	target, err := resolveJepsenTarget(defaultJepsenTarget)
+	if err != nil {
+		t.Fatalf("resolve target: %v", err)
+	}
+	lab := newHarnessLab(harnessOptions{runOptions: runOptions{campaign: "case", target: target}})
 
 	status, err := lab.dispatch(context.Background(), "missing_command")
 	if status != 1 || err == nil || !strings.Contains(err.Error(), "unsupported Go harness command") {
@@ -59,7 +63,7 @@ func TestHarnessDispatchValidationAndResultsFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read results: %v", err)
 	}
-	assertContainsAll(t, "results", string(data), []string{":valid? true", `:campaign "case"`, `:target "pacman-docker-lab"`})
+	assertContainsAll(t, "results", string(data), []string{":valid? true", `:campaign "case"`, `:target "pacman-3-data"`, `:target-store "pacman"`})
 }
 
 func TestHarnessTopologyHelpers(t *testing.T) {
@@ -89,6 +93,31 @@ func TestHarnessTopologyHelpers(t *testing.T) {
 	}
 	if got := serviceForMember("unknown"); got != "" {
 		t.Fatalf("unknown service: got %q want empty", got)
+	}
+}
+
+func TestDCSQuorumTargetStateDerivesKilledTargetsFromEndpointHealth(t *testing.T) {
+	t.Parallel()
+
+	health := dcsHealthResult{
+		TotalEndpoints:   3,
+		HealthyEndpoints: 2,
+		FailedEndpoints:  1,
+		Endpoints: []dcsEndpointInfo{
+			{Endpoint: "http://pacman-dcs:2379", OK: true},
+			{Endpoint: "http://pacman-dcs-2:2379", OK: false},
+			{Endpoint: "http://pacman-dcs-3:2379", OK: true},
+		},
+	}
+
+	running, allRunning := dcsQuorumTargetState("dcs-kill-one", []string{"pacman-dcs-2"}, health)
+	if running != 0 || allRunning {
+		t.Fatalf("killed target state: running=%d allRunning=%v, want 0 false", running, allRunning)
+	}
+
+	running, allRunning = dcsQuorumTargetState("primary-dcs-majority-partition", []string{"pacman-dcs-2", "pacman-dcs-3"}, health)
+	if running != 2 || !allRunning {
+		t.Fatalf("partition target state: running=%d allRunning=%v, want 2 true", running, allRunning)
 	}
 }
 

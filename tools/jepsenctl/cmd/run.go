@@ -18,6 +18,7 @@ import (
 type runOptions struct {
 	campaign string
 	caseName string
+	target   jepsenTarget
 }
 
 type commandSpec struct {
@@ -102,7 +103,12 @@ func parseRunOptions(args []string) (runOptions, error) {
 		return runOptions{}, fmt.Errorf("campaign is required")
 	}
 
-	options := runOptions{campaign: args[0]}
+	target, err := resolveJepsenTarget(envOrDefault("PACMAN_JEPSEN_TARGET", defaultJepsenTarget))
+	if err != nil {
+		return runOptions{}, err
+	}
+
+	options := runOptions{campaign: args[0], target: target}
 	switch options.campaign {
 	case "smoke", "nightly":
 		if len(args) > 1 {
@@ -164,6 +170,7 @@ func runCICampaign(ctx context.Context, options runOptions, stdout, stderr io.Wr
 		"PACMAN_JEPSEN_ARTIFACT_DIR="+artifactDir,
 		"PACMAN_JEPSEN_CI_ARTIFACT_DIR="+ciArtifactDir,
 		"PACMAN_JEPSEN_SUMMARY_PATH="+summaryPath,
+		"PACMAN_JEPSEN_TARGET="+options.target.Name,
 	)
 	if options.caseName != "" {
 		env = append(env, "PACMAN_JEPSEN_CASE="+options.caseName)
@@ -280,7 +287,7 @@ func runHarnessCampaign(ctx context.Context, options harnessOptions) (int, error
 
 func runHarnessSmoke(ctx context.Context, options harnessOptions) (status int, err error) {
 	cases := campaignCases("smoke")
-	runDir := runDirFor(options.artifactDir, "smoke")
+	runDir := runDirFor(options.artifactDir, "smoke", options.target)
 	historyFile := filepath.Join(runDir, "jepsen-history.edn")
 	scheduleFile := filepath.Join(runDir, "nemesis-schedule.edn")
 
@@ -349,7 +356,7 @@ func runHarnessCase(ctx context.Context, options harnessOptions) (status int, er
 		return 2, err
 	}
 
-	runDir := runDirFor(options.artifactDir, "case-"+caseSlug(caseSpec))
+	runDir := runDirFor(options.artifactDir, "case-"+caseSlug(caseSpec), options.target)
 	historyFile := filepath.Join(runDir, "jepsen-history.edn")
 	scheduleFile := filepath.Join(runDir, "nemesis-schedule.edn")
 
@@ -422,7 +429,7 @@ func runHarnessCase(ctx context.Context, options harnessOptions) (status int, er
 
 func runHarnessNightly(ctx context.Context, options harnessOptions) (status int, err error) {
 	cases := campaignCases("nightly")
-	runDir := runDirFor(options.artifactDir, "nightly")
+	runDir := runDirFor(options.artifactDir, "nightly", options.target)
 	historyFile := filepath.Join(runDir, "jepsen-history.edn")
 	scheduleFile := filepath.Join(runDir, "nemesis-schedule.edn")
 	failuresFile := filepath.Join(runDir, "nightly-failures.txt")
@@ -700,9 +707,9 @@ func splitCaseSpec(spec string) (string, string) {
 	return workload, nemesis
 }
 
-func runDirFor(artifactDir, campaign string) string {
+func runDirFor(artifactDir, campaign string, target jepsenTarget) string {
 	runID := envOrDefault("PACMAN_JEPSEN_RUN_ID", time.Now().UTC().Format("20060102T150405Z"))
-	return filepath.Join(artifactDir, "pacman", campaign, runID)
+	return filepath.Join(artifactDir, target.StoreName, campaign, runID)
 }
 
 func createHarnessFiles(runDir string, files ...string) error {
@@ -878,6 +885,7 @@ func dockerCampaignEnv(repoRoot, campaign, caseName string) map[string]string {
 		"PACMAN_JEPSEN_CI_ARTIFACT_DIR":                    envOrDefault("PACMAN_JEPSEN_CI_ARTIFACT_DIR", filepath.Join(repoRoot, "bin", "jepsen-ci", campaign)),
 		"PACMAN_JEPSEN_CASES":                              os.Getenv("PACMAN_JEPSEN_CASES"),
 		"PACMAN_JEPSEN_CASE":                               firstNonEmpty(caseName, os.Getenv("PACMAN_JEPSEN_CASE")),
+		"PACMAN_JEPSEN_TARGET":                             envOrDefault("PACMAN_JEPSEN_TARGET", defaultJepsenTarget),
 		"PACMAN_JEPSEN_WORKLOAD_OPS":                       os.Getenv("PACMAN_JEPSEN_WORKLOAD_OPS"),
 		"PACMAN_JEPSEN_WORKLOAD_DURATION_SECONDS":          os.Getenv("PACMAN_JEPSEN_WORKLOAD_DURATION_SECONDS"),
 		"PACMAN_JEPSEN_WORKLOAD_CLIENTS":                   os.Getenv("PACMAN_JEPSEN_WORKLOAD_CLIENTS"),
@@ -917,6 +925,7 @@ func dockerEnvArgs(env map[string]string) []string {
 		"PACMAN_JEPSEN_CI_ARTIFACT_DIR",
 		"PACMAN_JEPSEN_CASES",
 		"PACMAN_JEPSEN_CASE",
+		"PACMAN_JEPSEN_TARGET",
 		"PACMAN_JEPSEN_WORKLOAD_OPS",
 		"PACMAN_JEPSEN_WORKLOAD_DURATION_SECONDS",
 		"PACMAN_JEPSEN_WORKLOAD_CLIENTS",
