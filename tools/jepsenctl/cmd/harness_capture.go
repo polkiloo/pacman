@@ -263,14 +263,16 @@ func (lab *harnessLab) recordDCSQuorumProbe(ctx context.Context, caseDir, nemesi
 	for _, target := range targets {
 		targetMembers = append(targetMembers, dcsMemberForService(target))
 	}
+	runningTargets, targetRunning := dcsQuorumTargetState(nemesis, targets, health)
 	appendJSONL(path, map[string]any{
 		"observedAt":               time.Now().UTC().Format(time.RFC3339),
 		"nemesis":                  nemesis,
 		"phase":                    phase,
+		"ok":                       health.TotalEndpoints == len(dcsEndpoints()),
 		"targetServices":           strings.Join(targets, " "),
 		"targetMembers":            strings.Join(targetMembers, " "),
-		"targetRunning":            true,
-		"runningTargets":           len(targets),
+		"targetRunning":            targetRunning,
+		"runningTargets":           runningTargets,
 		"targetCount":              len(targets),
 		"totalEndpoints":           health.TotalEndpoints,
 		"healthyEndpoints":         health.HealthyEndpoints,
@@ -281,6 +283,30 @@ func (lab *harnessLab) recordDCSQuorumProbe(ctx context.Context, caseDir, nemesi
 		"error":                    errorString(err),
 	})
 	return err
+}
+
+func dcsQuorumTargetState(nemesis string, targets []string, health dcsHealthResult) (int, bool) {
+	switch nemesis {
+	case "dcs-kill-one", "dcs-lose-majority", "dcs-full-restart":
+		running := 0
+		for _, target := range targets {
+			if dcsEndpointHealthy("http://"+target+":2379", health) {
+				running++
+			}
+		}
+		return running, len(targets) > 0 && running == len(targets)
+	default:
+		return len(targets), len(targets) > 0
+	}
+}
+
+func dcsEndpointHealthy(endpoint string, health dcsHealthResult) bool {
+	for _, info := range health.Endpoints {
+		if info.Endpoint == endpoint {
+			return info.OK
+		}
+	}
+	return false
 }
 
 type dcsHealthResult struct {

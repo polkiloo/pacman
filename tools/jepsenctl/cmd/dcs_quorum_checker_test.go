@@ -163,6 +163,51 @@ func TestDCSQuorumCheckerNotApplicable(t *testing.T) {
 	}
 }
 
+func TestDCSQuorumCheckerAcceptsProbeSamplesWithoutLegacyOKField(t *testing.T) {
+	t.Parallel()
+
+	result := checkDCSQuorumSamples("dcs-kill-one", 100, []dcsQuorumSample{
+		{
+			Nemesis:          "dcs-kill-one",
+			Phase:            "before-kill",
+			TargetCount:      1,
+			RunningTargets:   1,
+			TargetRunning:    true,
+			TotalEndpoints:   3,
+			HealthyEndpoints: 3,
+			FailedEndpoints:  0,
+		},
+		{
+			Nemesis:          "dcs-kill-one",
+			Phase:            "during-kill",
+			TargetCount:      1,
+			RunningTargets:   0,
+			TargetRunning:    false,
+			TotalEndpoints:   3,
+			HealthyEndpoints: 2,
+			FailedEndpoints:  1,
+			Error:            "unhealthy DCS endpoints: http://pacman-dcs-2:2379",
+		},
+		{
+			Nemesis:          "dcs-kill-one",
+			Phase:            "after-restart",
+			TargetCount:      1,
+			RunningTargets:   1,
+			TargetRunning:    true,
+			TotalEndpoints:   3,
+			HealthyEndpoints: 3,
+			FailedEndpoints:  0,
+		},
+	})
+
+	if !result.Valid {
+		t.Fatalf("valid: got false want true: %#v", result)
+	}
+	if result.DuringExpectedSamples != 1 || result.AfterRecoveredSamples != 1 {
+		t.Fatalf("sample counts: during=%d after=%d", result.DuringExpectedSamples, result.AfterRecoveredSamples)
+	}
+}
+
 func TestDCSQuorumCheckerMissingSamples(t *testing.T) {
 	t.Parallel()
 
