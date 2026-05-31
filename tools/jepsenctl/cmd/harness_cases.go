@@ -83,6 +83,10 @@ func (lab *harnessLab) runCases(ctx context.Context, cases []string, runDir, his
 }
 
 func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, campaignHistory, scheduleFile, caseResults string) error {
+	if !lab.options.target.supportsCase(workload, nemesis) {
+		return fmt.Errorf("Jepsen target %s does not support case %s:%s", lab.options.target.Name, workload, nemesis)
+	}
+
 	slug := caseSlug(workload + "__" + nemesis)
 	caseDir := filepath.Join(runDir, "cases", slug)
 	runID := envOrDefault("PACMAN_JEPSEN_RUN_ID", time.Now().UTC().Format("20060102T150405Z")) + "-" + slug

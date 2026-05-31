@@ -155,13 +155,13 @@ same three-node etcd DCS shape. Patroni baseline artifacts use
 
 ```bash
 go run ./tools/jepsenctl targets list
-PACMAN_JEPSEN_TARGET=patroni-3-data go run ./tools/jepsenctl run ci smoke
+PACMAN_JEPSEN_TARGET=patroni-3-data go run ./tools/jepsenctl run docker smoke
 ```
 
-`patroni-3-data` is registered as the baseline topology and artifact namespace.
-The PACMAN Docker lab bootstrap remains bound to `pacman-3-data`; Patroni
-workload cases should add their Patroni deployment hook before enabling baseline
-campaigns.
+`patroni-3-data` uses the dedicated `deploy/patroni-lab` Compose stack, three
+Patroni-managed PostgreSQL nodes, and a three-node etcd quorum. Its first enabled
+baseline case is `append-smoke:none`. Other Patroni workload/nemesis profiles
+remain disabled until their target-specific fault controls are implemented.
 
 Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
 `case-results.jsonl`, per-case `history.edn`, `nemesis-schedule.edn`,

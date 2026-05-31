@@ -21,11 +21,11 @@ func (lab *harnessLab) checkAcknowledgedWrite(ctx context.Context, workload, run
 	}
 	finalPrimary := lab.currentPrimaryName(ctx)
 	if finalPrimary == "unknown" {
-		finalPrimary = "alpha-1"
+		finalPrimary = lab.options.target.firstDataMember()
 	}
-	finalService := serviceForMember(finalPrimary)
+	finalService := lab.serviceForMember(finalPrimary)
 	if finalService == "" {
-		finalService = "pacman-primary"
+		finalService = lab.options.target.firstDataService()
 	}
 	output, err := lab.psqlService(ctx, finalService, fmt.Sprintf("SELECT op_id, count(*)::int FROM %s WHERE run_id = %s GROUP BY op_id ORDER BY op_id;", table, sqlLiteral(runID)))
 	countsFile := filepath.Join(caseDir, "final-primary-op-counts.tsv")

@@ -232,6 +232,37 @@ func TestVerifyThreeDataNodeClusterWaitsForHealthyShape(t *testing.T) {
 	}
 }
 
+func TestPatroniClusterStatusUsesPostgresRoleProbes(t *testing.T) {
+	target, err := resolveJepsenTarget("patroni-3-data")
+	if err != nil {
+		t.Fatalf("resolve target: %v", err)
+	}
+	lab := newHarnessLab(harnessOptions{
+		repoRoot: t.TempDir(),
+		runOptions: runOptions{
+			target: target,
+		},
+	})
+
+	status := patroniClusterStatusFromProbes([]patroniRoleProbe{
+		{node: target.DataNodes[0]},
+		{node: target.DataNodes[1], inRecovery: true, streaming: true},
+		{node: target.DataNodes[2], inRecovery: true, streaming: true},
+	})
+	if err := validateClusterStatusForMembers(status, []string{"patroni-1", "patroni-2", "patroni-3"}); err != nil {
+		t.Fatalf("validate Patroni status: %v", err)
+	}
+	if status.CurrentPrimary != "patroni-1" {
+		t.Fatalf("primary: got %q want patroni-1", status.CurrentPrimary)
+	}
+	if lab.cfg.composeFile != filepath.Join(lab.options.repoRoot, "deploy", "patroni-lab", "compose.yml") {
+		t.Fatalf("compose file: got %q", lab.cfg.composeFile)
+	}
+	if lab.cfg.pgClientService != "patroni-primary" || lab.cfg.pgHost != "127.0.0.1" || lab.cfg.psqlBinary != "/usr/bin/psql" {
+		t.Fatalf("Patroni PostgreSQL config: %#v", lab.cfg)
+	}
+}
+
 func TestHarnessSmallProfileHelpers(t *testing.T) {
 	t.Parallel()
 

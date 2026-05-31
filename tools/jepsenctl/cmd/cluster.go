@@ -112,13 +112,17 @@ func validateClusterStatusFile(path string) error {
 }
 
 func validateClusterStatus(status clusterStatus) error {
+	return validateClusterStatusForMembers(status, expectedDataMembers)
+}
+
+func validateClusterStatusForMembers(status clusterStatus, expectedMembers []string) error {
 	var problems []string
 
 	if status.Phase != "healthy" {
 		problems = append(problems, fmt.Sprintf("phase is %q, want healthy", status.Phase))
 	}
-	if len(status.Members) != len(expectedDataMembers) {
-		problems = append(problems, fmt.Sprintf("member count is %d, want %d", len(status.Members), len(expectedDataMembers)))
+	if len(status.Members) != len(expectedMembers) {
+		problems = append(problems, fmt.Sprintf("member count is %d, want %d", len(status.Members), len(expectedMembers)))
 	}
 
 	names := make([]string, 0, len(status.Members))
@@ -148,8 +152,10 @@ func validateClusterStatus(status clusterStatus) error {
 	}
 
 	sort.Strings(names)
-	if !stringSlicesEqual(names, expectedDataMembers) {
-		problems = append(problems, fmt.Sprintf("members are %v, want %v", names, expectedDataMembers))
+	expectedNames := append([]string(nil), expectedMembers...)
+	sort.Strings(expectedNames)
+	if !stringSlicesEqual(names, expectedNames) {
+		problems = append(problems, fmt.Sprintf("members are %v, want %v", names, expectedNames))
 	}
 	if primaryCount != 1 {
 		problems = append(problems, fmt.Sprintf("primary count is %d, want 1", primaryCount))

@@ -405,11 +405,11 @@ func (lab *harnessLab) queryIntResult(ctx context.Context, service, sql string) 
 func (lab *harnessLab) finalPrimaryService(ctx context.Context) (string, string) {
 	finalPrimary := lab.currentPrimaryName(ctx)
 	if finalPrimary == "" || finalPrimary == "unknown" {
-		finalPrimary = "alpha-1"
+		finalPrimary = lab.options.target.firstDataMember()
 	}
-	finalService := serviceForMember(finalPrimary)
+	finalService := lab.serviceForMember(finalPrimary)
 	if finalService == "" {
-		finalService = "pacman-primary"
+		finalService = lab.options.target.firstDataService()
 	}
 	return finalPrimary, finalService
 }

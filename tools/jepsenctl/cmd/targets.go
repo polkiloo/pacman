@@ -14,6 +14,11 @@ type jepsenTarget struct {
 	Name        string
 	StoreName   string
 	Description string
+	ComposeFile string
+	PGClient    string
+	PGHost      string
+	PGPassword  string
+	PSQLBinary  string
 	DataNodes   []targetNode
 	DCSNodes    []targetNode
 }
@@ -62,6 +67,11 @@ func defaultJepsenTargets() []jepsenTarget {
 			Name:        "pacman-3-data",
 			StoreName:   "pacman",
 			Description: "PACMAN Docker lab with three PostgreSQL data nodes and three external etcd DCS nodes.",
+			ComposeFile: "deploy/lab/compose.yml",
+			PGClient:    "pacman-primary",
+			PGHost:      "172.28.0.100",
+			PGPassword:  "pacman-demo-password",
+			PSQLBinary:  "/usr/pgsql-17/bin/psql",
 			DataNodes: []targetNode{
 				{Name: "alpha-1", Service: "pacman-primary", Role: "data"},
 				{Name: "alpha-2", Service: "pacman-replica", Role: "data"},
@@ -77,15 +87,20 @@ func defaultJepsenTargets() []jepsenTarget {
 			Name:        "patroni-3-data",
 			StoreName:   "patroni",
 			Description: "Patroni calibration baseline with three PostgreSQL data nodes and the same three-node etcd DCS shape.",
+			ComposeFile: "deploy/patroni-lab/compose.yml",
+			PGClient:    "patroni-primary",
+			PGHost:      "127.0.0.1",
+			PGPassword:  "patroni-demo-password",
+			PSQLBinary:  "/usr/bin/psql",
 			DataNodes: []targetNode{
 				{Name: "patroni-1", Service: "patroni-primary", Role: "data"},
 				{Name: "patroni-2", Service: "patroni-replica", Role: "data"},
 				{Name: "patroni-3", Service: "patroni-replica-2", Role: "data"},
 			},
 			DCSNodes: []targetNode{
-				{Name: "alpha-dcs", Service: "pacman-dcs", Role: "dcs"},
-				{Name: "alpha-dcs-2", Service: "pacman-dcs-2", Role: "dcs"},
-				{Name: "alpha-dcs-3", Service: "pacman-dcs-3", Role: "dcs"},
+				{Name: "patroni-dcs", Service: "patroni-dcs", Role: "dcs"},
+				{Name: "patroni-dcs-2", Service: "patroni-dcs-2", Role: "dcs"},
+				{Name: "patroni-dcs-3", Service: "patroni-dcs-3", Role: "dcs"},
 			},
 		},
 	}
@@ -118,4 +133,47 @@ func formatTargetNodes(nodes []targetNode) string {
 
 func (target jepsenTarget) supportsPACMANLab() bool {
 	return target.Name == "pacman-3-data"
+}
+
+func (target jepsenTarget) supportsPatroniLab() bool {
+	return target.Name == "patroni-3-data"
+}
+
+func (target jepsenTarget) serviceForMember(member string) string {
+	for _, node := range target.DataNodes {
+		if node.Name == member {
+			return node.Service
+		}
+	}
+	return ""
+}
+
+func (target jepsenTarget) memberForService(service string) string {
+	for _, node := range target.DataNodes {
+		if node.Service == service {
+			return node.Name
+		}
+	}
+	return ""
+}
+
+func (target jepsenTarget) firstDataService() string {
+	if len(target.DataNodes) == 0 {
+		return ""
+	}
+	return target.DataNodes[0].Service
+}
+
+func (target jepsenTarget) firstDataMember() string {
+	if len(target.DataNodes) == 0 {
+		return ""
+	}
+	return target.DataNodes[0].Name
+}
+
+func (target jepsenTarget) supportsCase(workload, nemesis string) bool {
+	if target.supportsPACMANLab() {
+		return true
+	}
+	return target.supportsPatroniLab() && workload == "append-smoke" && nemesis == "none"
 }

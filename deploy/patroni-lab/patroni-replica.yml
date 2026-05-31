@@ -1,0 +1,25 @@
+scope: alpha
+name: patroni-2
+
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: patroni-replica:8008
+
+etcd3:
+  hosts:
+    - patroni-dcs:2379
+    - patroni-dcs-2:2379
+    - patroni-dcs-3:2379
+
+postgresql:
+  listen: 0.0.0.0:5432
+  connect_address: patroni-replica:5432
+  data_dir: /var/lib/postgresql/data
+  bin_dir: /usr/lib/postgresql/17/bin
+  authentication:
+    replication:
+      username: replicator
+      password: patroni-replication-password
+    superuser:
+      username: postgres
+      password: patroni-demo-password

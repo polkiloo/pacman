@@ -130,10 +130,10 @@ Use Patroni to calibrate the Jepsen harness and checkers, not as the main produc
 target.
 
 - [x] Patroni three-data-node baseline target.
-- [ ] Patroni `append-smoke:none`.
+- [x] Patroni `append-smoke:none`.
 - [ ] Patroni `append-failover:kill`.
 - [ ] Patroni `single-key-register:packet`.
-- [ ] Store Patroni artifacts under `jepsen/store/patroni/...`.
+- [x] Store Patroni artifacts under `jepsen/store/patroni/...`.
 - [ ] Compare PACMAN results only against matching workload/nemesis profiles.
 
 ### Synchronous Replication Semantics

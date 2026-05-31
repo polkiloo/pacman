@@ -75,7 +75,7 @@ func (lab *harnessLab) psqlService(ctx context.Context, service, sql string) (st
 
 func (lab *harnessLab) psql(ctx context.Context, service, host, port, sql string) (string, error) {
 	output, status, err := lab.composeExecInput(ctx, service, sql, "env", "PGPASSWORD="+lab.cfg.pgPassword,
-		"/usr/pgsql-17/bin/psql",
+		lab.cfg.psqlBinary,
 		"-v", "ON_ERROR_STOP=1",
 		"-h", host,
 		"-p", port,

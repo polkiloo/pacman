@@ -1,0 +1,105 @@
+name: patroni-lab
+
+x-etcd-common: &etcd_common
+  image: ${PATRONI_LAB_ETCD_IMAGE:-quay.io/coreos/etcd:v3.5.15}
+  networks:
+    patroni-lab-net: {}
+
+x-patroni-common: &patroni_common
+  build:
+    context: ../..
+    dockerfile: deploy/patroni-lab/Dockerfile
+  depends_on:
+    - patroni-dcs
+    - patroni-dcs-2
+    - patroni-dcs-3
+  environment:
+    MALLOC_ARENA_MAX: "1"
+    PG_MALLOC_ARENA_MAX: ""
+  networks:
+    patroni-lab-net: {}
+
+services:
+  patroni-dcs:
+    <<: *etcd_common
+    hostname: patroni-dcs
+    command:
+      - /usr/local/bin/etcd
+      - --name=patroni-dcs
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://patroni-dcs:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://patroni-dcs:2380
+      - --initial-cluster=patroni-dcs=http://patroni-dcs:2380,patroni-dcs-2=http://patroni-dcs-2:2380,patroni-dcs-3=http://patroni-dcs-3:2380
+      - --initial-cluster-token=patroni-lab
+    volumes:
+      - patroni-dcs-data:/etcd-data
+
+  patroni-dcs-2:
+    <<: *etcd_common
+    hostname: patroni-dcs-2
+    command:
+      - /usr/local/bin/etcd
+      - --name=patroni-dcs-2
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://patroni-dcs-2:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://patroni-dcs-2:2380
+      - --initial-cluster=patroni-dcs=http://patroni-dcs:2380,patroni-dcs-2=http://patroni-dcs-2:2380,patroni-dcs-3=http://patroni-dcs-3:2380
+      - --initial-cluster-token=patroni-lab
+    volumes:
+      - patroni-dcs-2-data:/etcd-data
+
+  patroni-dcs-3:
+    <<: *etcd_common
+    hostname: patroni-dcs-3
+    command:
+      - /usr/local/bin/etcd
+      - --name=patroni-dcs-3
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://patroni-dcs-3:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://patroni-dcs-3:2380
+      - --initial-cluster=patroni-dcs=http://patroni-dcs:2380,patroni-dcs-2=http://patroni-dcs-2:2380,patroni-dcs-3=http://patroni-dcs-3:2380
+      - --initial-cluster-token=patroni-lab
+    volumes:
+      - patroni-dcs-3-data:/etcd-data
+
+  patroni-primary:
+    <<: *patroni_common
+    hostname: patroni-primary
+    command: /etc/patroni/patroni.yml
+    volumes:
+      - ./patroni-primary.yml:/etc/patroni/patroni.yml:ro
+      - patroni-primary-data:/var/lib/postgresql/data
+
+  patroni-replica:
+    <<: *patroni_common
+    hostname: patroni-replica
+    command: /etc/patroni/patroni.yml
+    volumes:
+      - ./patroni-replica.yml:/etc/patroni/patroni.yml:ro
+      - patroni-replica-data:/var/lib/postgresql/data
+
+  patroni-replica-2:
+    <<: *patroni_common
+    hostname: patroni-replica-2
+    command: /etc/patroni/patroni.yml
+    volumes:
+      - ./patroni-replica-2.yml:/etc/patroni/patroni.yml:ro
+      - patroni-replica-2-data:/var/lib/postgresql/data
+
+networks:
+  patroni-lab-net:
+    driver: bridge
+
+volumes:
+  patroni-dcs-data:
+  patroni-dcs-2-data:
+  patroni-dcs-3-data:
+  patroni-primary-data:
+  patroni-replica-data:
+  patroni-replica-2-data:
