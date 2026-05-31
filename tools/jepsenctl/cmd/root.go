@@ -77,6 +77,7 @@ Run with go run ./tools/jepsenctl <command> [args].
 	root.AddCommand(newClusterCommand(stdout))
 	root.AddCommand(newNemesisCommand())
 	root.AddCommand(newRunCommand(stdout, stderr))
+	root.AddCommand(newTargetsCommand(stdout))
 	root.AddCommand(newVersionCommand(stdout))
 
 	return root

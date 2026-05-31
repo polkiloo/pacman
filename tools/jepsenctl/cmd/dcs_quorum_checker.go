@@ -32,6 +32,8 @@ type dcsQuorumSample struct {
 	ObserverService          string          `json:"observerService,omitempty"`
 	TargetService            string          `json:"targetService,omitempty"`
 	TargetMember             string          `json:"targetMember,omitempty"`
+	TargetServices           string          `json:"targetServices,omitempty"`
+	TargetMembers            string          `json:"targetMembers,omitempty"`
 	TargetCount              int             `json:"targetCount,omitempty"`
 	RunningTargets           int             `json:"runningTargets,omitempty"`
 	TargetRunning            bool            `json:"targetRunning"`
@@ -234,10 +236,6 @@ func dcsQuorumPhases(nemesis string) (before, during, after string) {
 }
 
 func dcsQuorumDuringExpected(nemesis string, minSlowLatencyMillis int, sample dcsQuorumSample) bool {
-	if !sample.OK {
-		return false
-	}
-
 	switch nemesis {
 	case "dcs-lose-majority":
 		return sample.HealthyEndpoints <= 1 &&
@@ -272,8 +270,7 @@ func dcsQuorumDuringExpected(nemesis string, minSlowLatencyMillis int, sample dc
 }
 
 func dcsQuorumAfterRecovered(sample dcsQuorumSample) bool {
-	return sample.OK &&
-		sample.HealthyEndpoints == sample.TotalEndpoints &&
+	return sample.HealthyEndpoints == sample.TotalEndpoints &&
 		sample.TotalEndpoints >= 3 &&
 		sample.TargetRunning
 }

@@ -129,7 +129,7 @@ Only implement these when PACMAN exposes or claims the corresponding behavior.
 Use Patroni to calibrate the Jepsen harness and checkers, not as the main product
 target.
 
-- [ ] Patroni three-data-node baseline target.
+- [x] Patroni three-data-node baseline target.
 - [ ] Patroni `append-smoke:none`.
 - [ ] Patroni `append-failover:kill`.
 - [ ] Patroni `single-key-register:packet`.

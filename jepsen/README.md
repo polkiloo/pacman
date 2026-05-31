@@ -10,6 +10,7 @@ Run locally through the Dockerized control node:
 ```bash
 make jepsen-list-cases
 make jepsen-check-case-targets
+go run ./tools/jepsenctl targets list
 make jepsen-docker-smoke
 make jepsen-docker-nightly
 ```
@@ -142,9 +143,25 @@ the primary sampler continues recording the transition.
 Artifacts are written under:
 
 ```text
-jepsen/store/pacman/<campaign>/<timestamp>/
+jepsen/store/<target-store>/<campaign>/<timestamp>/
 bin/jepsen-ci/<campaign>/summary.md
 ```
+
+The default target is `pacman-3-data`, which stores artifacts under
+`jepsen/store/pacman/...`. The target registry also includes a separate
+`patroni-3-data` baseline profile with three Patroni data-node slots and the
+same three-node etcd DCS shape. Patroni baseline artifacts use
+`jepsen/store/patroni/...` so calibration runs stay separate from PACMAN runs:
+
+```bash
+go run ./tools/jepsenctl targets list
+PACMAN_JEPSEN_TARGET=patroni-3-data go run ./tools/jepsenctl run ci smoke
+```
+
+`patroni-3-data` is registered as the baseline topology and artifact namespace.
+The PACMAN Docker lab bootstrap remains bound to `pacman-3-data`; Patroni
+workload cases should add their Patroni deployment hook before enabling baseline
+campaigns.
 
 Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
 `case-results.jsonl`, per-case `history.edn`, `nemesis-schedule.edn`,

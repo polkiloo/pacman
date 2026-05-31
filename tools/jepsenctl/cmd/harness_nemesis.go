@@ -108,10 +108,12 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 		lab.dcsKill(ctx, caseDir, scheduleFile, profile, lab.cfg.dcsMajorityKillServices)
 	case "primary-dcs-majority-partition":
 		event("primary-dcs-majority-partition", "start", fmt.Sprintf(":target %q :dcs %q", member, strings.Join(lab.cfg.dcsMajorityPartitionServices, " ")))
+		_ = lab.recordDCSQuorumProbe(ctx, caseDir, profile, "before-primary-majority-partition", lab.cfg.dcsMajorityPartitionServices, service)
 		lab.iptablesPartition(ctx, service, lab.cfg.dcsMajorityPartitionServices)
 		_ = lab.recordDCSQuorumProbe(ctx, caseDir, profile, "during-primary-majority-partition", lab.cfg.dcsMajorityPartitionServices, service)
 		time.Sleep(lab.cfg.nemesisHold)
 		lab.iptablesHeal(ctx, service, lab.cfg.dcsMajorityPartitionServices)
+		_ = lab.recordDCSQuorumProbe(ctx, caseDir, profile, "after-primary-majority-partition", lab.cfg.dcsMajorityPartitionServices, service)
 		event("primary-dcs-majority-partition", "stop", fmt.Sprintf(":target %q :dcs %q :result :ok", member, strings.Join(lab.cfg.dcsMajorityPartitionServices, " ")))
 	case "dcs-full-restart":
 		lab.dcsFullRestart(ctx, caseDir, scheduleFile, profile, lab.cfg.dcsRestartServices)
@@ -331,17 +333,18 @@ func (lab *harnessLab) dcsKill(ctx context.Context, caseDir, scheduleFile, profi
 	for _, service := range services {
 		members = append(members, dcsMemberForService(service))
 	}
+	beforePhase, duringPhase, afterPhase := dcsQuorumPhases(profile)
 	appendFile(scheduleFile, fmt.Sprintf("{:time %q :nemesis :%s :action :start :targets %q :members %q}\n", time.Now().UTC().Format(time.RFC3339), strings.ReplaceAll(profile, ",", "-"), strings.Join(services, " "), strings.Join(members, " ")))
-	_ = lab.recordDCSQuorumProbe(ctx, caseDir, profile, "before-kill", services, "pacman-primary")
+	_ = lab.recordDCSQuorumProbe(ctx, caseDir, profile, beforePhase, services, "pacman-primary")
 	for _, service := range services {
 		_ = lab.stopDCSMember(ctx, service)
 	}
-	_ = lab.recordDCSQuorumProbe(ctx, caseDir, profile, "during-kill", services, "pacman-primary")
+	_ = lab.recordDCSQuorumProbe(ctx, caseDir, profile, duringPhase, services, "pacman-primary")
 	time.Sleep(lab.cfg.nemesisHold)
 	for _, service := range services {
 		_ = lab.startDCSMember(ctx, service)
 	}
-	_ = lab.recordDCSQuorumProbe(ctx, caseDir, profile, "after-restart", services, "pacman-primary")
+	_ = lab.recordDCSQuorumProbe(ctx, caseDir, profile, afterPhase, services, "pacman-primary")
 	appendFile(scheduleFile, fmt.Sprintf("{:time %q :nemesis :%s :action :stop :targets %q :members %q :result :ok}\n", time.Now().UTC().Format(time.RFC3339), strings.ReplaceAll(profile, ",", "-"), strings.Join(services, " "), strings.Join(members, " ")))
 }
 

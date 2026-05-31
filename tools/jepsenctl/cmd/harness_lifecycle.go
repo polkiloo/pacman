@@ -10,6 +10,10 @@ import (
 )
 
 func (lab *harnessLab) bootstrapLab(ctx context.Context) error {
+	if !lab.options.target.supportsPACMANLab() {
+		return fmt.Errorf("Jepsen target %s is registered, but deploy/lab bootstrap currently supports %s only", lab.options.target.Name, defaultJepsenTarget)
+	}
+
 	if envOrDefault("PACMAN_JEPSEN_RESET_LAB", "true") == "true" {
 		if status, err := lab.runHost(ctx, filepath.Join(lab.options.repoRoot, "deploy", "lab", "scripts", "reset-state.sh")); err != nil || status != 0 {
 			if err != nil {
@@ -139,9 +143,11 @@ func (lab *harnessLab) writeResultsFile(runDir string, valid bool) error {
 	if valid {
 		status = "true"
 	}
-	value := fmt.Sprintf("{:valid? %s\n :campaign %q\n :target \"pacman-docker-lab\"\n :checked-at %q}\n",
+	value := fmt.Sprintf("{:valid? %s\n :campaign %q\n :target %q\n :target-store %q\n :checked-at %q}\n",
 		status,
 		envOrDefault("PACMAN_JEPSEN_CAMPAIGN", lab.options.campaign),
+		lab.options.target.Name,
+		lab.options.target.StoreName,
 		time.Now().UTC().Format(time.RFC3339),
 	)
 	return os.WriteFile(filepath.Join(runDir, "results.edn"), []byte(value), 0o644)
