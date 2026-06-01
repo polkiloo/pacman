@@ -126,6 +126,15 @@ func TestDockerCampaignEnvPrefersExplicitCase(t *testing.T) {
 	}
 }
 
+func TestCampaignCasesExcludesPatroniOnlyProfilesFromNightly(t *testing.T) {
+	t.Setenv("PACMAN_JEPSEN_CASES", "")
+
+	cases := strings.Join(campaignCases("nightly"), " ")
+	if strings.Contains(cases, "append-sync:kill") || strings.Contains(cases, "append-strict-sync:no-standby") {
+		t.Fatalf("nightly cases included opt-in Patroni profiles: %s", cases)
+	}
+}
+
 func TestPullDockerImageWithRetries(t *testing.T) {
 	t.Parallel()
 

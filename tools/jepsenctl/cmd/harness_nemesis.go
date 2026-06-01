@@ -121,6 +121,8 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 		_ = lab.startPostgres(ctx, service)
 		lab.iptablesHeal(ctx, service, peers)
 		event("packet-kill", "stop", fmt.Sprintf(":target %q :result :ok", member))
+	case "no-standby":
+		return lab.strictSyncNoStandby(ctx, caseDir, scheduleFile, member, service, peers)
 	case "primary-dcs-partition":
 		targets := []string{"pacman-dcs", "pacman-dcs-2", "pacman-dcs-3"}
 		event("primary-dcs-partition", "start", fmt.Sprintf(":target %q :dcs %q", member, strings.Join(targets, " ")))

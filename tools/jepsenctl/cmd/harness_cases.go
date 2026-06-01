@@ -98,6 +98,9 @@ func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, c
 			return err
 		}
 	}
+	if err := lab.prepareWorkloadProfile(ctx, workload, caseDir); err != nil {
+		return err
+	}
 
 	caseHistory := filepath.Join(caseDir, "history.edn")
 	_, _ = writeEDNEvent(campaignHistory, workload+"/"+nemesis, "invoke", fmt.Sprintf("%q", runID))
@@ -136,6 +139,7 @@ func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, c
 		"failover_chain_checker":      lab.checkFailoverChain(nemesis, caseDir),
 		"open_transaction_checker":    lab.checkOpenTransaction(workload, caseDir),
 		"vip_routing_checker":         runChecker(func() error { return execVIPRoutingChecker(workload, nemesis, caseDir) }),
+		"strict_sync_checker":         lab.checkStrictSyncNoStandby(nemesis, caseDir),
 		"nemesis_schedule_checker_status": runChecker(func() error {
 			return validateNemesisScheduleFile(workload, nemesis, filepath.Join(caseDir, "nemesis-schedule.edn"))
 		}),

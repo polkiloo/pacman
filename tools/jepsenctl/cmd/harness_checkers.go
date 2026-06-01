@@ -40,7 +40,7 @@ func (lab *harnessLab) checkAcknowledgedWrite(ctx context.Context, workload, run
 
 func workloadTable(workload string) string {
 	switch workload {
-	case "append-smoke", "append-failover", "append-switchover", "append-dcs-quorum", "open-transaction-failover", "vip-routing":
+	case "append-smoke", "append-failover", "append-sync", "append-strict-sync", "append-switchover", "append-dcs-quorum", "open-transaction-failover", "vip-routing":
 		return "jepsen.append_values"
 	case "single-key-register":
 		return "jepsen.register_values"
@@ -177,6 +177,22 @@ func (lab *harnessLab) checkFailoverChain(nemesis, caseDir string) error {
 		return fmt.Errorf("failover chain checker failed")
 	}
 	return nil
+}
+
+func (lab *harnessLab) checkStrictSyncNoStandby(nemesis, caseDir string) error {
+	checkerFile := filepath.Join(caseDir, strictSyncNoStandbyCheckerFile)
+	if nemesis != "no-standby" {
+		writeJSON(checkerFile, map[string]any{"checker": "strict-sync-no-standby", "valid": true, "applicable": false})
+		return nil
+	}
+	probes := readStrictSyncWriteProbes(filepath.Join(caseDir, strictSyncWriteProbesFile))
+	err := checkStrictSyncNoStandbyProbes(probes)
+	result := map[string]any{"checker": "strict-sync-no-standby", "valid": err == nil, "applicable": true, "probes": probes}
+	if err != nil {
+		result["error"] = err.Error()
+	}
+	writeJSON(checkerFile, result)
+	return err
 }
 
 func (lab *harnessLab) checkOpenTransaction(workload, caseDir string) error {

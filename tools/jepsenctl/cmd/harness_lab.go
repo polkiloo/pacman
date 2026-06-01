@@ -51,6 +51,9 @@ type harnessConfig struct {
 	dcsSlowServices              []string
 	dcsSlowMinLatencyMS          int
 	allowAsyncLoss               bool
+	synchronousStandbyTimeout    time.Duration
+	synchronousStandbyInterval   time.Duration
+	strictSyncProbeTimeout       time.Duration
 }
 
 type harnessCommand struct {
@@ -107,6 +110,9 @@ func newHarnessLab(options harnessOptions) *harnessLab {
 		dcsSlowServices:              strings.Fields(envOrDefault("PACMAN_JEPSEN_DCS_SLOW_SERVICES", "pacman-dcs pacman-dcs-2 pacman-dcs-3")),
 		dcsSlowMinLatencyMS:          envInt("PACMAN_JEPSEN_DCS_SLOW_MIN_LATENCY_MS", 100),
 		allowAsyncLoss:               envOrDefault("PACMAN_JEPSEN_ALLOW_ASYNC_LOSS", "false") == "true",
+		synchronousStandbyTimeout:    time.Duration(envInt("PACMAN_JEPSEN_SYNCHRONOUS_STANDBY_TIMEOUT_SECONDS", 60)) * time.Second,
+		synchronousStandbyInterval:   time.Duration(envInt("PACMAN_JEPSEN_SYNCHRONOUS_STANDBY_INTERVAL_SECONDS", 1)) * time.Second,
+		strictSyncProbeTimeout:       time.Duration(envInt("PACMAN_JEPSEN_STRICT_SYNC_PROBE_TIMEOUT_SECONDS", 3)) * time.Second,
 	}
 	return &harnessLab{options: options, cfg: cfg}
 }

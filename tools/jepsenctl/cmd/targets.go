@@ -184,12 +184,19 @@ func (target jepsenTarget) hasService(service string) bool {
 
 func (target jepsenTarget) supportsCase(workload, nemesis string) bool {
 	if target.supportsPACMANLab() {
-		return true
+		return !isPatroniOnlyWorkload(workload)
 	}
 	if !target.supportsPatroniLab() {
 		return false
 	}
 	return (workload == "append-smoke" && nemesis == "none") ||
 		(workload == "append-failover" && nemesis == "kill") ||
-		(workload == "single-key-register" && nemesis == "packet")
+		(workload == "single-key-register" && nemesis == "packet") ||
+		(workload == "append-sync" && nemesis == "kill") ||
+		(workload == "append-strict-sync" && nemesis == "no-standby")
+}
+
+func isPatroniOnlyWorkload(workload string) bool {
+	_, ok := patroniSynchronousProfile(workload)
+	return ok
 }
