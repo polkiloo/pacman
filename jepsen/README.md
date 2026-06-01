@@ -98,6 +98,8 @@ Implemented workload profiles:
 - `append-smoke`
 - `append-switchover`
 - `append-failover`
+- `append-sync` (Patroni calibration only)
+- `append-strict-sync` (Patroni calibration only)
 - `append-dcs-quorum`
 - `open-transaction-failover`
 - `vip-routing`
@@ -122,6 +124,7 @@ Implemented nemesis profiles:
 - `failover-chain`
 - `slow-network`
 - `repeated-failure`
+- `no-standby` (Patroni strict-sync calibration only)
 
 Campaigns reset `deploy/lab/.local/` before bootstrap by default so repeated
 runs start from a clean PostgreSQL and DCS state. After artifact collection, the
@@ -161,8 +164,34 @@ PACMAN_JEPSEN_TARGET=patroni-3-data go run ./tools/jepsenctl run docker smoke
 `patroni-3-data` uses the dedicated `deploy/patroni-lab` Compose stack, three
 Patroni-managed PostgreSQL nodes, and a three-node etcd quorum. Its enabled
 baseline cases are `append-smoke:none`, `append-failover:kill`, and
-`single-key-register:packet`. Other Patroni workload/nemesis profiles remain
+`single-key-register:packet`. The opt-in synchronous replication calibration
+cases are `append-sync:kill` and `append-strict-sync:no-standby`:
+
+```bash
+PACMAN_JEPSEN_TARGET=patroni-3-data \
+  go run ./tools/jepsenctl run docker case append-sync-kill
+PACMAN_JEPSEN_TARGET=patroni-3-data \
+  go run ./tools/jepsenctl run docker case append-strict-sync-no-standby
+```
+
+The synchronous cases configure Patroni through its dynamic DCS configuration
+API before the workload starts. The strict-sync case stops both standbys,
+requires a bounded write probe to become unavailable, restarts both standbys,
+and requires writes to recover. Other Patroni workload/nemesis profiles remain
 disabled until their target-specific fault controls are implemented.
+
+Compare an explicit PACMAN run with an explicit Patroni calibration run using
+their `case-results.jsonl` files:
+
+```bash
+go run ./tools/jepsenctl artifacts compare-baseline \
+  --pacman-results jepsen/store/pacman/<campaign>/<run>/case-results.jsonl \
+  --patroni-results jepsen/store/patroni/<campaign>/<run>/case-results.jsonl
+```
+
+The comparison joins results by the exact `workload:nemesis` profile. PACMAN
+profiles without a matching Patroni baseline are reported as
+`no-matching-profile` and are not compared with a different fault profile.
 
 Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
 `case-results.jsonl`, per-case `history.edn`, `nemesis-schedule.edn`,
@@ -173,6 +202,8 @@ Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
 `client-traffic-during-nemesis-checker.json`,
 `replication-traffic-during-nemesis-checker.json`,
 `dcs-traffic-during-nemesis-checker.json`,
+`synchronous-replication-config.json`,
+`strict-sync-no-standby-checker.json`, `strict-sync-write-probes.jsonl`,
 `acknowledged-op-ids.txt`, `final-primary-op-counts.tsv`,
 `pacman-cluster-snapshots.jsonl`, `pg-stat-replication.json`,
 `pg-stat-wal-receiver.jsonl`, nemesis logs, PACMAN cluster/history snapshots,
