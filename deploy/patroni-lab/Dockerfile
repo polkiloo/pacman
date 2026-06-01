@@ -7,6 +7,10 @@ RUN apt-get update \
     && /opt/patroni/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/patroni/bin/pip install --no-cache-dir "patroni[etcd3,psycopg3]==4.1.3"
 
+COPY --chmod=0755 deploy/patroni-lab/entrypoint.sh /usr/local/bin/patroni-entrypoint
+
 ENV PATH="/opt/patroni/bin:${PATH}"
 
-ENTRYPOINT ["patroni"]
+USER postgres
+
+ENTRYPOINT ["patroni-entrypoint"]
