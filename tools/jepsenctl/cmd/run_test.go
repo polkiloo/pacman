@@ -130,7 +130,7 @@ func TestCampaignCasesExcludesPatroniOnlyProfilesFromNightly(t *testing.T) {
 	t.Setenv("PACMAN_JEPSEN_CASES", "")
 
 	cases := strings.Join(campaignCases("nightly"), " ")
-	if strings.Contains(cases, "append-sync:kill") || strings.Contains(cases, "append-strict-sync:no-standby") {
+	if strings.Contains(cases, "append-sync:") || strings.Contains(cases, "append-sync-two:") || strings.Contains(cases, "append-strict-sync:") {
 		t.Fatalf("nightly cases included opt-in Patroni profiles: %s", cases)
 	}
 }

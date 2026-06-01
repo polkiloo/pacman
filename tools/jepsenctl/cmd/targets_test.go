@@ -54,6 +54,12 @@ func TestResolveJepsenTarget(t *testing.T) {
 	if !patroni.supportsCase("append-sync", "kill") {
 		t.Fatalf("patroni target should support append-sync:kill")
 	}
+	if !patroni.supportsCase("append-sync", "sync-standby-kill") {
+		t.Fatalf("patroni target should support append-sync:sync-standby-kill")
+	}
+	if !patroni.supportsCase("append-sync-two", "none") {
+		t.Fatalf("patroni target should support append-sync-two:none")
+	}
 	if !patroni.supportsCase("append-strict-sync", "no-standby") {
 		t.Fatalf("patroni target should support append-strict-sync:no-standby")
 	}

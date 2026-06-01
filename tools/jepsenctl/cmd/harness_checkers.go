@@ -40,7 +40,7 @@ func (lab *harnessLab) checkAcknowledgedWrite(ctx context.Context, workload, run
 
 func workloadTable(workload string) string {
 	switch workload {
-	case "append-smoke", "append-failover", "append-sync", "append-strict-sync", "append-switchover", "append-dcs-quorum", "open-transaction-failover", "vip-routing":
+	case "append-smoke", "append-failover", "append-sync", "append-sync-two", "append-strict-sync", "append-switchover", "append-dcs-quorum", "open-transaction-failover", "vip-routing":
 		return "jepsen.append_values"
 	case "single-key-register":
 		return "jepsen.register_values"
@@ -188,6 +188,41 @@ func (lab *harnessLab) checkStrictSyncNoStandby(nemesis, caseDir string) error {
 	probes := readStrictSyncWriteProbes(filepath.Join(caseDir, strictSyncWriteProbesFile))
 	err := checkStrictSyncNoStandbyProbes(probes)
 	result := map[string]any{"checker": "strict-sync-no-standby", "valid": err == nil, "applicable": true, "probes": probes}
+	if err != nil {
+		result["error"] = err.Error()
+	}
+	writeJSON(checkerFile, result)
+	return err
+}
+
+func (lab *harnessLab) checkSynchronousReplication(ctx context.Context, workload, caseDir string) error {
+	checkerFile := filepath.Join(caseDir, synchronousReplicationCheckerFile)
+	profile, ok := resolvePatroniSynchronousProfile(workload)
+	if !ok {
+		writeJSON(checkerFile, map[string]any{"checker": "synchronous-replication", "valid": true, "applicable": false})
+		return nil
+	}
+	state, err := lab.patroniSynchronousState(ctx)
+	if err == nil {
+		err = profile.validate(state)
+	}
+	result := map[string]any{"checker": "synchronous-replication", "valid": err == nil, "applicable": true, "profile": profile, "state": state}
+	if err != nil {
+		result["error"] = err.Error()
+	}
+	writeJSON(checkerFile, result)
+	return err
+}
+
+func (lab *harnessLab) checkSynchronousStandbyKill(nemesis, caseDir string) error {
+	checkerFile := filepath.Join(caseDir, synchronousStandbyKillCheckerFile)
+	if nemesis != synchronousStandbyKillNemesisProfile {
+		writeJSON(checkerFile, map[string]any{"checker": "synchronous-standby-kill", "valid": true, "applicable": false})
+		return nil
+	}
+	probes := readSynchronousStandbyKillProbes(filepath.Join(caseDir, synchronousStandbyKillProbesFile))
+	err := checkSynchronousStandbyKillProbes(probes)
+	result := map[string]any{"checker": "synchronous-standby-kill", "valid": err == nil, "applicable": true, "probes": probes}
 	if err != nil {
 		result["error"] = err.Error()
 	}

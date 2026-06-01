@@ -1,4 +1,4 @@
-.PHONY: jepsen-ci-check jepsen-list-cases jepsen-check-case-targets jepsen-smoke jepsen-nightly jepsen-case jepsen-case-append-smoke-none jepsen-case-append-switchover-switchover jepsen-case-append-failover-kill jepsen-case-append-failover-packet jepsen-case-append-failover-packet-kill jepsen-case-append-failover-primary-dcs-partition jepsen-case-append-failover-primary-replication-partition jepsen-case-append-failover-failover-chain jepsen-case-open-transaction-failover-kill jepsen-case-vip-routing-switchover jepsen-case-append-dcs-quorum-dcs-kill-one jepsen-case-append-dcs-quorum-dcs-lose-majority jepsen-case-append-dcs-quorum-primary-dcs-majority-partition jepsen-case-append-dcs-quorum-dcs-full-restart jepsen-case-append-dcs-quorum-dcs-slow-network jepsen-case-single-key-register-packet jepsen-case-read-committed-txn-slow-network jepsen-case-serializable-txn-packet-kill jepsen-case-append-failover-repeated-failure jepsen-case-append-sync-kill jepsen-case-append-strict-sync-no-standby jepsen-docker-smoke jepsen-docker-nightly jepsen-docker-case jepsen-docker-case-append-smoke-none jepsen-docker-case-append-switchover-switchover jepsen-docker-case-append-failover-kill jepsen-docker-case-append-failover-packet jepsen-docker-case-append-failover-packet-kill jepsen-docker-case-append-failover-primary-dcs-partition jepsen-docker-case-append-failover-primary-replication-partition jepsen-docker-case-append-failover-failover-chain jepsen-docker-case-open-transaction-failover-kill jepsen-docker-case-vip-routing-switchover jepsen-docker-case-append-dcs-quorum-dcs-kill-one jepsen-docker-case-append-dcs-quorum-dcs-lose-majority jepsen-docker-case-append-dcs-quorum-primary-dcs-majority-partition jepsen-docker-case-append-dcs-quorum-dcs-full-restart jepsen-docker-case-append-dcs-quorum-dcs-slow-network jepsen-docker-case-single-key-register-packet jepsen-docker-case-read-committed-txn-slow-network jepsen-docker-case-serializable-txn-packet-kill jepsen-docker-case-append-failover-repeated-failure jepsen-docker-case-append-sync-kill jepsen-docker-case-append-strict-sync-no-standby
+.PHONY: jepsen-ci-check jepsen-list-cases jepsen-check-case-targets jepsen-smoke jepsen-nightly jepsen-case jepsen-case-append-smoke-none jepsen-case-append-switchover-switchover jepsen-case-append-failover-kill jepsen-case-append-failover-packet jepsen-case-append-failover-packet-kill jepsen-case-append-failover-primary-dcs-partition jepsen-case-append-failover-primary-replication-partition jepsen-case-append-failover-failover-chain jepsen-case-open-transaction-failover-kill jepsen-case-vip-routing-switchover jepsen-case-append-dcs-quorum-dcs-kill-one jepsen-case-append-dcs-quorum-dcs-lose-majority jepsen-case-append-dcs-quorum-primary-dcs-majority-partition jepsen-case-append-dcs-quorum-dcs-full-restart jepsen-case-append-dcs-quorum-dcs-slow-network jepsen-case-single-key-register-packet jepsen-case-read-committed-txn-slow-network jepsen-case-serializable-txn-packet-kill jepsen-case-append-failover-repeated-failure jepsen-case-append-sync-kill jepsen-case-append-sync-sync-standby-kill jepsen-case-append-sync-two-none jepsen-case-append-strict-sync-no-standby jepsen-docker-smoke jepsen-docker-nightly jepsen-docker-case jepsen-docker-case-append-smoke-none jepsen-docker-case-append-switchover-switchover jepsen-docker-case-append-failover-kill jepsen-docker-case-append-failover-packet jepsen-docker-case-append-failover-packet-kill jepsen-docker-case-append-failover-primary-dcs-partition jepsen-docker-case-append-failover-primary-replication-partition jepsen-docker-case-append-failover-failover-chain jepsen-docker-case-open-transaction-failover-kill jepsen-docker-case-vip-routing-switchover jepsen-docker-case-append-dcs-quorum-dcs-kill-one jepsen-docker-case-append-dcs-quorum-dcs-lose-majority jepsen-docker-case-append-dcs-quorum-primary-dcs-majority-partition jepsen-docker-case-append-dcs-quorum-dcs-full-restart jepsen-docker-case-append-dcs-quorum-dcs-slow-network jepsen-docker-case-single-key-register-packet jepsen-docker-case-read-committed-txn-slow-network jepsen-docker-case-serializable-txn-packet-kill jepsen-docker-case-append-failover-repeated-failure jepsen-docker-case-append-sync-kill jepsen-docker-case-append-sync-sync-standby-kill jepsen-docker-case-append-sync-two-none jepsen-docker-case-append-strict-sync-no-standby
 
 jepsen-ci-check:
 	go run ./tools/jepsenctl cases validate
@@ -85,6 +85,12 @@ jepsen-case-append-failover-repeated-failure:
 jepsen-case-append-sync-kill:
 	$(MAKE) jepsen-case PACMAN_JEPSEN_CASE=append-sync-kill
 
+jepsen-case-append-sync-sync-standby-kill:
+	$(MAKE) jepsen-case PACMAN_JEPSEN_CASE=append-sync-sync-standby-kill
+
+jepsen-case-append-sync-two-none:
+	$(MAKE) jepsen-case PACMAN_JEPSEN_CASE=append-sync-two-none
+
 jepsen-case-append-strict-sync-no-standby:
 	$(MAKE) jepsen-case PACMAN_JEPSEN_CASE=append-strict-sync-no-standby
 
@@ -159,6 +165,12 @@ jepsen-docker-case-append-failover-repeated-failure:
 
 jepsen-docker-case-append-sync-kill:
 	$(MAKE) jepsen-docker-case PACMAN_JEPSEN_CASE=append-sync-kill
+
+jepsen-docker-case-append-sync-sync-standby-kill:
+	$(MAKE) jepsen-docker-case PACMAN_JEPSEN_CASE=append-sync-sync-standby-kill
+
+jepsen-docker-case-append-sync-two-none:
+	$(MAKE) jepsen-docker-case PACMAN_JEPSEN_CASE=append-sync-two-none
 
 jepsen-docker-case-append-strict-sync-no-standby:
 	$(MAKE) jepsen-docker-case PACMAN_JEPSEN_CASE=append-strict-sync-no-standby

@@ -193,6 +193,8 @@ func (target jepsenTarget) supportsCase(workload, nemesis string) bool {
 		(workload == "append-failover" && nemesis == "kill") ||
 		(workload == "single-key-register" && nemesis == "packet") ||
 		(workload == "append-sync" && nemesis == "kill") ||
+		(workload == "append-sync" && nemesis == "sync-standby-kill") ||
+		(workload == "append-sync-two" && nemesis == "none") ||
 		(workload == "append-strict-sync" && nemesis == "no-standby")
 }
 

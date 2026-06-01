@@ -208,7 +208,7 @@ func (lab *harnessLab) writeArtifactIndexHTML(runDir string, valid bool) error {
 <li><a href="jepsen-history.edn">jepsen-history.edn</a></li>
 <li><a href="nemesis-schedule.edn">nemesis-schedule.edn</a></li>
 %s
-<li>Per-case: primary-observations.jsonl, pacman-cluster-snapshots.jsonl, pg-stat-replication.json, pg-stat-wal-receiver.jsonl, single-primary-checker.json, acknowledged-write-checker.json, timeline-checker.json, old-primary-rejoin-checker.json, manual-switchover-checker.json, client-traffic-during-nemesis-checker.json, replication-traffic-during-nemesis-checker.json, dcs-traffic-during-nemesis-checker.json, dcs-quorum-checker.json, failover-chain-checker.json, open-transaction-checker.json, vip-routing-checker.json, synchronous-replication-config.json, strict-sync-no-standby-checker.json, and strict-sync-write-probes.jsonl</li>
+<li>Per-case: primary-observations.jsonl, pacman-cluster-snapshots.jsonl, pg-stat-replication.json, pg-stat-wal-receiver.jsonl, single-primary-checker.json, acknowledged-write-checker.json, timeline-checker.json, old-primary-rejoin-checker.json, manual-switchover-checker.json, client-traffic-during-nemesis-checker.json, replication-traffic-during-nemesis-checker.json, dcs-traffic-during-nemesis-checker.json, dcs-quorum-checker.json, failover-chain-checker.json, open-transaction-checker.json, vip-routing-checker.json, synchronous-replication-config.json, synchronous-replication-checker.json, synchronous-standby-kill-checker.json, synchronous-standby-kill-probes.jsonl, strict-sync-no-standby-checker.json, and strict-sync-write-probes.jsonl</li>
 </ul>
 </body>
 </html>
