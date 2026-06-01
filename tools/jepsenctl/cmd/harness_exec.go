@@ -32,6 +32,11 @@ func (lab *harnessLab) composeExec(ctx context.Context, service string, args ...
 	return lab.compose(ctx, fullArgs...)
 }
 
+func (lab *harnessLab) composeExecAsUser(ctx context.Context, user, service string, args ...string) (string, int, error) {
+	fullArgs := append([]string{"exec", "-T", "--user", user, service}, args...)
+	return lab.compose(ctx, fullArgs...)
+}
+
 func (lab *harnessLab) composeExecInput(ctx context.Context, service, input string, args ...string) (string, int, error) {
 	fullArgs := append([]string{"compose", "-f", lab.cfg.composeFile, "exec", "-T", service}, args...)
 	var stdout bytes.Buffer

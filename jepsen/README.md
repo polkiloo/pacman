@@ -160,9 +160,9 @@ PACMAN_JEPSEN_TARGET=patroni-3-data go run ./tools/jepsenctl run docker smoke
 
 `patroni-3-data` uses the dedicated `deploy/patroni-lab` Compose stack, three
 Patroni-managed PostgreSQL nodes, and a three-node etcd quorum. Its enabled
-baseline cases are `append-smoke:none` and `append-failover:kill`. Other Patroni
-workload/nemesis profiles remain disabled until their target-specific fault
-controls are implemented.
+baseline cases are `append-smoke:none`, `append-failover:kill`, and
+`single-key-register:packet`. Other Patroni workload/nemesis profiles remain
+disabled until their target-specific fault controls are implemented.
 
 Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
 `case-results.jsonl`, per-case `history.edn`, `nemesis-schedule.edn`,

@@ -171,6 +171,17 @@ func (target jepsenTarget) firstDataMember() string {
 	return target.DataNodes[0].Name
 }
 
+func (target jepsenTarget) hasService(service string) bool {
+	for _, nodes := range [][]targetNode{target.DataNodes, target.DCSNodes} {
+		for _, node := range nodes {
+			if node.Service == service {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (target jepsenTarget) supportsCase(workload, nemesis string) bool {
 	if target.supportsPACMANLab() {
 		return true
@@ -179,5 +190,6 @@ func (target jepsenTarget) supportsCase(workload, nemesis string) bool {
 		return false
 	}
 	return (workload == "append-smoke" && nemesis == "none") ||
-		(workload == "append-failover" && nemesis == "kill")
+		(workload == "append-failover" && nemesis == "kill") ||
+		(workload == "single-key-register" && nemesis == "packet")
 }

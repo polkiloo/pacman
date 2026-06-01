@@ -48,6 +48,9 @@ func TestResolveJepsenTarget(t *testing.T) {
 	if !patroni.supportsCase("append-failover", "kill") {
 		t.Fatalf("patroni target should support append-failover:kill")
 	}
+	if !patroni.supportsCase("single-key-register", "packet") {
+		t.Fatalf("patroni target should support single-key-register:packet")
+	}
 	if patroni.supportsCase("append-failover", "packet") {
 		t.Fatalf("patroni target should not support append-failover:packet yet")
 	}

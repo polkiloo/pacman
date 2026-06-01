@@ -132,7 +132,7 @@ target.
 - [x] Patroni three-data-node baseline target.
 - [x] Patroni `append-smoke:none`.
 - [x] Patroni `append-failover:kill`.
-- [ ] Patroni `single-key-register:packet`.
+- [x] Patroni `single-key-register:packet`.
 - [x] Store Patroni artifacts under `jepsen/store/patroni/...`.
 - [ ] Compare PACMAN results only against matching workload/nemesis profiles.
 
