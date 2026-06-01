@@ -30,6 +30,27 @@ func TestResolveJepsenTarget(t *testing.T) {
 	if patroni.supportsPACMANLab() {
 		t.Fatalf("patroni target should not use deploy/lab bootstrap")
 	}
+	if !patroni.supportsPatroniLab() {
+		t.Fatalf("patroni target should support Patroni lab bootstrap")
+	}
+	if patroni.ComposeFile != "deploy/patroni-lab/compose.yml" || patroni.PSQLBinary != "/usr/bin/psql" {
+		t.Fatalf("patroni runtime config: %#v", patroni)
+	}
+	if got := patroni.serviceForMember("patroni-2"); got != "patroni-replica" {
+		t.Fatalf("patroni service: got %q", got)
+	}
+	if got := patroni.memberForService("patroni-replica-2"); got != "patroni-3" {
+		t.Fatalf("patroni member: got %q", got)
+	}
+	if !patroni.supportsCase("append-smoke", "none") {
+		t.Fatalf("patroni target should support append-smoke:none")
+	}
+	if !patroni.supportsCase("append-failover", "kill") {
+		t.Fatalf("patroni target should support append-failover:kill")
+	}
+	if patroni.supportsCase("append-failover", "packet") {
+		t.Fatalf("patroni target should not support append-failover:packet yet")
+	}
 
 	if _, err := resolveJepsenTarget("unknown"); err == nil || !strings.Contains(err.Error(), "supported targets") {
 		t.Fatalf("unknown target error: %v", err)

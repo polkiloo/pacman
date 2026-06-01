@@ -36,6 +36,7 @@ RUN set -eux; \
         findutils \
         hostname \
         iproute \
+        iptables \
         iputils \
         procps-ng \
         python3 \

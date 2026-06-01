@@ -46,21 +46,24 @@ func (sampler *primarySampler) stop() {
 }
 
 func (lab *harnessLab) samplePrimaryState(ctx context.Context, sampleID int, observationFile string) error {
-	for _, member := range []string{"alpha-1", "alpha-2", "alpha-3"} {
-		service := serviceForMember(member)
+	for _, node := range lab.options.target.DataNodes {
+		member := node.Name
+		service := node.Service
 		output, err := lab.psqlService(ctx, service, `
 with local as (
   select
     pg_is_in_recovery() as in_recovery,
     case when pg_is_in_recovery() then null else pg_current_wal_lsn() end as write_lsn,
-    pg_last_wal_replay_lsn() as replay_lsn
+    pg_last_wal_replay_lsn() as replay_lsn,
+    (select received_tli from pg_stat_wal_receiver where status = 'streaming' limit 1) as received_tli
 ),
 observed as (
-  select in_recovery, coalesce(write_lsn, replay_lsn) as lsn from local
+  select in_recovery, coalesce(write_lsn, replay_lsn) as lsn, received_tli from local
 )
 select
   in_recovery,
   case
+    when in_recovery then coalesce(received_tli, 0)
     when lsn is null then 0
     else ('x' || substr(pg_walfile_name(lsn), 1, 8))::bit(32)::int
   end as timeline,
@@ -109,13 +112,13 @@ from observed;`)
 
 func (lab *harnessLab) captureClusterSnapshot(ctx context.Context, caseDir, phase, nemesis, target, service string) error {
 	if service == "" {
-		service = "pacman-primary"
+		service = lab.options.target.firstDataService()
 	}
 	snapshotFile := filepath.Join(caseDir, "pacman-cluster-snapshots.jsonl")
-	output, err := lab.pacmanClusterStatusJSON(ctx, service)
-	if err != nil && service != "pacman-primary" {
-		output, err = lab.pacmanClusterStatusJSON(ctx, "pacman-primary")
-		service = "pacman-primary"
+	output, err := lab.clusterStatusJSON(ctx, service)
+	if fallback := lab.options.target.firstDataService(); err != nil && service != fallback {
+		output, err = lab.clusterStatusJSON(ctx, fallback)
+		service = fallback
 	}
 	if err != nil {
 		appendJSONL(snapshotFile, map[string]any{
@@ -147,9 +150,9 @@ func (lab *harnessLab) captureClusterSnapshot(ctx context.Context, caseDir, phas
 
 func (lab *harnessLab) capturePGStatReplication(ctx context.Context, caseDir, phase string) error {
 	primary := lab.currentPrimaryName(ctx)
-	service := serviceForMember(primary)
+	service := lab.serviceForMember(primary)
 	if service == "" {
-		service = "pacman-primary"
+		service = lab.options.target.firstDataService()
 	}
 	output, err := lab.psqlService(ctx, service, `
 SELECT coalesce(json_agg(json_build_object(
@@ -183,8 +186,9 @@ FROM pg_stat_replication;`)
 func (lab *harnessLab) capturePGStatWalReceiver(ctx context.Context, caseDir, phase string) error {
 	path := filepath.Join(caseDir, "pg-stat-wal-receiver.jsonl")
 	_ = os.WriteFile(path, nil, 0o644)
-	for _, member := range []string{"alpha-1", "alpha-2", "alpha-3"} {
-		service := serviceForMember(member)
+	for _, node := range lab.options.target.DataNodes {
+		member := node.Name
+		service := node.Service
 		output, err := lab.psqlService(ctx, service, `SELECT coalesce(json_agg(json_build_object('status', status, 'receivedTli', received_tli, 'latestEndLsn', latest_end_lsn::text)), '[]'::json) FROM pg_stat_wal_receiver;`)
 		rows := []any{}
 		ok := err == nil && json.Unmarshal([]byte(lastNonEmptyLine(output)), &rows) == nil

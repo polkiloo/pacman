@@ -27,6 +27,7 @@ type harnessConfig struct {
 	pgUser                       string
 	pgPassword                   string
 	pgDatabase                   string
+	psqlBinary                   string
 	vipInterface                 string
 	defaultOps                   int
 	defaultDuration              time.Duration
@@ -41,6 +42,7 @@ type harnessConfig struct {
 	workloadVisibilityTimeout    time.Duration
 	workloadVisibilityInterval   time.Duration
 	primarySampleInterval        time.Duration
+	appendFailoverOpDelay        time.Duration
 	appendSwitchoverOpDelay      time.Duration
 	dcsKillService               string
 	dcsMajorityKillServices      []string
@@ -58,6 +60,7 @@ type harnessCommand struct {
 
 type nemesisRun struct {
 	done chan struct{}
+	err  error
 }
 
 type primarySampler struct {
@@ -73,13 +76,14 @@ func newHarnessLab(options harnessOptions) *harnessLab {
 		}
 	}
 	cfg := harnessConfig{
-		composeFile:                  filepath.Join(options.repoRoot, "deploy", "lab", "compose.yml"),
-		pgClientService:              envOrDefault("PACMAN_JEPSEN_PG_CLIENT_SERVICE", "pacman-primary"),
-		pgHost:                       envOrDefault("PACMAN_JEPSEN_PG_HOST", "172.28.0.100"),
+		composeFile:                  filepath.Join(options.repoRoot, options.target.ComposeFile),
+		pgClientService:              envOrDefault("PACMAN_JEPSEN_PG_CLIENT_SERVICE", options.target.PGClient),
+		pgHost:                       envOrDefault("PACMAN_JEPSEN_PG_HOST", options.target.PGHost),
 		pgPort:                       envOrDefault("PACMAN_JEPSEN_PG_PORT", "5432"),
 		pgUser:                       envOrDefault("PACMAN_JEPSEN_PG_USER", "postgres"),
-		pgPassword:                   envOrDefault("PACMAN_JEPSEN_PG_PASSWORD", "pacman-demo-password"),
+		pgPassword:                   envOrDefault("PACMAN_JEPSEN_PG_PASSWORD", options.target.PGPassword),
 		pgDatabase:                   envOrDefault("PACMAN_JEPSEN_PG_DATABASE", "postgres"),
+		psqlBinary:                   options.target.PSQLBinary,
 		vipInterface:                 envOrDefault("PACMAN_JEPSEN_VIP_INTERFACE", "eth0"),
 		defaultOps:                   envInt("PACMAN_JEPSEN_WORKLOAD_OPS", 12),
 		defaultDuration:              time.Duration(envInt("PACMAN_JEPSEN_WORKLOAD_DURATION_SECONDS", 20)) * time.Second,
@@ -94,6 +98,7 @@ func newHarnessLab(options harnessOptions) *harnessLab {
 		workloadVisibilityTimeout:    time.Duration(envInt("PACMAN_JEPSEN_WORKLOAD_VISIBILITY_TIMEOUT_SECONDS", 60)) * time.Second,
 		workloadVisibilityInterval:   time.Duration(envInt("PACMAN_JEPSEN_WORKLOAD_VISIBILITY_INTERVAL_SECONDS", 2)) * time.Second,
 		primarySampleInterval:        time.Duration(envInt("PACMAN_JEPSEN_PRIMARY_SAMPLE_INTERVAL_SECONDS", 1)) * time.Second,
+		appendFailoverOpDelay:        time.Duration(envInt("PACMAN_JEPSEN_APPEND_FAILOVER_OP_DELAY_SECONDS", 1)) * time.Second,
 		appendSwitchoverOpDelay:      time.Duration(envInt("PACMAN_JEPSEN_APPEND_SWITCHOVER_OP_DELAY_SECONDS", 1)) * time.Second,
 		dcsKillService:               envOrDefault("PACMAN_JEPSEN_DCS_KILL_SERVICE", "pacman-dcs-2"),
 		dcsMajorityKillServices:      strings.Fields(envOrDefault("PACMAN_JEPSEN_DCS_MAJORITY_KILL_SERVICES", "pacman-dcs-2 pacman-dcs-3")),
@@ -121,6 +126,9 @@ func (lab *harnessLab) dispatch(ctx context.Context, body string) (int, error) {
 	case "verify_three_data_node_cluster":
 		return statusError(lab.verifyThreeDataNodeCluster(ctx, argOr(command.args, 0, "")))
 	case "verify_lab":
+		if lab.options.target.supportsPatroniLab() {
+			return statusError(lab.verifyThreeDataNodeCluster(ctx, ""))
+		}
 		return lab.runHost(ctx, filepath.Join(lab.options.repoRoot, "deploy", "lab", "scripts", "demo.sh"), "verify")
 	case "run_jepsen_cases":
 		if len(command.args) != 4 {

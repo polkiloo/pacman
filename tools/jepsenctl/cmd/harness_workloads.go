@@ -15,8 +15,10 @@ import (
 
 func (lab *harnessLab) runWorkloadProfile(ctx context.Context, workload, runID, caseDir string) error {
 	switch workload {
-	case "append-smoke", "append-failover", "append-dcs-quorum":
+	case "append-smoke", "append-dcs-quorum":
 		return lab.runAppendWorkload(ctx, runID, caseDir, "read committed", lab.cfg.defaultOps, lab.cfg.defaultKeys, 0)
+	case "append-failover":
+		return lab.runAppendWorkload(ctx, runID, caseDir, "read committed", lab.cfg.defaultOps, lab.cfg.defaultKeys, lab.cfg.appendFailoverOpDelay)
 	case "append-switchover":
 		return lab.runAppendWorkload(ctx, runID, caseDir, "read committed", lab.cfg.defaultOps, lab.cfg.defaultKeys, lab.cfg.appendSwitchoverOpDelay)
 	case "open-transaction-failover":
@@ -405,11 +407,11 @@ func (lab *harnessLab) queryIntResult(ctx context.Context, service, sql string) 
 func (lab *harnessLab) finalPrimaryService(ctx context.Context) (string, string) {
 	finalPrimary := lab.currentPrimaryName(ctx)
 	if finalPrimary == "" || finalPrimary == "unknown" {
-		finalPrimary = "alpha-1"
+		finalPrimary = lab.options.target.firstDataMember()
 	}
-	finalService := serviceForMember(finalPrimary)
+	finalService := lab.serviceForMember(finalPrimary)
 	if finalService == "" {
-		finalService = "pacman-primary"
+		finalService = lab.options.target.firstDataService()
 	}
 	return finalPrimary, finalService
 }

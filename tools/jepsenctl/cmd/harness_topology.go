@@ -20,13 +20,15 @@ func (lab *harnessLab) verifyThreeDataNodeCluster(ctx context.Context, outputFil
 		if err := os.WriteFile(outputFile, []byte(output+"\n"), 0o644); err != nil {
 			return err
 		}
-		return validateClusterStatusFile(outputFile)
+		if lab.options.target.supportsPACMANLab() {
+			return validateClusterStatusFile(outputFile)
+		}
 	}
 	var status clusterStatus
 	if err := json.Unmarshal([]byte(output), &status); err != nil {
 		return err
 	}
-	return validateClusterStatus(status)
+	return validateClusterStatusForMembers(status, lab.dataMemberNames())
 }
 
 func (lab *harnessLab) waitForThreeDataNodeCluster(ctx context.Context) (string, error) {
@@ -35,8 +37,8 @@ func (lab *harnessLab) waitForThreeDataNodeCluster(ctx context.Context) (string,
 	var lastErr error
 
 	for {
-		for _, service := range []string{"pacman-primary", "pacman-replica", "pacman-replica-2"} {
-			output, err := lab.pacmanClusterStatusJSON(ctx, service)
+		for _, node := range lab.options.target.DataNodes {
+			output, err := lab.clusterStatusJSON(ctx, node.Service)
 			if err != nil {
 				lastErr = err
 				continue
@@ -47,7 +49,7 @@ func (lab *harnessLab) waitForThreeDataNodeCluster(ctx context.Context) (string,
 				lastErr = err
 				continue
 			}
-			if err := validateClusterStatus(status); err != nil {
+			if err := validateClusterStatusForMembers(status, lab.dataMemberNames()); err != nil {
 				lastErr = err
 				continue
 			}
@@ -69,6 +71,76 @@ func (lab *harnessLab) waitForThreeDataNodeCluster(ctx context.Context) (string,
 	}
 }
 
+func (lab *harnessLab) clusterStatusJSON(ctx context.Context, service string) (string, error) {
+	if lab.options.target.supportsPatroniLab() {
+		return lab.patroniClusterStatusJSON(ctx)
+	}
+	return lab.pacmanClusterStatusJSON(ctx, service)
+}
+
+func (lab *harnessLab) patroniClusterStatusJSON(ctx context.Context) (string, error) {
+	var probes []patroniRoleProbe
+	for _, node := range lab.options.target.DataNodes {
+		output, err := lab.psqlService(ctx, node.Service, `
+SELECT
+  pg_is_in_recovery(),
+  CASE
+    WHEN pg_is_in_recovery() THEN EXISTS (
+      SELECT 1 FROM pg_stat_wal_receiver WHERE status = 'streaming'
+    )
+    ELSE true
+  END;`)
+		probe := patroniRoleProbe{node: node, err: err}
+		if err == nil {
+			parts := strings.Split(lastNonEmptyLine(output), "\t")
+			probe.inRecovery = len(parts) > 0 && parts[0] == "t"
+			probe.streaming = len(parts) > 1 && parts[1] == "t"
+		}
+		probes = append(probes, probe)
+	}
+	status := patroniClusterStatusFromProbes(probes)
+	data, err := json.Marshal(status)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+type patroniRoleProbe struct {
+	node       targetNode
+	inRecovery bool
+	streaming  bool
+	err        error
+}
+
+func patroniClusterStatusFromProbes(probes []patroniRoleProbe) clusterStatus {
+	status := clusterStatus{Phase: "healthy"}
+	for _, probe := range probes {
+		member := clusterMember{Name: probe.node.Name, State: "unknown"}
+		if probe.err == nil {
+			member.Healthy = !probe.inRecovery || probe.streaming
+			if probe.inRecovery {
+				member.Role = "replica"
+				if probe.streaming {
+					member.State = "streaming"
+				}
+			} else {
+				member.Role = "primary"
+				member.State = "running"
+				status.CurrentPrimary = probe.node.Name
+			}
+		}
+		if !member.Healthy {
+			status.Phase = "degraded"
+		}
+		status.Members = append(status.Members, member)
+	}
+	if status.CurrentPrimary == "" {
+		status.Phase = "degraded"
+	}
+	return status
+}
+
 func (lab *harnessLab) pacmanClusterStatusJSON(ctx context.Context, service string) (string, error) {
 	output, status, err := lab.composeExec(ctx, service, "env",
 		"PACMANCTL_API_URL=http://"+service+":8080",
@@ -86,8 +158,8 @@ func (lab *harnessLab) pacmanClusterStatusJSON(ctx context.Context, service stri
 
 func (lab *harnessLab) pacmanClusterStatusAny(ctx context.Context) (clusterStatus, string, error) {
 	var lastErr error
-	for _, service := range []string{"pacman-primary", "pacman-replica", "pacman-replica-2"} {
-		text, err := lab.pacmanClusterStatusJSON(ctx, service)
+	for _, node := range lab.options.target.DataNodes {
+		text, err := lab.clusterStatusJSON(ctx, node.Service)
 		if err != nil {
 			lastErr = err
 			continue
@@ -97,7 +169,7 @@ func (lab *harnessLab) pacmanClusterStatusAny(ctx context.Context) (clusterStatu
 			lastErr = err
 			continue
 		}
-		return status, service, nil
+		return status, node.Service, nil
 	}
 	return clusterStatus{}, "", lastErr
 }
@@ -141,6 +213,31 @@ func (lab *harnessLab) currentPrimaryName(ctx context.Context) string {
 		return "unknown"
 	}
 	return status.CurrentPrimary
+}
+
+func (lab *harnessLab) dataMemberNames() []string {
+	names := make([]string, 0, len(lab.options.target.DataNodes))
+	for _, node := range lab.options.target.DataNodes {
+		names = append(names, node.Name)
+	}
+	return names
+}
+
+func (lab *harnessLab) serviceForMember(member string) string {
+	return lab.options.target.serviceForMember(member)
+}
+
+func (lab *harnessLab) peerServicesForMember(member string) []string {
+	if lab.options.target.supportsPACMANLab() {
+		return peerServicesForMember(member)
+	}
+	var peers []string
+	for _, node := range lab.options.target.DataNodes {
+		if node.Name != member {
+			peers = append(peers, node.Service)
+		}
+	}
+	return peers
 }
 
 func (lab *harnessLab) switchoverCandidate(ctx context.Context) string {

@@ -121,6 +121,52 @@ func TestDCSQuorumTargetStateDerivesKilledTargetsFromEndpointHealth(t *testing.T
 	}
 }
 
+func TestIPTablesPartitionReportsCommandFailure(t *testing.T) {
+	t.Parallel()
+
+	runner := &scriptedRunner{
+		outputs:  []string{"iptables command not found\n"},
+		statuses: []int{127},
+	}
+	lab := newHarnessLab(harnessOptions{
+		repoRoot: t.TempDir(),
+		runner:   runner,
+	})
+
+	err := lab.iptablesPartition(context.Background(), "pacman-primary", []string{"pacman-dcs-2"})
+	if err == nil {
+		t.Fatalf("partition succeeded without iptables")
+	}
+	assertContainsAll(t, "partition error", err.Error(), []string{
+		"iptables partition pacman-primary from pacman-dcs-2 failed with status 127",
+		"iptables command not found",
+	})
+	if len(runner.specs) != 1 {
+		t.Fatalf("runner calls: got %d want 1", len(runner.specs))
+	}
+	if got := strings.Join(runner.specs[0].args, " "); !strings.Contains(got, "command -v iptables") {
+		t.Fatalf("partition command missing iptables discovery: %s", got)
+	}
+}
+
+func TestIPTablesPartitionRejectsUnknownPeer(t *testing.T) {
+	t.Parallel()
+
+	runner := &scriptedRunner{}
+	lab := newHarnessLab(harnessOptions{
+		repoRoot: t.TempDir(),
+		runner:   runner,
+	})
+
+	err := lab.iptablesPartition(context.Background(), "pacman-primary", []string{"unknown-peer"})
+	if err == nil || !strings.Contains(err.Error(), "unknown peer service") {
+		t.Fatalf("partition error: got %v want unknown peer service", err)
+	}
+	if len(runner.specs) != 0 {
+		t.Fatalf("runner calls: got %d want 0", len(runner.specs))
+	}
+}
+
 func TestHarnessFileAndJSONHelpers(t *testing.T) {
 	t.Parallel()
 
@@ -232,6 +278,71 @@ func TestVerifyThreeDataNodeClusterWaitsForHealthyShape(t *testing.T) {
 	}
 }
 
+func TestPatroniClusterStatusUsesPostgresRoleProbes(t *testing.T) {
+	target, err := resolveJepsenTarget("patroni-3-data")
+	if err != nil {
+		t.Fatalf("resolve target: %v", err)
+	}
+	lab := newHarnessLab(harnessOptions{
+		repoRoot: t.TempDir(),
+		runOptions: runOptions{
+			target: target,
+		},
+	})
+
+	status := patroniClusterStatusFromProbes([]patroniRoleProbe{
+		{node: target.DataNodes[0]},
+		{node: target.DataNodes[1], inRecovery: true, streaming: true},
+		{node: target.DataNodes[2], inRecovery: true, streaming: true},
+	})
+	if err := validateClusterStatusForMembers(status, []string{"patroni-1", "patroni-2", "patroni-3"}); err != nil {
+		t.Fatalf("validate Patroni status: %v", err)
+	}
+	if status.CurrentPrimary != "patroni-1" {
+		t.Fatalf("primary: got %q want patroni-1", status.CurrentPrimary)
+	}
+	if lab.cfg.composeFile != filepath.Join(lab.options.repoRoot, "deploy", "patroni-lab", "compose.yml") {
+		t.Fatalf("compose file: got %q", lab.cfg.composeFile)
+	}
+	if lab.cfg.pgClientService != "patroni-primary" || lab.cfg.pgHost != "127.0.0.1" || lab.cfg.psqlBinary != "/usr/bin/psql" {
+		t.Fatalf("Patroni PostgreSQL config: %#v", lab.cfg)
+	}
+	if got := lab.peerServicesForMember("patroni-1"); !reflect.DeepEqual(got, []string{"patroni-replica", "patroni-replica-2"}) {
+		t.Fatalf("Patroni peers: got %#v", got)
+	}
+}
+
+func TestPatroniNodeRuntimeStopsAndStartsComposeService(t *testing.T) {
+	target, err := resolveJepsenTarget("patroni-3-data")
+	if err != nil {
+		t.Fatalf("resolve target: %v", err)
+	}
+	runner := &scriptedRunner{}
+	lab := newHarnessLab(harnessOptions{
+		repoRoot: t.TempDir(),
+		runner:   runner,
+		runOptions: runOptions{
+			target: target,
+		},
+	})
+
+	if err := lab.stopNodeRuntime(context.Background(), "patroni-primary"); err != nil {
+		t.Fatalf("stop Patroni runtime: %v", err)
+	}
+	if err := lab.startNodeRuntime(context.Background(), "patroni-primary"); err != nil {
+		t.Fatalf("start Patroni runtime: %v", err)
+	}
+	if len(runner.specs) != 2 {
+		t.Fatalf("runner calls: got %d want 2", len(runner.specs))
+	}
+	if got, want := runner.specs[0].args, []string{"compose", "-f", lab.cfg.composeFile, "stop", "patroni-primary"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("stop args: got %#v want %#v", got, want)
+	}
+	if got, want := runner.specs[1].args, []string{"compose", "-f", lab.cfg.composeFile, "start", "patroni-primary"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("start args: got %#v want %#v", got, want)
+	}
+}
+
 func TestHarnessSmallProfileHelpers(t *testing.T) {
 	t.Parallel()
 
@@ -256,8 +367,10 @@ func TestHarnessSmallProfileHelpers(t *testing.T) {
 }
 
 type scriptedRunner struct {
-	outputs []string
-	calls   int
+	outputs  []string
+	statuses []int
+	calls    int
+	specs    []commandSpec
 }
 
 func (runner *scriptedRunner) Run(_ context.Context, spec commandSpec) (int, error) {
@@ -268,8 +381,13 @@ func (runner *scriptedRunner) Run(_ context.Context, spec commandSpec) (int, err
 		output = runner.outputs[len(runner.outputs)-1]
 	}
 	runner.calls++
+	runner.specs = append(runner.specs, spec)
 	if spec.stdout != nil {
 		fmt.Fprint(spec.stdout, output)
 	}
-	return 0, nil
+	status := 0
+	if runner.calls <= len(runner.statuses) {
+		status = runner.statuses[runner.calls-1]
+	}
+	return status, nil
 }

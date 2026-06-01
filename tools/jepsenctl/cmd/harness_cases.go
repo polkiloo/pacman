@@ -83,6 +83,10 @@ func (lab *harnessLab) runCases(ctx context.Context, cases []string, runDir, his
 }
 
 func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, campaignHistory, scheduleFile, caseResults string) error {
+	if !lab.options.target.supportsCase(workload, nemesis) {
+		return fmt.Errorf("Jepsen target %s does not support case %s:%s", lab.options.target.Name, workload, nemesis)
+	}
+
 	slug := caseSlug(workload + "__" + nemesis)
 	caseDir := filepath.Join(runDir, "cases", slug)
 	runID := envOrDefault("PACMAN_JEPSEN_RUN_ID", time.Now().UTC().Format("20060102T150405Z")) + "-" + slug
@@ -105,7 +109,7 @@ func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, c
 	sampler := lab.startPrimarySampler(ctx, caseDir)
 	nemesisRun := lab.runNemesisProfile(ctx, nemesis, caseDir, scheduleFile, lab.cfg.defaultDuration)
 	workloadStatus := lab.runWorkloadProfile(ctx, workload, runID, caseDir)
-	nemesisRun.wait()
+	nemesisStatus := nemesisRun.wait()
 	_ = copyScheduleTail(scheduleFile, filepath.Join(caseDir, "nemesis-schedule.edn"), scheduleOffset)
 	lab.settleAfterNemesis(caseDir, nemesis)
 	observationFile := filepath.Join(caseDir, primaryObservationFile)
@@ -118,6 +122,7 @@ func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, c
 
 	checks := map[string]error{
 		"workload":                    workloadStatus,
+		"nemesis":                     nemesisStatus,
 		"workload_checker":            lab.checkWorkloadProfile(ctx, workload, runID, caseDir),
 		"primary_checker":             runChecker(func() error { return execSinglePrimaryChecker(caseDir) }),
 		"acknowledged_checker":        lab.checkAcknowledgedWrite(ctx, workload, runID, caseDir),

@@ -22,24 +22,28 @@ func (lab *harnessLab) runNemesisProfile(ctx context.Context, profile, caseDir, 
 	go func() {
 		defer close(run.done)
 		time.Sleep(maxDuration(duration/3, time.Second))
-		lab.applyNemesis(ctx, profile, caseDir, scheduleFile)
+		run.err = lab.applyNemesis(ctx, profile, caseDir, scheduleFile)
 	}()
 	return run
 }
 
-func (run *nemesisRun) wait() {
+func (run *nemesisRun) wait() error {
 	if run != nil && run.done != nil {
 		<-run.done
 	}
+	if run == nil {
+		return nil
+	}
+	return run.err
 }
 
-func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, scheduleFile string) {
+func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, scheduleFile string) error {
 	member := lab.currentPrimaryName(ctx)
-	service := serviceForMember(member)
+	service := lab.serviceForMember(member)
 	if service == "" {
-		service = "pacman-primary"
+		service = lab.options.target.firstDataService()
 	}
-	peers := peerServicesForMember(member)
+	peers := lab.peerServicesForMember(member)
 	logFile := filepath.Join(caseDir, "nemesis.log")
 	log := func(format string, args ...any) { appendFile(logFile, fmt.Sprintf(format+"\n", args...)) }
 	event := func(name, action, value string) { writeNemesisScheduleEvent(scheduleFile, name, action, value) }
@@ -47,12 +51,34 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 	switch profile {
 	case "kill":
 		event("kill", "start", fmt.Sprintf(":target %q", member))
-		_ = lab.stopPacmanNodeRuntime(ctx, service)
-		promoted := lab.waitForCurrentPrimaryNot(ctx, member, 90*time.Second)
+		promoted := "unknown"
+		killErr := lab.stopNodeRuntime(ctx, service)
+		if killErr == nil {
+			promoted = lab.waitForCurrentPrimaryNot(ctx, member, 90*time.Second)
+			if promoted == "unknown" {
+				killErr = fmt.Errorf("timed out waiting for promotion after stopping %s", member)
+			}
+		}
 		_ = lab.captureClusterSnapshot(ctx, caseDir, "during-nemesis", profile, member, service)
-		time.Sleep(lab.cfg.nemesisHold)
-		_ = lab.startPacmanNodeRuntime(ctx, service)
-		event("kill", "stop", fmt.Sprintf(":target %q :promoted %q :result :ok", member, promoted))
+		if killErr == nil {
+			time.Sleep(lab.cfg.nemesisHold)
+		}
+		if restartErr := lab.startNodeRuntime(ctx, service); restartErr != nil {
+			if killErr == nil {
+				killErr = restartErr
+			} else {
+				killErr = fmt.Errorf("%w; restart failed: %w", killErr, restartErr)
+			}
+		}
+		result := "ok"
+		if killErr != nil {
+			result = "fail"
+		}
+		event("kill", "stop", fmt.Sprintf(":target %q :promoted %q :result :%s", member, promoted, result))
+		if killErr != nil {
+			_ = lab.captureClusterSnapshot(ctx, caseDir, "after-nemesis", profile, member, service)
+			return killErr
+		}
 	case "switchover":
 		candidate := lab.switchoverCandidate(ctx)
 		event("switchover", "start", fmt.Sprintf(":source %q :target %q", member, candidate))
@@ -62,7 +88,7 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 			"source":           member,
 			"sourceService":    service,
 			"candidate":        candidate,
-			"candidateService": serviceForMember(candidate),
+			"candidateService": lab.serviceForMember(candidate),
 			"controlService":   service,
 			"exitStatus":       status,
 			"output":           output,
@@ -72,14 +98,22 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 		event("switchover", "stop", fmt.Sprintf(":source %q :target %q :exit-status %d", member, candidate, status))
 	case "packet":
 		event("packet", "start", fmt.Sprintf(":target %q", member))
-		lab.iptablesPartition(ctx, service, peers)
+		if err := lab.iptablesPartition(ctx, service, peers); err != nil {
+			lab.iptablesHeal(ctx, service, peers)
+			event("packet", "stop", fmt.Sprintf(":target %q :result :fail :error %q", member, err))
+			return err
+		}
 		_ = lab.captureClusterSnapshot(ctx, caseDir, "during-nemesis", profile, member, service)
 		time.Sleep(lab.cfg.nemesisHold)
 		lab.iptablesHeal(ctx, service, peers)
 		event("packet", "stop", fmt.Sprintf(":target %q :result :ok", member))
 	case "packet,kill":
 		event("packet-kill", "start", fmt.Sprintf(":target %q", member))
-		lab.iptablesPartition(ctx, service, peers)
+		if err := lab.iptablesPartition(ctx, service, peers); err != nil {
+			lab.iptablesHeal(ctx, service, peers)
+			event("packet-kill", "stop", fmt.Sprintf(":target %q :result :fail :error %q", member, err))
+			return err
+		}
 		_ = lab.stopPostgres(ctx, service)
 		_ = lab.captureClusterSnapshot(ctx, caseDir, "during-nemesis", profile, member, service)
 		time.Sleep(lab.cfg.nemesisHold)
@@ -89,7 +123,11 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 	case "primary-dcs-partition":
 		targets := []string{"pacman-dcs", "pacman-dcs-2", "pacman-dcs-3"}
 		event("primary-dcs-partition", "start", fmt.Sprintf(":target %q :dcs %q", member, strings.Join(targets, " ")))
-		lab.iptablesPartition(ctx, service, targets)
+		if err := lab.iptablesPartition(ctx, service, targets); err != nil {
+			lab.iptablesHeal(ctx, service, targets)
+			event("primary-dcs-partition", "stop", fmt.Sprintf(":target %q :dcs %q :result :fail :error %q", member, strings.Join(targets, " "), err))
+			return err
+		}
 		_ = lab.recordClientTrafficProbe(ctx, caseDir, profile, member+"-dcs-isolated")
 		_ = lab.recordReplicationHealthProbe(ctx, service, caseDir, profile)
 		time.Sleep(lab.cfg.nemesisHold)
@@ -97,7 +135,11 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 		event("primary-dcs-partition", "stop", fmt.Sprintf(":target %q :dcs %q :result :ok", member, strings.Join(targets, " ")))
 	case "primary-replication-partition":
 		event("primary-replication-partition", "start", fmt.Sprintf(":target %q", member))
-		lab.iptablesReplicationPartition(ctx, service, peers)
+		if err := lab.iptablesReplicationPartition(ctx, service, peers); err != nil {
+			lab.iptablesReplicationHeal(ctx, service, peers)
+			event("primary-replication-partition", "stop", fmt.Sprintf(":target %q :result :fail :error %q", member, err))
+			return err
+		}
 		_ = lab.recordDCSTrafficProbe(ctx, service, caseDir, profile)
 		time.Sleep(lab.cfg.nemesisHold)
 		lab.iptablesReplicationHeal(ctx, service, peers)
@@ -109,7 +151,11 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 	case "primary-dcs-majority-partition":
 		event("primary-dcs-majority-partition", "start", fmt.Sprintf(":target %q :dcs %q", member, strings.Join(lab.cfg.dcsMajorityPartitionServices, " ")))
 		_ = lab.recordDCSQuorumProbe(ctx, caseDir, profile, "before-primary-majority-partition", lab.cfg.dcsMajorityPartitionServices, service)
-		lab.iptablesPartition(ctx, service, lab.cfg.dcsMajorityPartitionServices)
+		if err := lab.iptablesPartition(ctx, service, lab.cfg.dcsMajorityPartitionServices); err != nil {
+			lab.iptablesHeal(ctx, service, lab.cfg.dcsMajorityPartitionServices)
+			event("primary-dcs-majority-partition", "stop", fmt.Sprintf(":target %q :dcs %q :result :fail :error %q", member, strings.Join(lab.cfg.dcsMajorityPartitionServices, " "), err))
+			return err
+		}
 		_ = lab.recordDCSQuorumProbe(ctx, caseDir, profile, "during-primary-majority-partition", lab.cfg.dcsMajorityPartitionServices, service)
 		time.Sleep(lab.cfg.nemesisHold)
 		lab.iptablesHeal(ctx, service, lab.cfg.dcsMajorityPartitionServices)
@@ -132,7 +178,11 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 		_ = lab.slowNetworkOn(ctx, service)
 		time.Sleep(3 * time.Second)
 		_ = lab.slowNetworkOff(ctx, service)
-		lab.iptablesPartition(ctx, service, peers)
+		if err := lab.iptablesPartition(ctx, service, peers); err != nil {
+			lab.iptablesHeal(ctx, service, peers)
+			event("repeated-failure", "stop", fmt.Sprintf(":target %q :result :fail :error %q", member, err))
+			return err
+		}
 		time.Sleep(3 * time.Second)
 		lab.iptablesHeal(ctx, service, peers)
 		_ = lab.stopPostgres(ctx, service)
@@ -143,6 +193,7 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 		log("unsupported nemesis profile: %s", profile)
 	}
 	_ = lab.captureClusterSnapshot(ctx, caseDir, "after-nemesis", profile, member, service)
+	return nil
 }
 
 func writeNemesisScheduleEvent(scheduleFile, name, action, value string) {
@@ -156,14 +207,21 @@ func maxDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
-func (lab *harnessLab) iptablesPartition(ctx context.Context, service string, peers []string) {
+func (lab *harnessLab) iptablesPartition(ctx context.Context, service string, peers []string) error {
 	for _, peer := range peers {
 		ip := serviceIP(peer)
 		if ip == "" {
-			continue
+			return fmt.Errorf("iptables partition %s from %s: unknown peer service", service, peer)
 		}
-		_, _, _ = lab.composeExec(ctx, service, "/bin/sh", "-lc", fmt.Sprintf("iptables -I INPUT -s %s -j DROP; iptables -I OUTPUT -d %s -j DROP", ip, ip))
+		output, status, err := lab.composeExec(ctx, service, "/bin/sh", "-lc", fmt.Sprintf("iptables_bin=$(command -v iptables || command -v /usr/sbin/iptables || true); if [ -z \"$iptables_bin\" ]; then echo 'iptables command not found' >&2; exit 127; fi; \"$iptables_bin\" -I INPUT -s %s -j DROP && \"$iptables_bin\" -I OUTPUT -d %s -j DROP", ip, ip))
+		if err != nil {
+			return fmt.Errorf("iptables partition %s from %s: %w", service, peer, err)
+		}
+		if status != 0 {
+			return fmt.Errorf("iptables partition %s from %s failed with status %d: %s", service, peer, status, strings.TrimSpace(output))
+		}
 	}
+	return nil
 }
 
 func (lab *harnessLab) iptablesHeal(ctx context.Context, service string, peers []string) {
@@ -176,16 +234,29 @@ func (lab *harnessLab) iptablesHeal(ctx context.Context, service string, peers [
 	}
 }
 
-func (lab *harnessLab) iptablesReplicationPartition(ctx context.Context, service string, peers []string) {
+func (lab *harnessLab) iptablesReplicationPartition(ctx context.Context, service string, peers []string) error {
 	for _, peer := range peers {
 		ip := serviceIP(peer)
-		_, _, _ = lab.composeExec(ctx, service, "/bin/sh", "-lc", fmt.Sprintf("iptables -I INPUT -s %s -p tcp --dport 5432 -j DROP; iptables -I OUTPUT -d %s -p tcp --sport 5432 -j DROP", ip, ip))
+		if ip == "" {
+			return fmt.Errorf("iptables replication partition %s from %s: unknown peer service", service, peer)
+		}
+		output, status, err := lab.composeExec(ctx, service, "/bin/sh", "-lc", fmt.Sprintf("iptables_bin=$(command -v iptables || command -v /usr/sbin/iptables || true); if [ -z \"$iptables_bin\" ]; then echo 'iptables command not found' >&2; exit 127; fi; \"$iptables_bin\" -I INPUT -s %s -p tcp --dport 5432 -j DROP && \"$iptables_bin\" -I OUTPUT -d %s -p tcp --sport 5432 -j DROP", ip, ip))
+		if err != nil {
+			return fmt.Errorf("iptables replication partition %s from %s: %w", service, peer, err)
+		}
+		if status != 0 {
+			return fmt.Errorf("iptables replication partition %s from %s failed with status %d: %s", service, peer, status, strings.TrimSpace(output))
+		}
 	}
+	return nil
 }
 
 func (lab *harnessLab) iptablesReplicationHeal(ctx context.Context, service string, peers []string) {
 	for _, peer := range peers {
 		ip := serviceIP(peer)
+		if ip == "" {
+			continue
+		}
 		_, _, _ = lab.composeExec(ctx, service, "/bin/sh", "-lc", fmt.Sprintf("while iptables -D INPUT -s %s -p tcp --dport 5432 -j DROP 2>/dev/null; do :; done; while iptables -D OUTPUT -d %s -p tcp --sport 5432 -j DROP 2>/dev/null; do :; done", ip, ip))
 	}
 }
@@ -208,6 +279,42 @@ func (lab *harnessLab) startPostgres(ctx context.Context, service string) error 
 	}
 	if status != 0 {
 		return fmt.Errorf("start postgres status %d", status)
+	}
+	return nil
+}
+
+func (lab *harnessLab) stopNodeRuntime(ctx context.Context, service string) error {
+	if lab.options.target.supportsPatroniLab() {
+		return lab.stopPatroniNodeRuntime(ctx, service)
+	}
+	return lab.stopPacmanNodeRuntime(ctx, service)
+}
+
+func (lab *harnessLab) startNodeRuntime(ctx context.Context, service string) error {
+	if lab.options.target.supportsPatroniLab() {
+		return lab.startPatroniNodeRuntime(ctx, service)
+	}
+	return lab.startPacmanNodeRuntime(ctx, service)
+}
+
+func (lab *harnessLab) stopPatroniNodeRuntime(ctx context.Context, service string) error {
+	_, status, err := lab.compose(ctx, "stop", service)
+	if err != nil {
+		return err
+	}
+	if status != 0 {
+		return fmt.Errorf("stop Patroni runtime %s status=%d", service, status)
+	}
+	return nil
+}
+
+func (lab *harnessLab) startPatroniNodeRuntime(ctx context.Context, service string) error {
+	_, status, err := lab.compose(ctx, "start", service)
+	if err != nil {
+		return err
+	}
+	if status != 0 {
+		return fmt.Errorf("start Patroni runtime %s status=%d", service, status)
 	}
 	return nil
 }

@@ -10,8 +10,11 @@ import (
 )
 
 func (lab *harnessLab) bootstrapLab(ctx context.Context) error {
+	if lab.options.target.supportsPatroniLab() {
+		return lab.bootstrapPatroniLab(ctx)
+	}
 	if !lab.options.target.supportsPACMANLab() {
-		return fmt.Errorf("Jepsen target %s is registered, but deploy/lab bootstrap currently supports %s only", lab.options.target.Name, defaultJepsenTarget)
+		return fmt.Errorf("Jepsen target %s has no lab bootstrap", lab.options.target.Name)
 	}
 
 	if envOrDefault("PACMAN_JEPSEN_RESET_LAB", "true") == "true" {
@@ -41,6 +44,25 @@ func (lab *harnessLab) bootstrapLab(ctx context.Context) error {
 		return fmt.Errorf("bootstrap lab exited with status %d", status)
 	}
 	return nil
+}
+
+func (lab *harnessLab) bootstrapPatroniLab(ctx context.Context) error {
+	if envOrDefault("PACMAN_JEPSEN_RESET_LAB", "true") == "true" {
+		if _, status, err := lab.compose(ctx, "down", "--volumes", "--remove-orphans"); err != nil || status != 0 {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("reset Patroni lab exited with status %d", status)
+		}
+	}
+	if _, status, err := lab.compose(ctx, "up", "-d", "--build"); err != nil || status != 0 {
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("bootstrap Patroni lab exited with status %d", status)
+	}
+	_, err := lab.waitForThreeDataNodeCluster(ctx)
+	return err
 }
 
 func (lab *harnessLab) bootstrapLabWithRetries(ctx context.Context, label string) error {
@@ -75,36 +97,37 @@ func (lab *harnessLab) collectArtifacts(ctx context.Context, runDir string, vali
 	lab.writeComposeOutput(ctx, filepath.Join(runDir, "docker-compose-ps.txt"), "ps")
 	lab.writeComposeOutput(ctx, filepath.Join(runDir, "docker-compose.log"), "logs", "--no-color")
 
-	for _, node := range []struct {
-		service string
-		member  string
-	}{
-		{"pacman-primary", "alpha-1"},
-		{"pacman-replica", "alpha-2"},
-		{"pacman-replica-2", "alpha-3"},
-	} {
-		lab.writeComposeExecOutput(ctx, filepath.Join(runDir, "node-logs", node.member+"-pacmand.log"), node.service, "/bin/sh", "-lc", "cat /var/log/pacman/pacmand.log 2>/dev/null || true")
-		lab.writeComposeExecOutput(ctx, filepath.Join(runDir, "postgres-logs", node.member+"-postgres.log"), node.service, "/bin/sh", "-lc", "if [ -d /var/lib/pgsql/17/data/log ]; then find /var/lib/pgsql/17/data/log -maxdepth 1 -type f -print -exec cat {} \\; 2>/dev/null; fi")
+	for _, node := range lab.options.target.DataNodes {
+		if lab.options.target.supportsPatroniLab() {
+			lab.writeComposeOutput(ctx, filepath.Join(runDir, "node-logs", node.Name+"-patroni.log"), "logs", "--no-color", node.Service)
+			lab.writeComposeOutput(ctx, filepath.Join(runDir, "postgres-logs", node.Name+"-postgres.log"), "logs", "--no-color", node.Service)
+			continue
+		}
+		lab.writeComposeExecOutput(ctx, filepath.Join(runDir, "node-logs", node.Name+"-pacmand.log"), node.Service, "/bin/sh", "-lc", "cat /var/log/pacman/pacmand.log 2>/dev/null || true")
+		lab.writeComposeExecOutput(ctx, filepath.Join(runDir, "postgres-logs", node.Name+"-postgres.log"), node.Service, "/bin/sh", "-lc", "if [ -d /var/lib/pgsql/17/data/log ]; then find /var/lib/pgsql/17/data/log -maxdepth 1 -type f -print -exec cat {} \\; 2>/dev/null; fi")
 	}
-	for _, node := range []struct {
-		service string
-		member  string
-	}{
-		{"pacman-dcs", "alpha-dcs"},
-		{"pacman-dcs-2", "alpha-dcs-2"},
-		{"pacman-dcs-3", "alpha-dcs-3"},
-	} {
-		lab.writeComposeExecOutput(ctx, filepath.Join(runDir, "dcs-logs", node.member+"-etcd.log"), node.service, "/bin/sh", "-lc", "cat /var/log/etcd.log 2>/dev/null || true")
+	for _, node := range lab.options.target.DCSNodes {
+		if lab.options.target.supportsPatroniLab() {
+			lab.writeComposeOutput(ctx, filepath.Join(runDir, "dcs-logs", node.Name+"-etcd.log"), "logs", "--no-color", node.Service)
+			continue
+		}
+		lab.writeComposeExecOutput(ctx, filepath.Join(runDir, "dcs-logs", node.Name+"-etcd.log"), node.Service, "/bin/sh", "-lc", "cat /var/log/etcd.log 2>/dev/null || true")
 	}
 
-	lab.writeComposeExecOutput(ctx, filepath.Join(runDir, "pacman-cluster-after.json"), "pacman-primary", "env",
-		"PACMANCTL_API_URL=http://pacman-primary:8080",
-		"PACMANCTL_API_TOKEN="+pacmanAPIToken,
-		"pacmanctl", "cluster", "status", "-o", "json")
-	lab.writeComposeExecOutput(ctx, filepath.Join(runDir, "pacman-history.json"), "pacman-primary", "env",
-		"PACMANCTL_API_URL=http://pacman-primary:8080",
-		"PACMANCTL_API_TOKEN="+pacmanAPIToken,
-		"pacmanctl", "history", "list", "-o", "json")
+	if lab.options.target.supportsPatroniLab() {
+		output, _ := lab.clusterStatusJSON(ctx, lab.options.target.firstDataService())
+		_ = os.WriteFile(filepath.Join(runDir, "patroni-cluster-after.json"), []byte(output+"\n"), 0o644)
+		lab.writeComposeExecOutput(ctx, filepath.Join(runDir, "patroni-rest-cluster-after.json"), lab.options.target.firstDataService(), "curl", "-fsS", "http://127.0.0.1:8008/cluster")
+	} else {
+		lab.writeComposeExecOutput(ctx, filepath.Join(runDir, "pacman-cluster-after.json"), "pacman-primary", "env",
+			"PACMANCTL_API_URL=http://pacman-primary:8080",
+			"PACMANCTL_API_TOKEN="+pacmanAPIToken,
+			"pacmanctl", "cluster", "status", "-o", "json")
+		lab.writeComposeExecOutput(ctx, filepath.Join(runDir, "pacman-history.json"), "pacman-primary", "env",
+			"PACMANCTL_API_URL=http://pacman-primary:8080",
+			"PACMANCTL_API_TOKEN="+pacmanAPIToken,
+			"pacmanctl", "history", "list", "-o", "json")
+	}
 
 	if err := lab.writeResultsFile(runDir, valid); err != nil {
 		return err
@@ -121,7 +144,7 @@ func (lab *harnessLab) destroyLabAfterSuite(ctx context.Context, runDir, history
 	if _, err := writeEDNEvent(historyFile, "destroy", "invoke", `"docker-lab"`); err != nil {
 		return err
 	}
-	status, err := lab.runHost(ctx, filepath.Join(lab.options.repoRoot, "deploy", "lab", "scripts", "destroy-cluster.sh"))
+	status, err := lab.destroyLab(ctx)
 	destroyed := err == nil && status == 0 && lab.labDestroyed(ctx)
 	if destroyed {
 		_, err = writeEDNEvent(historyFile, "destroy", "ok", `"docker-lab"`)
@@ -136,6 +159,14 @@ func (lab *harnessLab) destroyLabAfterSuite(ctx context.Context, runDir, history
 		return fmt.Errorf("destroy lab failed")
 	}
 	return nil
+}
+
+func (lab *harnessLab) destroyLab(ctx context.Context) (int, error) {
+	if lab.options.target.supportsPatroniLab() {
+		_, status, err := lab.compose(ctx, "down", "--volumes", "--remove-orphans")
+		return status, err
+	}
+	return lab.runHost(ctx, filepath.Join(lab.options.repoRoot, "deploy", "lab", "scripts", "destroy-cluster.sh"))
 }
 
 func (lab *harnessLab) writeResultsFile(runDir string, valid bool) error {
@@ -159,24 +190,29 @@ func (lab *harnessLab) writeArtifactIndexHTML(runDir string, valid bool) error {
 		status = "true"
 	}
 	campaign := envOrDefault("PACMAN_JEPSEN_CAMPAIGN", lab.options.campaign)
+	clusterArtifacts := `<li><a href="pacman-cluster-after.json">pacman-cluster-after.json</a></li>
+<li><a href="pacman-history.json">pacman-history.json</a></li>`
+	if lab.options.target.supportsPatroniLab() {
+		clusterArtifacts = `<li><a href="patroni-cluster-after.json">patroni-cluster-after.json</a></li>
+<li><a href="patroni-rest-cluster-after.json">patroni-rest-cluster-after.json</a></li>`
+	}
 	html := fmt.Sprintf(`<!doctype html>
 <html>
-<head><meta charset="utf-8"><title>PACMAN Jepsen %s</title></head>
+<head><meta charset="utf-8"><title>Jepsen %s %s</title></head>
 <body>
-<h1>PACMAN Jepsen %s</h1>
+<h1>Jepsen %s %s</h1>
 <p>Status: %s</p>
 <ul>
 <li><a href="results.edn">results.edn</a></li>
 <li><a href="case-results.jsonl">case-results.jsonl</a></li>
 <li><a href="jepsen-history.edn">jepsen-history.edn</a></li>
 <li><a href="nemesis-schedule.edn">nemesis-schedule.edn</a></li>
-<li><a href="pacman-cluster-after.json">pacman-cluster-after.json</a></li>
-<li><a href="pacman-history.json">pacman-history.json</a></li>
+%s
 <li>Per-case: primary-observations.jsonl, pacman-cluster-snapshots.jsonl, pg-stat-replication.json, pg-stat-wal-receiver.jsonl, single-primary-checker.json, acknowledged-write-checker.json, timeline-checker.json, old-primary-rejoin-checker.json, manual-switchover-checker.json, client-traffic-during-nemesis-checker.json, replication-traffic-during-nemesis-checker.json, dcs-traffic-during-nemesis-checker.json, dcs-quorum-checker.json, failover-chain-checker.json, open-transaction-checker.json, and vip-routing-checker.json</li>
 </ul>
 </body>
 </html>
-`, campaign, campaign, status)
+`, lab.options.target.Name, campaign, lab.options.target.Name, campaign, status, clusterArtifacts)
 	return os.WriteFile(filepath.Join(runDir, "index.html"), []byte(html), 0o644)
 }
 
