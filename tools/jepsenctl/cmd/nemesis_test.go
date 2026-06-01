@@ -54,6 +54,24 @@ func TestValidateNemesisSchedule(t *testing.T) {
 `,
 		},
 		{
+			name:     "accepts strict sync no standby",
+			workload: "append-strict-sync",
+			nemesis:  "no-standby",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :no-standby :action :start :target "patroni-1" :standbys "patroni-replica patroni-replica-2"}
+{:time "2026-05-01T00:00:02Z" :nemesis :no-standby :action :stop :target "patroni-1" :standbys "patroni-replica patroni-replica-2" :result :ok}
+`,
+		},
+		{
+			name:     "accepts synchronous standby kill",
+			workload: "append-sync",
+			nemesis:  "sync-standby-kill",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :sync-standby-kill :action :start :target "patroni-2" :service "patroni-replica"}
+{:time "2026-05-01T00:00:02Z" :nemesis :sync-standby-kill :action :stop :target "patroni-2" :service "patroni-replica" :result :ok}
+`,
+		},
+		{
 			name:     "accepts failover chain step result",
 			workload: "append-failover",
 			nemesis:  "failover-chain",

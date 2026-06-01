@@ -355,6 +355,12 @@ func TestHarnessSmallProfileHelpers(t *testing.T) {
 	if got := workloadTable("append-failover"); got != "jepsen.append_values" {
 		t.Fatalf("append table: got %q", got)
 	}
+	if got := workloadTable("append-sync"); got != "jepsen.append_values" {
+		t.Fatalf("sync append table: got %q", got)
+	}
+	if got := workloadTable("append-sync-two"); got != "jepsen.append_values" {
+		t.Fatalf("two-standby sync append table: got %q", got)
+	}
 	if got := workloadTable("serializable-txn"); got != "jepsen.txn_ops" {
 		t.Fatalf("txn table: got %q", got)
 	}

@@ -18,6 +18,7 @@ type jepsenCase struct {
 	Slug        string
 	Spec        string
 	Description string
+	PatroniOnly bool
 }
 
 type caseTargetValidation struct {
@@ -161,6 +162,10 @@ func defaultJepsenCases() []jepsenCase {
 		{Slug: "read-committed-txn-slow-network", Spec: "read-committed-txn:slow-network", Description: "Read committed transaction workload under latency and loss."},
 		{Slug: "serializable-txn-packet-kill", Spec: "serializable-txn:packet,kill", Description: "Serializable transaction workload under partition plus kill."},
 		{Slug: "append-failover-repeated-failure", Spec: "append-failover:repeated-failure", Description: "Append workload under slow network, partition, and kill sequence."},
+		{Slug: "append-sync-kill", Spec: "append-sync:kill", Description: "Synchronous append workload while killing the current primary.", PatroniOnly: true},
+		{Slug: "append-sync-sync-standby-kill", Spec: "append-sync:sync-standby-kill", Description: "Synchronous append workload while killing an active synchronous standby.", PatroniOnly: true},
+		{Slug: "append-sync-two-none", Spec: "append-sync-two:none", Description: "Synchronous append workload with synchronous_node_count=2.", PatroniOnly: true},
+		{Slug: "append-strict-sync-no-standby", Spec: "append-strict-sync:no-standby", Description: "Strict synchronous append workload while stopping both standbys.", PatroniOnly: true},
 	}
 }
 

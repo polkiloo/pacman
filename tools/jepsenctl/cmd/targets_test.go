@@ -48,6 +48,24 @@ func TestResolveJepsenTarget(t *testing.T) {
 	if !patroni.supportsCase("append-failover", "kill") {
 		t.Fatalf("patroni target should support append-failover:kill")
 	}
+	if !patroni.supportsCase("single-key-register", "packet") {
+		t.Fatalf("patroni target should support single-key-register:packet")
+	}
+	if !patroni.supportsCase("append-sync", "kill") {
+		t.Fatalf("patroni target should support append-sync:kill")
+	}
+	if !patroni.supportsCase("append-sync", "sync-standby-kill") {
+		t.Fatalf("patroni target should support append-sync:sync-standby-kill")
+	}
+	if !patroni.supportsCase("append-sync-two", "none") {
+		t.Fatalf("patroni target should support append-sync-two:none")
+	}
+	if !patroni.supportsCase("append-strict-sync", "no-standby") {
+		t.Fatalf("patroni target should support append-strict-sync:no-standby")
+	}
+	if pacman.supportsCase("append-sync", "kill") {
+		t.Fatalf("pacman target should not support Patroni-only append-sync:kill")
+	}
 	if patroni.supportsCase("append-failover", "packet") {
 		t.Fatalf("patroni target should not support append-failover:packet yet")
 	}

@@ -1,7 +1,7 @@
 FROM postgres:17-bookworm
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl python3-venv \
+    && apt-get install -y --no-install-recommends curl iptables python3-venv \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m venv /opt/patroni \
     && /opt/patroni/bin/pip install --no-cache-dir --upgrade pip \

@@ -132,18 +132,18 @@ target.
 - [x] Patroni three-data-node baseline target.
 - [x] Patroni `append-smoke:none`.
 - [x] Patroni `append-failover:kill`.
-- [ ] Patroni `single-key-register:packet`.
+- [x] Patroni `single-key-register:packet`.
 - [x] Store Patroni artifacts under `jepsen/store/patroni/...`.
-- [ ] Compare PACMAN results only against matching workload/nemesis profiles.
+- [x] Compare PACMAN results only against matching workload/nemesis profiles.
 
 ### Synchronous Replication Semantics
 
 Skip until PACMAN has explicit supported semantics for sync/strict-sync behavior.
 
-- [ ] Sync-mode acknowledged write preservation.
-- [ ] Strict-sync no-standby unavailability behavior.
-- [ ] Synchronous standby kill.
-- [ ] `synchronous_node_count > 1` behavior.
+- [x] Sync-mode acknowledged write preservation.
+- [x] Strict-sync no-standby unavailability behavior.
+- [x] Synchronous standby kill.
+- [x] `synchronous_node_count > 1` behavior.
 
 ### Fencing and Watchdog
 
@@ -159,12 +159,12 @@ Post-MVP unless PACMAN ships a watchdog/fencing contract.
 These stay in the Patroni baseline track unless PACMAN adds equivalent config
 surface.
 
-- [ ] `synchronous_mode=true`.
-- [ ] `synchronous_mode_strict=true`.
+- [x] `synchronous_mode=true`.
+- [x] `synchronous_mode_strict=true`.
 - [ ] `maximum_lag_on_failover`.
 - [ ] `check_timeline=true`.
 - [ ] `patronictl pause` / `resume`.
-- [ ] Patroni dynamic config changes through DCS.
+- [x] Patroni dynamic config changes through DCS.
 
 ## Go Automation Migration Plan
 

@@ -171,13 +171,34 @@ func (target jepsenTarget) firstDataMember() string {
 	return target.DataNodes[0].Name
 }
 
+func (target jepsenTarget) hasService(service string) bool {
+	for _, nodes := range [][]targetNode{target.DataNodes, target.DCSNodes} {
+		for _, node := range nodes {
+			if node.Service == service {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (target jepsenTarget) supportsCase(workload, nemesis string) bool {
 	if target.supportsPACMANLab() {
-		return true
+		return !isPatroniOnlyWorkload(workload)
 	}
 	if !target.supportsPatroniLab() {
 		return false
 	}
 	return (workload == "append-smoke" && nemesis == "none") ||
-		(workload == "append-failover" && nemesis == "kill")
+		(workload == "append-failover" && nemesis == "kill") ||
+		(workload == "single-key-register" && nemesis == "packet") ||
+		(workload == "append-sync" && nemesis == "kill") ||
+		(workload == "append-sync" && nemesis == "sync-standby-kill") ||
+		(workload == "append-sync-two" && nemesis == "none") ||
+		(workload == "append-strict-sync" && nemesis == "no-standby")
+}
+
+func isPatroniOnlyWorkload(workload string) bool {
+	_, ok := patroniSynchronousProfile(workload)
+	return ok
 }

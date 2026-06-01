@@ -16,6 +16,9 @@ x-patroni-common: &patroni_common
   environment:
     MALLOC_ARENA_MAX: "1"
     PG_MALLOC_ARENA_MAX: ""
+  cap_add:
+    - NET_ADMIN
+    - NET_RAW
   networks:
     patroni-lab-net: {}
 

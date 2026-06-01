@@ -40,6 +40,12 @@ var artifactIndexExactNames = map[string]struct{}{
 	"open-transaction.json":                           {},
 	"vip-routing-checker.json":                        {},
 	"vip-routing.jsonl":                               {},
+	"synchronous-replication-config.json":             {},
+	"synchronous-replication-checker.json":            {},
+	"synchronous-standby-kill-checker.json":           {},
+	"synchronous-standby-kill-probes.jsonl":           {},
+	"strict-sync-no-standby-checker.json":             {},
+	"strict-sync-write-probes.jsonl":                  {},
 	"primary-observations.jsonl":                      {},
 	"pacman-cluster-snapshots.jsonl":                  {},
 	"pg-stat-wal-receiver.jsonl":                      {},
@@ -79,9 +85,10 @@ type checkerResult struct {
 func newArtifactsCommand() *cobra.Command {
 	artifacts := &cobra.Command{
 		Use:   "artifacts",
-		Short: "summarize Jepsen artifacts",
+		Short: "work with Jepsen artifacts",
 	}
 
+	artifacts.AddCommand(newArtifactsCompareBaselineCommand())
 	artifacts.AddCommand(newArtifactsSummarizeCommand())
 
 	return artifacts

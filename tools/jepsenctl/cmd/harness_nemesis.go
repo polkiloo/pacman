@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,6 +121,10 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 		_ = lab.startPostgres(ctx, service)
 		lab.iptablesHeal(ctx, service, peers)
 		event("packet-kill", "stop", fmt.Sprintf(":target %q :result :ok", member))
+	case "no-standby":
+		return lab.strictSyncNoStandby(ctx, caseDir, scheduleFile, member, service, peers)
+	case synchronousStandbyKillNemesisProfile:
+		return lab.synchronousStandbyKill(ctx, caseDir, scheduleFile)
 	case "primary-dcs-partition":
 		targets := []string{"pacman-dcs", "pacman-dcs-2", "pacman-dcs-3"}
 		event("primary-dcs-partition", "start", fmt.Sprintf(":target %q :dcs %q", member, strings.Join(targets, " ")))
@@ -209,11 +214,11 @@ func maxDuration(a, b time.Duration) time.Duration {
 
 func (lab *harnessLab) iptablesPartition(ctx context.Context, service string, peers []string) error {
 	for _, peer := range peers {
-		ip := serviceIP(peer)
-		if ip == "" {
-			return fmt.Errorf("iptables partition %s from %s: unknown peer service", service, peer)
+		ip, err := lab.partitionServiceIP(ctx, service, peer)
+		if err != nil {
+			return fmt.Errorf("iptables partition %s from %s: %w", service, peer, err)
 		}
-		output, status, err := lab.composeExec(ctx, service, "/bin/sh", "-lc", fmt.Sprintf("iptables_bin=$(command -v iptables || command -v /usr/sbin/iptables || true); if [ -z \"$iptables_bin\" ]; then echo 'iptables command not found' >&2; exit 127; fi; \"$iptables_bin\" -I INPUT -s %s -j DROP && \"$iptables_bin\" -I OUTPUT -d %s -j DROP", ip, ip))
+		output, status, err := lab.composeExecAsUser(ctx, "root", service, "/bin/sh", "-lc", fmt.Sprintf("iptables_bin=$(command -v iptables || command -v /usr/sbin/iptables || true); if [ -z \"$iptables_bin\" ]; then echo 'iptables command not found' >&2; exit 127; fi; \"$iptables_bin\" -I INPUT -s %s -j DROP && \"$iptables_bin\" -I OUTPUT -d %s -j DROP", ip, ip))
 		if err != nil {
 			return fmt.Errorf("iptables partition %s from %s: %w", service, peer, err)
 		}
@@ -226,21 +231,21 @@ func (lab *harnessLab) iptablesPartition(ctx context.Context, service string, pe
 
 func (lab *harnessLab) iptablesHeal(ctx context.Context, service string, peers []string) {
 	for _, peer := range peers {
-		ip := serviceIP(peer)
-		if ip == "" {
+		ip, err := lab.partitionServiceIP(ctx, service, peer)
+		if err != nil {
 			continue
 		}
-		_, _, _ = lab.composeExec(ctx, service, "/bin/sh", "-lc", fmt.Sprintf("while iptables -D INPUT -s %s -j DROP 2>/dev/null; do :; done; while iptables -D OUTPUT -d %s -j DROP 2>/dev/null; do :; done", ip, ip))
+		_, _, _ = lab.composeExecAsUser(ctx, "root", service, "/bin/sh", "-lc", fmt.Sprintf("while iptables -D INPUT -s %s -j DROP 2>/dev/null; do :; done; while iptables -D OUTPUT -d %s -j DROP 2>/dev/null; do :; done", ip, ip))
 	}
 }
 
 func (lab *harnessLab) iptablesReplicationPartition(ctx context.Context, service string, peers []string) error {
 	for _, peer := range peers {
-		ip := serviceIP(peer)
-		if ip == "" {
-			return fmt.Errorf("iptables replication partition %s from %s: unknown peer service", service, peer)
+		ip, err := lab.partitionServiceIP(ctx, service, peer)
+		if err != nil {
+			return fmt.Errorf("iptables replication partition %s from %s: %w", service, peer, err)
 		}
-		output, status, err := lab.composeExec(ctx, service, "/bin/sh", "-lc", fmt.Sprintf("iptables_bin=$(command -v iptables || command -v /usr/sbin/iptables || true); if [ -z \"$iptables_bin\" ]; then echo 'iptables command not found' >&2; exit 127; fi; \"$iptables_bin\" -I INPUT -s %s -p tcp --dport 5432 -j DROP && \"$iptables_bin\" -I OUTPUT -d %s -p tcp --sport 5432 -j DROP", ip, ip))
+		output, status, err := lab.composeExecAsUser(ctx, "root", service, "/bin/sh", "-lc", fmt.Sprintf("iptables_bin=$(command -v iptables || command -v /usr/sbin/iptables || true); if [ -z \"$iptables_bin\" ]; then echo 'iptables command not found' >&2; exit 127; fi; \"$iptables_bin\" -I INPUT -s %s -p tcp --dport 5432 -j DROP && \"$iptables_bin\" -I OUTPUT -d %s -p tcp --sport 5432 -j DROP", ip, ip))
 		if err != nil {
 			return fmt.Errorf("iptables replication partition %s from %s: %w", service, peer, err)
 		}
@@ -253,12 +258,33 @@ func (lab *harnessLab) iptablesReplicationPartition(ctx context.Context, service
 
 func (lab *harnessLab) iptablesReplicationHeal(ctx context.Context, service string, peers []string) {
 	for _, peer := range peers {
-		ip := serviceIP(peer)
-		if ip == "" {
+		ip, err := lab.partitionServiceIP(ctx, service, peer)
+		if err != nil {
 			continue
 		}
-		_, _, _ = lab.composeExec(ctx, service, "/bin/sh", "-lc", fmt.Sprintf("while iptables -D INPUT -s %s -p tcp --dport 5432 -j DROP 2>/dev/null; do :; done; while iptables -D OUTPUT -d %s -p tcp --sport 5432 -j DROP 2>/dev/null; do :; done", ip, ip))
+		_, _, _ = lab.composeExecAsUser(ctx, "root", service, "/bin/sh", "-lc", fmt.Sprintf("while iptables -D INPUT -s %s -p tcp --dport 5432 -j DROP 2>/dev/null; do :; done; while iptables -D OUTPUT -d %s -p tcp --sport 5432 -j DROP 2>/dev/null; do :; done", ip, ip))
 	}
+}
+
+func (lab *harnessLab) partitionServiceIP(ctx context.Context, observer, peer string) (string, error) {
+	if ip := serviceIP(peer); ip != "" {
+		return ip, nil
+	}
+	if !lab.options.target.hasService(peer) {
+		return "", fmt.Errorf("unknown peer service")
+	}
+	output, status, err := lab.composeExec(ctx, observer, "getent", "ahostsv4", peer)
+	if err != nil {
+		return "", err
+	}
+	if status != 0 {
+		return "", fmt.Errorf("resolve service IP failed with status %d: %s", status, strings.TrimSpace(output))
+	}
+	fields := strings.Fields(output)
+	if len(fields) == 0 || net.ParseIP(fields[0]).To4() == nil {
+		return "", fmt.Errorf("resolve service IP returned no IPv4 address: %s", strings.TrimSpace(output))
+	}
+	return fields[0], nil
 }
 
 func (lab *harnessLab) stopPostgres(ctx context.Context, service string) error {
