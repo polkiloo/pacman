@@ -175,5 +175,9 @@ func (target jepsenTarget) supportsCase(workload, nemesis string) bool {
 	if target.supportsPACMANLab() {
 		return true
 	}
-	return target.supportsPatroniLab() && workload == "append-smoke" && nemesis == "none"
+	if !target.supportsPatroniLab() {
+		return false
+	}
+	return (workload == "append-smoke" && nemesis == "none") ||
+		(workload == "append-failover" && nemesis == "kill")
 }

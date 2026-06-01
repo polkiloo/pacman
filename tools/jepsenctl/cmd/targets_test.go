@@ -45,8 +45,11 @@ func TestResolveJepsenTarget(t *testing.T) {
 	if !patroni.supportsCase("append-smoke", "none") {
 		t.Fatalf("patroni target should support append-smoke:none")
 	}
-	if patroni.supportsCase("append-failover", "kill") {
-		t.Fatalf("patroni target should not support append-failover:kill yet")
+	if !patroni.supportsCase("append-failover", "kill") {
+		t.Fatalf("patroni target should support append-failover:kill")
+	}
+	if patroni.supportsCase("append-failover", "packet") {
+		t.Fatalf("patroni target should not support append-failover:packet yet")
 	}
 
 	if _, err := resolveJepsenTarget("unknown"); err == nil || !strings.Contains(err.Error(), "supported targets") {

@@ -261,6 +261,40 @@ func TestPatroniClusterStatusUsesPostgresRoleProbes(t *testing.T) {
 	if lab.cfg.pgClientService != "patroni-primary" || lab.cfg.pgHost != "127.0.0.1" || lab.cfg.psqlBinary != "/usr/bin/psql" {
 		t.Fatalf("Patroni PostgreSQL config: %#v", lab.cfg)
 	}
+	if got := lab.peerServicesForMember("patroni-1"); !reflect.DeepEqual(got, []string{"patroni-replica", "patroni-replica-2"}) {
+		t.Fatalf("Patroni peers: got %#v", got)
+	}
+}
+
+func TestPatroniNodeRuntimeStopsAndStartsComposeService(t *testing.T) {
+	target, err := resolveJepsenTarget("patroni-3-data")
+	if err != nil {
+		t.Fatalf("resolve target: %v", err)
+	}
+	runner := &scriptedRunner{}
+	lab := newHarnessLab(harnessOptions{
+		repoRoot: t.TempDir(),
+		runner:   runner,
+		runOptions: runOptions{
+			target: target,
+		},
+	})
+
+	if err := lab.stopNodeRuntime(context.Background(), "patroni-primary"); err != nil {
+		t.Fatalf("stop Patroni runtime: %v", err)
+	}
+	if err := lab.startNodeRuntime(context.Background(), "patroni-primary"); err != nil {
+		t.Fatalf("start Patroni runtime: %v", err)
+	}
+	if len(runner.specs) != 2 {
+		t.Fatalf("runner calls: got %d want 2", len(runner.specs))
+	}
+	if got, want := runner.specs[0].args, []string{"compose", "-f", lab.cfg.composeFile, "stop", "patroni-primary"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("stop args: got %#v want %#v", got, want)
+	}
+	if got, want := runner.specs[1].args, []string{"compose", "-f", lab.cfg.composeFile, "start", "patroni-primary"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("start args: got %#v want %#v", got, want)
+	}
 }
 
 func TestHarnessSmallProfileHelpers(t *testing.T) {
@@ -289,6 +323,7 @@ func TestHarnessSmallProfileHelpers(t *testing.T) {
 type scriptedRunner struct {
 	outputs []string
 	calls   int
+	specs   []commandSpec
 }
 
 func (runner *scriptedRunner) Run(_ context.Context, spec commandSpec) (int, error) {
@@ -299,6 +334,7 @@ func (runner *scriptedRunner) Run(_ context.Context, spec commandSpec) (int, err
 		output = runner.outputs[len(runner.outputs)-1]
 	}
 	runner.calls++
+	runner.specs = append(runner.specs, spec)
 	if spec.stdout != nil {
 		fmt.Fprint(spec.stdout, output)
 	}

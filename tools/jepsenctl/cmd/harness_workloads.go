@@ -15,8 +15,10 @@ import (
 
 func (lab *harnessLab) runWorkloadProfile(ctx context.Context, workload, runID, caseDir string) error {
 	switch workload {
-	case "append-smoke", "append-failover", "append-dcs-quorum":
+	case "append-smoke", "append-dcs-quorum":
 		return lab.runAppendWorkload(ctx, runID, caseDir, "read committed", lab.cfg.defaultOps, lab.cfg.defaultKeys, 0)
+	case "append-failover":
+		return lab.runAppendWorkload(ctx, runID, caseDir, "read committed", lab.cfg.defaultOps, lab.cfg.defaultKeys, lab.cfg.appendFailoverOpDelay)
 	case "append-switchover":
 		return lab.runAppendWorkload(ctx, runID, caseDir, "read committed", lab.cfg.defaultOps, lab.cfg.defaultKeys, lab.cfg.appendSwitchoverOpDelay)
 	case "open-transaction-failover":

@@ -109,7 +109,7 @@ func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, c
 	sampler := lab.startPrimarySampler(ctx, caseDir)
 	nemesisRun := lab.runNemesisProfile(ctx, nemesis, caseDir, scheduleFile, lab.cfg.defaultDuration)
 	workloadStatus := lab.runWorkloadProfile(ctx, workload, runID, caseDir)
-	nemesisRun.wait()
+	nemesisStatus := nemesisRun.wait()
 	_ = copyScheduleTail(scheduleFile, filepath.Join(caseDir, "nemesis-schedule.edn"), scheduleOffset)
 	lab.settleAfterNemesis(caseDir, nemesis)
 	observationFile := filepath.Join(caseDir, primaryObservationFile)
@@ -122,6 +122,7 @@ func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, c
 
 	checks := map[string]error{
 		"workload":                    workloadStatus,
+		"nemesis":                     nemesisStatus,
 		"workload_checker":            lab.checkWorkloadProfile(ctx, workload, runID, caseDir),
 		"primary_checker":             runChecker(func() error { return execSinglePrimaryChecker(caseDir) }),
 		"acknowledged_checker":        lab.checkAcknowledgedWrite(ctx, workload, runID, caseDir),

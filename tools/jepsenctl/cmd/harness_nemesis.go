@@ -22,24 +22,28 @@ func (lab *harnessLab) runNemesisProfile(ctx context.Context, profile, caseDir, 
 	go func() {
 		defer close(run.done)
 		time.Sleep(maxDuration(duration/3, time.Second))
-		lab.applyNemesis(ctx, profile, caseDir, scheduleFile)
+		run.err = lab.applyNemesis(ctx, profile, caseDir, scheduleFile)
 	}()
 	return run
 }
 
-func (run *nemesisRun) wait() {
+func (run *nemesisRun) wait() error {
 	if run != nil && run.done != nil {
 		<-run.done
 	}
+	if run == nil {
+		return nil
+	}
+	return run.err
 }
 
-func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, scheduleFile string) {
+func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, scheduleFile string) error {
 	member := lab.currentPrimaryName(ctx)
-	service := serviceForMember(member)
+	service := lab.serviceForMember(member)
 	if service == "" {
-		service = "pacman-primary"
+		service = lab.options.target.firstDataService()
 	}
-	peers := peerServicesForMember(member)
+	peers := lab.peerServicesForMember(member)
 	logFile := filepath.Join(caseDir, "nemesis.log")
 	log := func(format string, args ...any) { appendFile(logFile, fmt.Sprintf(format+"\n", args...)) }
 	event := func(name, action, value string) { writeNemesisScheduleEvent(scheduleFile, name, action, value) }
@@ -47,12 +51,34 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 	switch profile {
 	case "kill":
 		event("kill", "start", fmt.Sprintf(":target %q", member))
-		_ = lab.stopPacmanNodeRuntime(ctx, service)
-		promoted := lab.waitForCurrentPrimaryNot(ctx, member, 90*time.Second)
+		promoted := "unknown"
+		killErr := lab.stopNodeRuntime(ctx, service)
+		if killErr == nil {
+			promoted = lab.waitForCurrentPrimaryNot(ctx, member, 90*time.Second)
+			if promoted == "unknown" {
+				killErr = fmt.Errorf("timed out waiting for promotion after stopping %s", member)
+			}
+		}
 		_ = lab.captureClusterSnapshot(ctx, caseDir, "during-nemesis", profile, member, service)
-		time.Sleep(lab.cfg.nemesisHold)
-		_ = lab.startPacmanNodeRuntime(ctx, service)
-		event("kill", "stop", fmt.Sprintf(":target %q :promoted %q :result :ok", member, promoted))
+		if killErr == nil {
+			time.Sleep(lab.cfg.nemesisHold)
+		}
+		if restartErr := lab.startNodeRuntime(ctx, service); restartErr != nil {
+			if killErr == nil {
+				killErr = restartErr
+			} else {
+				killErr = fmt.Errorf("%w; restart failed: %w", killErr, restartErr)
+			}
+		}
+		result := "ok"
+		if killErr != nil {
+			result = "fail"
+		}
+		event("kill", "stop", fmt.Sprintf(":target %q :promoted %q :result :%s", member, promoted, result))
+		if killErr != nil {
+			_ = lab.captureClusterSnapshot(ctx, caseDir, "after-nemesis", profile, member, service)
+			return killErr
+		}
 	case "switchover":
 		candidate := lab.switchoverCandidate(ctx)
 		event("switchover", "start", fmt.Sprintf(":source %q :target %q", member, candidate))
@@ -62,7 +88,7 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 			"source":           member,
 			"sourceService":    service,
 			"candidate":        candidate,
-			"candidateService": serviceForMember(candidate),
+			"candidateService": lab.serviceForMember(candidate),
 			"controlService":   service,
 			"exitStatus":       status,
 			"output":           output,
@@ -143,6 +169,7 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 		log("unsupported nemesis profile: %s", profile)
 	}
 	_ = lab.captureClusterSnapshot(ctx, caseDir, "after-nemesis", profile, member, service)
+	return nil
 }
 
 func writeNemesisScheduleEvent(scheduleFile, name, action, value string) {
@@ -208,6 +235,42 @@ func (lab *harnessLab) startPostgres(ctx context.Context, service string) error 
 	}
 	if status != 0 {
 		return fmt.Errorf("start postgres status %d", status)
+	}
+	return nil
+}
+
+func (lab *harnessLab) stopNodeRuntime(ctx context.Context, service string) error {
+	if lab.options.target.supportsPatroniLab() {
+		return lab.stopPatroniNodeRuntime(ctx, service)
+	}
+	return lab.stopPacmanNodeRuntime(ctx, service)
+}
+
+func (lab *harnessLab) startNodeRuntime(ctx context.Context, service string) error {
+	if lab.options.target.supportsPatroniLab() {
+		return lab.startPatroniNodeRuntime(ctx, service)
+	}
+	return lab.startPacmanNodeRuntime(ctx, service)
+}
+
+func (lab *harnessLab) stopPatroniNodeRuntime(ctx context.Context, service string) error {
+	_, status, err := lab.compose(ctx, "stop", service)
+	if err != nil {
+		return err
+	}
+	if status != 0 {
+		return fmt.Errorf("stop Patroni runtime %s status=%d", service, status)
+	}
+	return nil
+}
+
+func (lab *harnessLab) startPatroniNodeRuntime(ctx context.Context, service string) error {
+	_, status, err := lab.compose(ctx, "start", service)
+	if err != nil {
+		return err
+	}
+	if status != 0 {
+		return fmt.Errorf("start Patroni runtime %s status=%d", service, status)
 	}
 	return nil
 }

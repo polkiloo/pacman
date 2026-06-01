@@ -54,14 +54,16 @@ with local as (
   select
     pg_is_in_recovery() as in_recovery,
     case when pg_is_in_recovery() then null else pg_current_wal_lsn() end as write_lsn,
-    pg_last_wal_replay_lsn() as replay_lsn
+    pg_last_wal_replay_lsn() as replay_lsn,
+    (select received_tli from pg_stat_wal_receiver where status = 'streaming' limit 1) as received_tli
 ),
 observed as (
-  select in_recovery, coalesce(write_lsn, replay_lsn) as lsn from local
+  select in_recovery, coalesce(write_lsn, replay_lsn) as lsn, received_tli from local
 )
 select
   in_recovery,
   case
+    when in_recovery then coalesce(received_tli, 0)
     when lsn is null then 0
     else ('x' || substr(pg_walfile_name(lsn), 1, 8))::bit(32)::int
   end as timeline,

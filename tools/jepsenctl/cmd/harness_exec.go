@@ -66,6 +66,13 @@ func (lab *harnessLab) runHost(ctx context.Context, name string, args ...string)
 }
 
 func (lab *harnessLab) psqlVIP(ctx context.Context, sql string) (string, error) {
+	if lab.options.target.supportsPatroniLab() {
+		service := lab.serviceForMember(lab.currentPrimaryName(ctx))
+		if service == "" {
+			return "", fmt.Errorf("Patroni primary is unavailable")
+		}
+		return lab.psqlService(ctx, service, sql)
+	}
 	return lab.psql(ctx, lab.cfg.pgClientService, lab.cfg.pgHost, lab.cfg.pgPort, sql)
 }
 

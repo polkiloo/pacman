@@ -227,8 +227,17 @@ func (lab *harnessLab) serviceForMember(member string) string {
 	return lab.options.target.serviceForMember(member)
 }
 
-func (lab *harnessLab) memberForService(service string) string {
-	return lab.options.target.memberForService(service)
+func (lab *harnessLab) peerServicesForMember(member string) []string {
+	if lab.options.target.supportsPACMANLab() {
+		return peerServicesForMember(member)
+	}
+	var peers []string
+	for _, node := range lab.options.target.DataNodes {
+		if node.Name != member {
+			peers = append(peers, node.Service)
+		}
+	}
+	return peers
 }
 
 func (lab *harnessLab) switchoverCandidate(ctx context.Context) string {
