@@ -142,8 +142,8 @@ Skip until PACMAN has explicit supported semantics for sync/strict-sync behavior
 
 - [x] Sync-mode acknowledged write preservation.
 - [x] Strict-sync no-standby unavailability behavior.
-- [ ] Synchronous standby kill.
-- [ ] `synchronous_node_count > 1` behavior.
+- [x] Synchronous standby kill.
+- [x] `synchronous_node_count > 1` behavior.
 
 ### Fencing and Watchdog
 

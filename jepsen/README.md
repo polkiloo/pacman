@@ -99,6 +99,7 @@ Implemented workload profiles:
 - `append-switchover`
 - `append-failover`
 - `append-sync` (Patroni calibration only)
+- `append-sync-two` (Patroni calibration only)
 - `append-strict-sync` (Patroni calibration only)
 - `append-dcs-quorum`
 - `open-transaction-failover`
@@ -124,6 +125,7 @@ Implemented nemesis profiles:
 - `failover-chain`
 - `slow-network`
 - `repeated-failure`
+- `sync-standby-kill` (Patroni sync calibration only)
 - `no-standby` (Patroni strict-sync calibration only)
 
 Campaigns reset `deploy/lab/.local/` before bootstrap by default so repeated
@@ -165,19 +167,27 @@ PACMAN_JEPSEN_TARGET=patroni-3-data go run ./tools/jepsenctl run docker smoke
 Patroni-managed PostgreSQL nodes, and a three-node etcd quorum. Its enabled
 baseline cases are `append-smoke:none`, `append-failover:kill`, and
 `single-key-register:packet`. The opt-in synchronous replication calibration
-cases are `append-sync:kill` and `append-strict-sync:no-standby`:
+cases are `append-sync:kill`, `append-sync:sync-standby-kill`,
+`append-sync-two:none`, and `append-strict-sync:no-standby`:
 
 ```bash
 PACMAN_JEPSEN_TARGET=patroni-3-data \
   go run ./tools/jepsenctl run docker case append-sync-kill
 PACMAN_JEPSEN_TARGET=patroni-3-data \
+  go run ./tools/jepsenctl run docker case append-sync-sync-standby-kill
+PACMAN_JEPSEN_TARGET=patroni-3-data \
+  go run ./tools/jepsenctl run docker case append-sync-two-none
+PACMAN_JEPSEN_TARGET=patroni-3-data \
   go run ./tools/jepsenctl run docker case append-strict-sync-no-standby
 ```
 
 The synchronous cases configure Patroni through its dynamic DCS configuration
-API before the workload starts. The strict-sync case stops both standbys,
-requires a bounded write probe to become unavailable, restarts both standbys,
-and requires writes to recover. Other Patroni workload/nemesis profiles remain
+API before the workload starts. The standby-kill case stops an active
+synchronous standby and requires Patroni to retain an available synchronous
+standby. The two-standby case configures `synchronous_node_count=2` and requires
+both standbys to be selected. The strict-sync case stops both standbys, requires
+a bounded write probe to become unavailable, restarts both standbys, and
+requires writes to recover. Other Patroni workload/nemesis profiles remain
 disabled until their target-specific fault controls are implemented.
 
 Compare an explicit PACMAN run with an explicit Patroni calibration run using
@@ -203,6 +213,8 @@ Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
 `replication-traffic-during-nemesis-checker.json`,
 `dcs-traffic-during-nemesis-checker.json`,
 `synchronous-replication-config.json`,
+`synchronous-replication-checker.json`,
+`synchronous-standby-kill-checker.json`, `synchronous-standby-kill-probes.jsonl`,
 `strict-sync-no-standby-checker.json`, `strict-sync-write-probes.jsonl`,
 `acknowledged-op-ids.txt`, `final-primary-op-counts.tsv`,
 `pacman-cluster-snapshots.jsonl`, `pg-stat-replication.json`,
