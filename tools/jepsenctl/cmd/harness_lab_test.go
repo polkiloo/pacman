@@ -121,6 +121,52 @@ func TestDCSQuorumTargetStateDerivesKilledTargetsFromEndpointHealth(t *testing.T
 	}
 }
 
+func TestIPTablesPartitionReportsCommandFailure(t *testing.T) {
+	t.Parallel()
+
+	runner := &scriptedRunner{
+		outputs:  []string{"iptables command not found\n"},
+		statuses: []int{127},
+	}
+	lab := newHarnessLab(harnessOptions{
+		repoRoot: t.TempDir(),
+		runner:   runner,
+	})
+
+	err := lab.iptablesPartition(context.Background(), "pacman-primary", []string{"pacman-dcs-2"})
+	if err == nil {
+		t.Fatalf("partition succeeded without iptables")
+	}
+	assertContainsAll(t, "partition error", err.Error(), []string{
+		"iptables partition pacman-primary from pacman-dcs-2 failed with status 127",
+		"iptables command not found",
+	})
+	if len(runner.specs) != 1 {
+		t.Fatalf("runner calls: got %d want 1", len(runner.specs))
+	}
+	if got := strings.Join(runner.specs[0].args, " "); !strings.Contains(got, "command -v iptables") {
+		t.Fatalf("partition command missing iptables discovery: %s", got)
+	}
+}
+
+func TestIPTablesPartitionRejectsUnknownPeer(t *testing.T) {
+	t.Parallel()
+
+	runner := &scriptedRunner{}
+	lab := newHarnessLab(harnessOptions{
+		repoRoot: t.TempDir(),
+		runner:   runner,
+	})
+
+	err := lab.iptablesPartition(context.Background(), "pacman-primary", []string{"unknown-peer"})
+	if err == nil || !strings.Contains(err.Error(), "unknown peer service") {
+		t.Fatalf("partition error: got %v want unknown peer service", err)
+	}
+	if len(runner.specs) != 0 {
+		t.Fatalf("runner calls: got %d want 0", len(runner.specs))
+	}
+}
+
 func TestHarnessFileAndJSONHelpers(t *testing.T) {
 	t.Parallel()
 
@@ -321,9 +367,10 @@ func TestHarnessSmallProfileHelpers(t *testing.T) {
 }
 
 type scriptedRunner struct {
-	outputs []string
-	calls   int
-	specs   []commandSpec
+	outputs  []string
+	statuses []int
+	calls    int
+	specs    []commandSpec
 }
 
 func (runner *scriptedRunner) Run(_ context.Context, spec commandSpec) (int, error) {
@@ -338,5 +385,9 @@ func (runner *scriptedRunner) Run(_ context.Context, spec commandSpec) (int, err
 	if spec.stdout != nil {
 		fmt.Fprint(spec.stdout, output)
 	}
-	return 0, nil
+	status := 0
+	if runner.calls <= len(runner.statuses) {
+		status = runner.statuses[runner.calls-1]
+	}
+	return status, nil
 }
