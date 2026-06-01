@@ -82,9 +82,10 @@ type checkerResult struct {
 func newArtifactsCommand() *cobra.Command {
 	artifacts := &cobra.Command{
 		Use:   "artifacts",
-		Short: "summarize Jepsen artifacts",
+		Short: "work with Jepsen artifacts",
 	}
 
+	artifacts.AddCommand(newArtifactsCompareBaselineCommand())
 	artifacts.AddCommand(newArtifactsSummarizeCommand())
 
 	return artifacts
