@@ -20,20 +20,28 @@ type oldPrimaryRejoinCheckerOptions struct {
 }
 
 type oldPrimaryRejoinCheckerResult struct {
-	Checker                  string                 `json:"checker"`
-	Valid                    bool                   `json:"valid"`
-	Applicable               bool                   `json:"applicable"`
-	Reason                   string                 `json:"reason,omitempty"`
-	Error                    string                 `json:"error,omitempty"`
-	Nemesis                  string                 `json:"nemesis,omitempty"`
-	Observations             int                    `json:"observations"`
-	Samples                  int                    `json:"samples"`
-	PromotionObserved        bool                   `json:"promotionObserved"`
-	InitialPrimary           *timelineMemberSummary `json:"initialPrimary"`
-	FinalPrimary             *timelineMemberSummary `json:"finalPrimary"`
-	OldPrimaryRejoined       bool                   `json:"oldPrimaryRejoined"`
-	OldPrimarySafeOrRejoined bool                   `json:"oldPrimarySafeOrRejoined"`
-	OldPrimaryFinalState     *timelineMemberSummary `json:"oldPrimaryFinalState"`
+	Checker                        string                        `json:"checker"`
+	Valid                          bool                          `json:"valid"`
+	Applicable                     bool                          `json:"applicable"`
+	Reason                         string                        `json:"reason,omitempty"`
+	Error                          string                        `json:"error,omitempty"`
+	Nemesis                        string                        `json:"nemesis,omitempty"`
+	Observations                   int                           `json:"observations"`
+	Samples                        int                           `json:"samples"`
+	PromotionObserved              bool                          `json:"promotionObserved"`
+	InitialPrimary                 *timelineMemberSummary        `json:"initialPrimary"`
+	FinalPrimary                   *timelineMemberSummary        `json:"finalPrimary"`
+	OldPrimaryRejoined             bool                          `json:"oldPrimaryRejoined"`
+	OldPrimarySafeOrRejoined       bool                          `json:"oldPrimarySafeOrRejoined"`
+	OldPrimaryUnsafeAfterPromotion bool                          `json:"oldPrimaryUnsafeAfterPromotion"`
+	UnsafeOldPrimaryObservations   []oldPrimaryUnsafeObservation `json:"unsafeOldPrimaryObservations"`
+	OldPrimaryFinalState           *timelineMemberSummary        `json:"oldPrimaryFinalState"`
+}
+
+type oldPrimaryUnsafeObservation struct {
+	SampleID   int                   `json:"sampleId"`
+	ObservedAt string                `json:"observedAt,omitempty"`
+	Member     timelineMemberSummary `json:"member"`
 }
 
 func newOldPrimaryRejoinCheckerCommand() *cobra.Command {
@@ -184,15 +192,53 @@ func checkOldPrimaryRejoinAfterFailover(observations []primaryObservation, nemes
 		}
 	}
 
-	result.Valid = len(samples) > 0 && (!promotionObserved || oldPrimarySafeOrRejoined)
+	unsafeOldPrimaryObservations := oldPrimaryWritableAfterPromotion(samples, initialPrimary)
+	oldPrimaryUnsafeAfterPromotion := len(unsafeOldPrimaryObservations) > 0
+
+	result.Valid = len(samples) > 0 && (!promotionObserved || oldPrimarySafeOrRejoined) && !oldPrimaryUnsafeAfterPromotion
 	result.Applicable = promotionObserved
 	result.PromotionObserved = promotionObserved
 	result.InitialPrimary = initialPrimarySummary
 	result.FinalPrimary = finalPrimarySummary
 	result.OldPrimaryRejoined = oldPrimaryRejoined
 	result.OldPrimarySafeOrRejoined = oldPrimarySafeOrRejoined
+	result.OldPrimaryUnsafeAfterPromotion = oldPrimaryUnsafeAfterPromotion
+	result.UnsafeOldPrimaryObservations = unsafeOldPrimaryObservations
 	result.OldPrimaryFinalState = oldPrimaryFinalState
 	return result
+}
+
+func oldPrimaryWritableAfterPromotion(samples []timelineSample, initialPrimary *primaryObservation) []oldPrimaryUnsafeObservation {
+	if initialPrimary == nil {
+		return nil
+	}
+
+	promotionObserved := false
+	var unsafe []oldPrimaryUnsafeObservation
+	for _, sample := range samples {
+		for _, observation := range sample.Observations {
+			if observation.Reachable && observation.Writable && observation.Member != initialPrimary.Member {
+				promotionObserved = true
+				break
+			}
+		}
+		if !promotionObserved {
+			continue
+		}
+
+		for _, observation := range sample.Observations {
+			if observation.Member != initialPrimary.Member || !observation.Reachable || !observation.Writable {
+				continue
+			}
+			unsafe = append(unsafe, oldPrimaryUnsafeObservation{
+				SampleID:   sample.SampleID,
+				ObservedAt: observation.ObservedAt,
+				Member:     summarizeTimelineMember(observation),
+			})
+		}
+	}
+
+	return unsafe
 }
 
 func failureNemesisAllowsUnavailableOldPrimary(nemesis string) bool {

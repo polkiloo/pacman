@@ -8,8 +8,8 @@ The goal is to prove PACMAN's core HA safety claims first:
 - [x] PACMAN never exposes two writable PostgreSQL primaries at the same time.
 - [x] Acknowledged writes are preserved, or any async-mode loss is explicitly
       measured and reported as allowed data loss.
-- [ ] Failover promotes only eligible replicas.
-- [ ] A former primary rejoins safely and does not silently continue on a
+- [x] Failover promotes only eligible replicas.
+- [x] A former primary rejoins safely and does not silently continue on a
       divergent timeline.
 - [x] Surviving nodes converge to one PostgreSQL timeline after failover.
 - [x] Client write routing follows the current PACMAN primary.

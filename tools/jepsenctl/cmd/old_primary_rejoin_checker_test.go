@@ -20,6 +20,10 @@ func TestOldPrimaryRejoinCheckerFixtures(t *testing.T) {
 		wantRejoined         bool
 		wantSafeOrRejoined   bool
 		wantOldPrimaryMember string
+		wantObservations     int
+		wantSamples          int
+		wantUnsafe           bool
+		wantUnsafeSamples    int
 	}{
 		{
 			name:               "accepts no promotion",
@@ -28,6 +32,8 @@ func TestOldPrimaryRejoinCheckerFixtures(t *testing.T) {
 			wantValid:          true,
 			wantRejoined:       true,
 			wantSafeOrRejoined: true,
+			wantObservations:   6,
+			wantSamples:        2,
 		},
 		{
 			name:                 "accepts old primary rejoined as replica",
@@ -39,6 +45,8 @@ func TestOldPrimaryRejoinCheckerFixtures(t *testing.T) {
 			wantRejoined:         true,
 			wantSafeOrRejoined:   true,
 			wantOldPrimaryMember: "alpha-1",
+			wantObservations:     6,
+			wantSamples:          2,
 		},
 		{
 			name:                 "accepts killed old primary unavailable",
@@ -50,6 +58,8 @@ func TestOldPrimaryRejoinCheckerFixtures(t *testing.T) {
 			wantRejoined:         false,
 			wantSafeOrRejoined:   true,
 			wantOldPrimaryMember: "alpha-1",
+			wantObservations:     6,
+			wantSamples:          2,
 		},
 		{
 			name:                 "rejects old primary not rejoined",
@@ -61,6 +71,22 @@ func TestOldPrimaryRejoinCheckerFixtures(t *testing.T) {
 			wantRejoined:         false,
 			wantSafeOrRejoined:   false,
 			wantOldPrimaryMember: "alpha-1",
+			wantObservations:     6,
+			wantSamples:          2,
+		},
+		{
+			name:                 "rejects writable old primary before clean rejoin",
+			fixture:              "old_primary_writable_then_rejoined_invalid.jsonl",
+			nemesis:              "packet",
+			wantApplicable:       true,
+			wantPromotion:        true,
+			wantRejoined:         true,
+			wantSafeOrRejoined:   true,
+			wantOldPrimaryMember: "alpha-1",
+			wantObservations:     9,
+			wantSamples:          3,
+			wantUnsafe:           true,
+			wantUnsafeSamples:    1,
 		},
 	}
 
@@ -93,8 +119,8 @@ func TestOldPrimaryRejoinCheckerFixtures(t *testing.T) {
 			if result.Applicable != test.wantApplicable {
 				t.Fatalf("applicable: got %v want %v", result.Applicable, test.wantApplicable)
 			}
-			if result.Observations != 6 || result.Samples != 2 {
-				t.Fatalf("counts: got observations=%d samples=%d want observations=6 samples=2", result.Observations, result.Samples)
+			if result.Observations != test.wantObservations || result.Samples != test.wantSamples {
+				t.Fatalf("counts: got observations=%d samples=%d want observations=%d samples=%d", result.Observations, result.Samples, test.wantObservations, test.wantSamples)
 			}
 			if result.PromotionObserved != test.wantPromotion {
 				t.Fatalf("promotion observed: got %v want %v", result.PromotionObserved, test.wantPromotion)
@@ -104,6 +130,12 @@ func TestOldPrimaryRejoinCheckerFixtures(t *testing.T) {
 			}
 			if result.OldPrimarySafeOrRejoined != test.wantSafeOrRejoined {
 				t.Fatalf("old primary safe or rejoined: got %v want %v", result.OldPrimarySafeOrRejoined, test.wantSafeOrRejoined)
+			}
+			if result.OldPrimaryUnsafeAfterPromotion != test.wantUnsafe {
+				t.Fatalf("old primary unsafe after promotion: got %v want %v", result.OldPrimaryUnsafeAfterPromotion, test.wantUnsafe)
+			}
+			if len(result.UnsafeOldPrimaryObservations) != test.wantUnsafeSamples {
+				t.Fatalf("unsafe old primary observations: got %d want %d", len(result.UnsafeOldPrimaryObservations), test.wantUnsafeSamples)
 			}
 			if test.wantOldPrimaryMember == "" {
 				if result.OldPrimaryFinalState != nil {
