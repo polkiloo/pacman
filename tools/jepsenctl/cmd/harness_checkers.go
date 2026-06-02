@@ -40,7 +40,7 @@ func (lab *harnessLab) checkAcknowledgedWrite(ctx context.Context, workload, run
 
 func workloadTable(workload string) string {
 	switch workload {
-	case "append-smoke", "append-failover", "append-sync", "append-sync-two", "append-strict-sync", "append-max-lag", "append-switchover", "append-dcs-quorum", "open-transaction-failover", "vip-routing":
+	case "append-smoke", "append-failover", "append-sync", "append-sync-two", "append-strict-sync", "append-max-lag", "append-check-timeline", "append-switchover", "append-dcs-quorum", "open-transaction-failover", "vip-routing":
 		return "jepsen.append_values"
 	case "single-key-register":
 		return "jepsen.register_values"
@@ -239,6 +239,22 @@ func (lab *harnessLab) checkMaximumLagOnFailover(nemesis, caseDir string) error 
 	probes := readMaximumLagOnFailoverProbes(filepath.Join(caseDir, maximumLagOnFailoverProbesFile))
 	err := checkMaximumLagOnFailoverProbes(probes)
 	result := map[string]any{"checker": "maximum-lag-on-failover", "valid": err == nil, "applicable": true, "probes": probes}
+	if err != nil {
+		result["error"] = err.Error()
+	}
+	writeJSON(checkerFile, result)
+	return err
+}
+
+func (lab *harnessLab) checkPatroniCheckTimeline(nemesis, caseDir string) error {
+	checkerFile := filepath.Join(caseDir, patroniCheckTimelineCheckerFile)
+	if nemesis != patroniCheckTimelineNemesis {
+		writeJSON(checkerFile, map[string]any{"checker": "patroni-check-timeline", "valid": true, "applicable": false})
+		return nil
+	}
+	probes := readPatroniCheckTimelineProbes(filepath.Join(caseDir, patroniCheckTimelineProbesFile))
+	err := checkPatroniCheckTimelineProbes(probes)
+	result := map[string]any{"checker": "patroni-check-timeline", "valid": err == nil, "applicable": true, "probes": probes}
 	if err != nil {
 		result["error"] = err.Error()
 	}

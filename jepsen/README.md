@@ -102,6 +102,7 @@ Implemented workload profiles:
 - `append-sync-two` (Patroni calibration only)
 - `append-strict-sync` (Patroni calibration only)
 - `append-max-lag` (Patroni calibration only)
+- `append-check-timeline` (Patroni calibration only)
 - `append-dcs-quorum`
 - `open-transaction-failover`
 - `vip-routing`
@@ -129,6 +130,7 @@ Implemented nemesis profiles:
 - `sync-standby-kill` (Patroni sync calibration only)
 - `no-standby` (Patroni strict-sync calibration only)
 - `lagging-replica-failover` (Patroni max-lag calibration only)
+- `stale-timeline-failover` (Patroni timeline calibration only)
 
 Campaigns reset `deploy/lab/.local/` before bootstrap by default so repeated
 runs start from a clean PostgreSQL and DCS state. After artifact collection, the
@@ -174,10 +176,11 @@ PACMAN_JEPSEN_TARGET=patroni-3-data go run ./tools/jepsenctl run docker smoke
 `patroni-3-data` uses the dedicated `deploy/patroni-lab` Compose stack, three
 Patroni-managed PostgreSQL nodes, and a three-node etcd quorum. Its enabled
 baseline cases are `append-smoke:none`, `append-failover:kill`, and
-`single-key-register:packet`. The opt-in synchronous replication calibration
+`single-key-register:packet`. The opt-in Patroni configuration calibration
 cases are `append-sync:kill`, `append-sync:sync-standby-kill`,
-`append-sync-two:none`, `append-strict-sync:no-standby`, and
-`append-max-lag:lagging-replica-failover`:
+`append-sync-two:none`, `append-strict-sync:no-standby`,
+`append-max-lag:lagging-replica-failover`, and
+`append-check-timeline:stale-timeline-failover`:
 
 ```bash
 PACMAN_JEPSEN_TARGET=patroni-3-data \
@@ -190,6 +193,8 @@ PACMAN_JEPSEN_TARGET=patroni-3-data \
   go run ./tools/jepsenctl run docker case append-strict-sync-no-standby
 PACMAN_JEPSEN_TARGET=patroni-3-data \
   go run ./tools/jepsenctl run docker case append-max-lag-lagging-replica-failover
+PACMAN_JEPSEN_TARGET=patroni-3-data \
+  go run ./tools/jepsenctl run docker case append-check-timeline-stale-timeline-failover
 ```
 
 The synchronous cases configure Patroni through its dynamic DCS configuration
@@ -203,6 +208,9 @@ disabled until their target-specific fault controls are implemented. The
 max-lag case configures `maximum_lag_on_failover`, pauses WAL replay on one
 replica until it exceeds the threshold, stops the primary, and requires Patroni
 to promote the other replica while recording replay recovery.
+The timeline case configures `check_timeline=true`, keeps one replica on the old
+timeline while promoting the other, stops the promoted node, and requires the
+stale replica to remain read-only until the correct-timeline node returns.
 
 Compare an explicit PACMAN run with an explicit Patroni calibration run using
 their `case-results.jsonl` files:
@@ -232,6 +240,8 @@ Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
 `strict-sync-no-standby-checker.json`, `strict-sync-write-probes.jsonl`,
 `maximum-lag-on-failover-config.json`, `maximum-lag-on-failover-checker.json`,
 `maximum-lag-on-failover-probes.jsonl`,
+`patroni-check-timeline-config.json`, `patroni-check-timeline-checker.json`,
+`patroni-check-timeline-probes.jsonl`,
 `acknowledged-op-ids.txt`, `final-primary-op-counts.tsv`,
 `pacman-cluster-snapshots.jsonl`, `pg-stat-replication.json`,
 `pg-stat-wal-receiver.jsonl`, nemesis logs, PACMAN cluster/history snapshots,

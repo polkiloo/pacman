@@ -127,6 +127,8 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 		return lab.synchronousStandbyKill(ctx, caseDir, scheduleFile)
 	case maximumLagOnFailoverNemesis:
 		return lab.maximumLagOnFailover(ctx, caseDir, scheduleFile)
+	case patroniCheckTimelineNemesis:
+		return lab.patroniCheckTimelineFailover(ctx, caseDir, scheduleFile)
 	case "primary-dcs-partition":
 		targets := []string{"pacman-dcs", "pacman-dcs-2", "pacman-dcs-3"}
 		event("primary-dcs-partition", "start", fmt.Sprintf(":target %q :dcs %q", member, strings.Join(targets, " ")))

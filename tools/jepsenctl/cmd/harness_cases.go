@@ -142,6 +142,7 @@ func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, c
 		"synchronous_replication_checker":  lab.checkSynchronousReplication(ctx, workload, caseDir),
 		"synchronous_standby_kill_checker": lab.checkSynchronousStandbyKill(nemesis, caseDir),
 		"maximum_lag_on_failover_checker":  lab.checkMaximumLagOnFailover(nemesis, caseDir),
+		"patroni_check_timeline_checker":   lab.checkPatroniCheckTimeline(nemesis, caseDir),
 		"strict_sync_checker":              lab.checkStrictSyncNoStandby(nemesis, caseDir),
 		"nemesis_schedule_checker_status": runChecker(func() error {
 			return validateNemesisScheduleFile(workload, nemesis, filepath.Join(caseDir, "nemesis-schedule.edn"))

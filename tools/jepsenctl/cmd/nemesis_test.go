@@ -81,6 +81,15 @@ func TestValidateNemesisSchedule(t *testing.T) {
 `,
 		},
 		{
+			name:     "accepts Patroni check timeline failover",
+			workload: "append-check-timeline",
+			nemesis:  patroniCheckTimelineNemesis,
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :stale-timeline-failover :action :start :target "patroni-1" :stale-replica "patroni-2" :eligible-replica "patroni-3"}
+{:time "2026-05-01T00:00:02Z" :nemesis :stale-timeline-failover :action :stop :target "patroni-1" :stale-replica "patroni-2" :eligible-replica "patroni-3" :promoted "patroni-3" :result :ok}
+`,
+		},
+		{
 			name:     "accepts failover chain step result",
 			workload: "append-failover",
 			nemesis:  "failover-chain",

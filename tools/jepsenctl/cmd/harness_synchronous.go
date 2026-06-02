@@ -54,6 +54,9 @@ type strictSyncWriteProbe struct {
 }
 
 func (lab *harnessLab) prepareWorkloadProfile(ctx context.Context, workload, caseDir string) error {
+	if profile, ok := resolvePatroniCheckTimelineProfile(workload); ok {
+		return lab.preparePatroniCheckTimelineProfile(ctx, workload, caseDir, profile)
+	}
 	if profile, ok := resolvePatroniMaximumLagOnFailoverProfile(workload); ok {
 		return lab.prepareMaximumLagOnFailoverProfile(ctx, workload, caseDir, profile)
 	}

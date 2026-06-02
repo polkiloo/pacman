@@ -392,6 +392,9 @@ func TestHarnessSmallProfileHelpers(t *testing.T) {
 	if got := workloadTable("append-max-lag"); got != "jepsen.append_values" {
 		t.Fatalf("maximum lag append table: got %q", got)
 	}
+	if got := workloadTable("append-check-timeline"); got != "jepsen.append_values" {
+		t.Fatalf("check timeline append table: got %q", got)
+	}
 	if got := workloadTable("serializable-txn"); got != "jepsen.txn_ops" {
 		t.Fatalf("txn table: got %q", got)
 	}
