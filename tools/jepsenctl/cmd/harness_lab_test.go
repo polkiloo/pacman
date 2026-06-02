@@ -121,6 +121,34 @@ func TestDCSQuorumTargetStateDerivesKilledTargetsFromEndpointHealth(t *testing.T
 	}
 }
 
+func TestRecordDCSQuorumRecoveryProbeRetriesUntilHealthy(t *testing.T) {
+	t.Parallel()
+
+	runner := &scriptedRunner{
+		statuses: []int{1, 0, 0, 0, 0, 0},
+	}
+	lab := newHarnessLab(harnessOptions{
+		repoRoot: t.TempDir(),
+		runner:   runner,
+	})
+	lab.cfg.dcsRecoveryTimeout = 50 * time.Millisecond
+	lab.cfg.dcsRecoveryInterval = time.Millisecond
+
+	caseDir := t.TempDir()
+	lab.recordDCSQuorumRecoveryProbe(context.Background(), caseDir, "dcs-lose-majority", "after-restart", []string{"pacman-dcs-2", "pacman-dcs-3"}, "pacman-primary")
+
+	if runner.calls != 6 {
+		t.Fatalf("runner calls: got %d want 6", runner.calls)
+	}
+	rows := readJSONL(filepath.Join(caseDir, dcsQuorumSampleFile))
+	if len(rows) != 2 {
+		t.Fatalf("samples: got %d want 2", len(rows))
+	}
+	if rows[0]["healthyEndpoints"] != float64(2) || rows[1]["healthyEndpoints"] != float64(3) {
+		t.Fatalf("healthy endpoint samples: %#v", rows)
+	}
+}
+
 func TestIPTablesPartitionReportsCommandFailure(t *testing.T) {
 	t.Parallel()
 

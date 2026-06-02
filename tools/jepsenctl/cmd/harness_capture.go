@@ -289,6 +289,27 @@ func (lab *harnessLab) recordDCSQuorumProbe(ctx context.Context, caseDir, nemesi
 	return err
 }
 
+func (lab *harnessLab) recordDCSQuorumRecoveryProbe(ctx context.Context, caseDir, nemesis, phase string, targets []string, observer string) {
+	deadline := time.Now().Add(lab.cfg.dcsRecoveryTimeout)
+	interval := lab.cfg.dcsRecoveryInterval
+	if interval <= 0 {
+		interval = time.Second
+	}
+	for {
+		if err := lab.recordDCSQuorumProbe(ctx, caseDir, nemesis, phase, targets, observer); err == nil {
+			return
+		}
+		if lab.cfg.dcsRecoveryTimeout <= 0 || !time.Now().Before(deadline) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
+	}
+}
+
 func dcsQuorumTargetState(nemesis string, targets []string, health dcsHealthResult) (int, bool) {
 	switch nemesis {
 	case "dcs-kill-one", "dcs-lose-majority", "dcs-full-restart":

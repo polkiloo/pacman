@@ -145,6 +145,12 @@ seconds after the nemesis heals before final checker sampling. The default is
 `10`, which gives promoted timelines and restarted nodes time to settle while
 the primary sampler continues recording the transition.
 
+DCS quorum cases poll for a fully healthy post-heal sample for up to
+`PACMAN_JEPSEN_DCS_RECOVERY_TIMEOUT_SECONDS` seconds at
+`PACMAN_JEPSEN_DCS_RECOVERY_INTERVAL_SECONDS` intervals. The defaults are `10`
+and `1`, which tolerate transient etcd election responses without masking a
+quorum that fails to recover.
+
 Artifacts are written under:
 
 ```text
