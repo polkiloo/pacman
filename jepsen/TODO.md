@@ -161,7 +161,7 @@ surface.
 
 - [x] `synchronous_mode=true`.
 - [x] `synchronous_mode_strict=true`.
-- [ ] `maximum_lag_on_failover`.
+- [x] `maximum_lag_on_failover`.
 - [ ] `check_timeline=true`.
 - [ ] `patronictl pause` / `resume`.
 - [x] Patroni dynamic config changes through DCS.

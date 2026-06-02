@@ -327,6 +327,7 @@ func nemesisAllowedForWorkload(workload, nemesis string) bool {
 		"append-sync":               {"kill": {}, "sync-standby-kill": {}},
 		"append-sync-two":           {"none": {}},
 		"append-strict-sync":        {"no-standby": {}},
+		"append-max-lag":            {maximumLagOnFailoverNemesis: {}},
 		"open-transaction-failover": {"kill": {}},
 		"vip-routing":               {"switchover": {}},
 		"append-dcs-quorum":         {"dcs-kill-one": {}, "dcs-lose-majority": {}, "primary-dcs-majority-partition": {}, "dcs-full-restart": {}, "dcs-slow-network": {}},

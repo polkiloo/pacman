@@ -72,6 +72,15 @@ func TestValidateNemesisSchedule(t *testing.T) {
 `,
 		},
 		{
+			name:     "accepts maximum lag failover",
+			workload: "append-max-lag",
+			nemesis:  maximumLagOnFailoverNemesis,
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :lagging-replica-failover :action :start :target "patroni-1" :lagging-replica "patroni-2" :eligible-replica "patroni-3"}
+{:time "2026-05-01T00:00:02Z" :nemesis :lagging-replica-failover :action :stop :target "patroni-1" :lagging-replica "patroni-2" :eligible-replica "patroni-3" :promoted "patroni-3" :result :ok}
+`,
+		},
+		{
 			name:     "accepts failover chain step result",
 			workload: "append-failover",
 			nemesis:  "failover-chain",

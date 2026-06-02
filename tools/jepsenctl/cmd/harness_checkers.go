@@ -40,7 +40,7 @@ func (lab *harnessLab) checkAcknowledgedWrite(ctx context.Context, workload, run
 
 func workloadTable(workload string) string {
 	switch workload {
-	case "append-smoke", "append-failover", "append-sync", "append-sync-two", "append-strict-sync", "append-switchover", "append-dcs-quorum", "open-transaction-failover", "vip-routing":
+	case "append-smoke", "append-failover", "append-sync", "append-sync-two", "append-strict-sync", "append-max-lag", "append-switchover", "append-dcs-quorum", "open-transaction-failover", "vip-routing":
 		return "jepsen.append_values"
 	case "single-key-register":
 		return "jepsen.register_values"
@@ -223,6 +223,22 @@ func (lab *harnessLab) checkSynchronousStandbyKill(nemesis, caseDir string) erro
 	probes := readSynchronousStandbyKillProbes(filepath.Join(caseDir, synchronousStandbyKillProbesFile))
 	err := checkSynchronousStandbyKillProbes(probes)
 	result := map[string]any{"checker": "synchronous-standby-kill", "valid": err == nil, "applicable": true, "probes": probes}
+	if err != nil {
+		result["error"] = err.Error()
+	}
+	writeJSON(checkerFile, result)
+	return err
+}
+
+func (lab *harnessLab) checkMaximumLagOnFailover(nemesis, caseDir string) error {
+	checkerFile := filepath.Join(caseDir, maximumLagOnFailoverCheckerFile)
+	if nemesis != maximumLagOnFailoverNemesis {
+		writeJSON(checkerFile, map[string]any{"checker": "maximum-lag-on-failover", "valid": true, "applicable": false})
+		return nil
+	}
+	probes := readMaximumLagOnFailoverProbes(filepath.Join(caseDir, maximumLagOnFailoverProbesFile))
+	err := checkMaximumLagOnFailoverProbes(probes)
+	result := map[string]any{"checker": "maximum-lag-on-failover", "valid": err == nil, "applicable": true, "probes": probes}
 	if err != nil {
 		result["error"] = err.Error()
 	}

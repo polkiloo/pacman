@@ -63,8 +63,14 @@ func TestResolveJepsenTarget(t *testing.T) {
 	if !patroni.supportsCase("append-strict-sync", "no-standby") {
 		t.Fatalf("patroni target should support append-strict-sync:no-standby")
 	}
+	if !patroni.supportsCase("append-max-lag", maximumLagOnFailoverNemesis) {
+		t.Fatalf("patroni target should support append-max-lag:%s", maximumLagOnFailoverNemesis)
+	}
 	if pacman.supportsCase("append-sync", "kill") {
 		t.Fatalf("pacman target should not support Patroni-only append-sync:kill")
+	}
+	if pacman.supportsCase("append-max-lag", maximumLagOnFailoverNemesis) {
+		t.Fatalf("pacman target should not support Patroni-only append-max-lag:%s", maximumLagOnFailoverNemesis)
 	}
 	if patroni.supportsCase("append-failover", "packet") {
 		t.Fatalf("patroni target should not support append-failover:packet yet")

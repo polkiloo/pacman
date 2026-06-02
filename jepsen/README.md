@@ -101,6 +101,7 @@ Implemented workload profiles:
 - `append-sync` (Patroni calibration only)
 - `append-sync-two` (Patroni calibration only)
 - `append-strict-sync` (Patroni calibration only)
+- `append-max-lag` (Patroni calibration only)
 - `append-dcs-quorum`
 - `open-transaction-failover`
 - `vip-routing`
@@ -127,6 +128,7 @@ Implemented nemesis profiles:
 - `repeated-failure`
 - `sync-standby-kill` (Patroni sync calibration only)
 - `no-standby` (Patroni strict-sync calibration only)
+- `lagging-replica-failover` (Patroni max-lag calibration only)
 
 Campaigns reset `deploy/lab/.local/` before bootstrap by default so repeated
 runs start from a clean PostgreSQL and DCS state. After artifact collection, the
@@ -174,7 +176,8 @@ Patroni-managed PostgreSQL nodes, and a three-node etcd quorum. Its enabled
 baseline cases are `append-smoke:none`, `append-failover:kill`, and
 `single-key-register:packet`. The opt-in synchronous replication calibration
 cases are `append-sync:kill`, `append-sync:sync-standby-kill`,
-`append-sync-two:none`, and `append-strict-sync:no-standby`:
+`append-sync-two:none`, `append-strict-sync:no-standby`, and
+`append-max-lag:lagging-replica-failover`:
 
 ```bash
 PACMAN_JEPSEN_TARGET=patroni-3-data \
@@ -185,6 +188,8 @@ PACMAN_JEPSEN_TARGET=patroni-3-data \
   go run ./tools/jepsenctl run docker case append-sync-two-none
 PACMAN_JEPSEN_TARGET=patroni-3-data \
   go run ./tools/jepsenctl run docker case append-strict-sync-no-standby
+PACMAN_JEPSEN_TARGET=patroni-3-data \
+  go run ./tools/jepsenctl run docker case append-max-lag-lagging-replica-failover
 ```
 
 The synchronous cases configure Patroni through its dynamic DCS configuration
@@ -194,7 +199,10 @@ standby. The two-standby case configures `synchronous_node_count=2` and requires
 both standbys to be selected. The strict-sync case stops both standbys, requires
 a bounded write probe to become unavailable, restarts both standbys, and
 requires writes to recover. Other Patroni workload/nemesis profiles remain
-disabled until their target-specific fault controls are implemented.
+disabled until their target-specific fault controls are implemented. The
+max-lag case configures `maximum_lag_on_failover`, pauses WAL replay on one
+replica until it exceeds the threshold, stops the primary, and requires Patroni
+to promote the other replica while recording replay recovery.
 
 Compare an explicit PACMAN run with an explicit Patroni calibration run using
 their `case-results.jsonl` files:
@@ -222,6 +230,8 @@ Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
 `synchronous-replication-checker.json`,
 `synchronous-standby-kill-checker.json`, `synchronous-standby-kill-probes.jsonl`,
 `strict-sync-no-standby-checker.json`, `strict-sync-write-probes.jsonl`,
+`maximum-lag-on-failover-config.json`, `maximum-lag-on-failover-checker.json`,
+`maximum-lag-on-failover-probes.jsonl`,
 `acknowledged-op-ids.txt`, `final-primary-op-counts.tsv`,
 `pacman-cluster-snapshots.jsonl`, `pg-stat-replication.json`,
 `pg-stat-wal-receiver.jsonl`, nemesis logs, PACMAN cluster/history snapshots,
