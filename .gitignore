@@ -17,6 +17,8 @@
 coverage.*
 *.coverprofile
 profile.cov
+.cache/
+.gocache/
 jepsen/store/
 
 # Dependency directories (remove the comment below to include it)
