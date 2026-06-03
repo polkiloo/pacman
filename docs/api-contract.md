@@ -40,6 +40,9 @@ Key review decisions:
   required `leader` plus optional `candidate` and `scheduled_at`.
 - Patroni-compatible `POST /failover` uses the Patroni request shape with required
   `candidate` and optional `leader`.
+- Patroni-compatible `PATCH /config` supports `pause` updates so
+  `patronictl pause` and `patronictl resume` enter and leave PACMAN maintenance
+  mode.
 - Rejoin remains an internal control-plane workflow in v1 and is not exposed as a
   public mutating API.
 

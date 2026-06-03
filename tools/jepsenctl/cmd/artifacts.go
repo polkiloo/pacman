@@ -19,6 +19,7 @@ var artifactIndexExactNames = map[string]struct{}{
 	"nemesis-schedule.edn":                            {},
 	"case-results.jsonl":                              {},
 	"nightly-failures.txt":                            {},
+	"failure-diagnostics.json":                        {},
 	"docker-compose-after-destroy.txt":                {},
 	"checker.json":                                    {},
 	"single-primary-checker.json":                     {},
@@ -46,6 +47,12 @@ var artifactIndexExactNames = map[string]struct{}{
 	"synchronous-standby-kill-probes.jsonl":           {},
 	"strict-sync-no-standby-checker.json":             {},
 	"strict-sync-write-probes.jsonl":                  {},
+	"maximum-lag-on-failover-config.json":             {},
+	"maximum-lag-on-failover-checker.json":            {},
+	"maximum-lag-on-failover-probes.jsonl":            {},
+	"patroni-check-timeline-config.json":              {},
+	"patroni-check-timeline-checker.json":             {},
+	"patroni-check-timeline-probes.jsonl":             {},
 	"primary-observations.jsonl":                      {},
 	"pacman-cluster-snapshots.jsonl":                  {},
 	"pg-stat-wal-receiver.jsonl":                      {},
@@ -69,10 +76,15 @@ type artifactSummaryOptions struct {
 }
 
 type caseResult struct {
-	Workload string `json:"workload"`
-	Nemesis  string `json:"nemesis"`
-	Valid    bool   `json:"valid"`
-	Details  string `json:"details"`
+	Workload       string                       `json:"workload"`
+	Nemesis        string                       `json:"nemesis"`
+	RunID          string                       `json:"runId"`
+	Valid          bool                         `json:"valid"`
+	Details        string                       `json:"details"`
+	History        string                       `json:"history"`
+	HistoryFormat  string                       `json:"historyFormat"`
+	HistoryEvents  int                          `json:"historyEvents"`
+	CheckerReports map[string]caseCheckerReport `json:"checkerReports,omitempty"`
 }
 
 type checkerResult struct {
@@ -80,6 +92,17 @@ type checkerResult struct {
 	Valid      *bool  `json:"valid"`
 	Applicable *bool  `json:"applicable"`
 	Error      string `json:"error"`
+}
+
+type caseCheckerReport struct {
+	Checker    string         `json:"checker,omitempty"`
+	File       string         `json:"file"`
+	Valid      *bool          `json:"valid,omitempty"`
+	Applicable *bool          `json:"applicable,omitempty"`
+	Error      string         `json:"error,omitempty"`
+	Reason     string         `json:"reason,omitempty"`
+	Summary    string         `json:"summary,omitempty"`
+	Facts      map[string]any `json:"facts,omitempty"`
 }
 
 func newArtifactsCommand() *cobra.Command {

@@ -125,6 +125,10 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 		return lab.strictSyncNoStandby(ctx, caseDir, scheduleFile, member, service, peers)
 	case synchronousStandbyKillNemesisProfile:
 		return lab.synchronousStandbyKill(ctx, caseDir, scheduleFile)
+	case maximumLagOnFailoverNemesis:
+		return lab.maximumLagOnFailover(ctx, caseDir, scheduleFile)
+	case patroniCheckTimelineNemesis:
+		return lab.patroniCheckTimelineFailover(ctx, caseDir, scheduleFile)
 	case "primary-dcs-partition":
 		targets := []string{"pacman-dcs", "pacman-dcs-2", "pacman-dcs-3"}
 		event("primary-dcs-partition", "start", fmt.Sprintf(":target %q :dcs %q", member, strings.Join(targets, " ")))
@@ -164,7 +168,7 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 		_ = lab.recordDCSQuorumProbe(ctx, caseDir, profile, "during-primary-majority-partition", lab.cfg.dcsMajorityPartitionServices, service)
 		time.Sleep(lab.cfg.nemesisHold)
 		lab.iptablesHeal(ctx, service, lab.cfg.dcsMajorityPartitionServices)
-		_ = lab.recordDCSQuorumProbe(ctx, caseDir, profile, "after-primary-majority-partition", lab.cfg.dcsMajorityPartitionServices, service)
+		lab.recordDCSQuorumRecoveryProbe(ctx, caseDir, profile, "after-primary-majority-partition", lab.cfg.dcsMajorityPartitionServices, service)
 		event("primary-dcs-majority-partition", "stop", fmt.Sprintf(":target %q :dcs %q :result :ok", member, strings.Join(lab.cfg.dcsMajorityPartitionServices, " ")))
 	case "dcs-full-restart":
 		lab.dcsFullRestart(ctx, caseDir, scheduleFile, profile, lab.cfg.dcsRestartServices)
@@ -202,6 +206,9 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 }
 
 func writeNemesisScheduleEvent(scheduleFile, name, action, value string) {
+	if action == "stop" {
+		appendFile(scheduleFile, fmt.Sprintf("{:time %q :nemesis :%s :action :heal %s}\n", time.Now().UTC().Format(time.RFC3339), name, value))
+	}
 	appendFile(scheduleFile, fmt.Sprintf("{:time %q :nemesis :%s :action :%s %s}\n", time.Now().UTC().Format(time.RFC3339), name, action, value))
 }
 
@@ -467,7 +474,9 @@ func (lab *harnessLab) dcsKill(ctx context.Context, caseDir, scheduleFile, profi
 		members = append(members, dcsMemberForService(service))
 	}
 	beforePhase, duringPhase, afterPhase := dcsQuorumPhases(profile)
-	appendFile(scheduleFile, fmt.Sprintf("{:time %q :nemesis :%s :action :start :targets %q :members %q}\n", time.Now().UTC().Format(time.RFC3339), strings.ReplaceAll(profile, ",", "-"), strings.Join(services, " "), strings.Join(members, " ")))
+	scheduleName := strings.ReplaceAll(profile, ",", "-")
+	targets := strings.Join(services, " ")
+	writeNemesisScheduleEvent(scheduleFile, scheduleName, "start", fmt.Sprintf(":target %q :targets %q :members %q", targets, targets, strings.Join(members, " ")))
 	_ = lab.recordDCSQuorumProbe(ctx, caseDir, profile, beforePhase, services, "pacman-primary")
 	for _, service := range services {
 		_ = lab.stopDCSMember(ctx, service)
@@ -477,8 +486,8 @@ func (lab *harnessLab) dcsKill(ctx context.Context, caseDir, scheduleFile, profi
 	for _, service := range services {
 		_ = lab.startDCSMember(ctx, service)
 	}
-	_ = lab.recordDCSQuorumProbe(ctx, caseDir, profile, afterPhase, services, "pacman-primary")
-	appendFile(scheduleFile, fmt.Sprintf("{:time %q :nemesis :%s :action :stop :targets %q :members %q :result :ok}\n", time.Now().UTC().Format(time.RFC3339), strings.ReplaceAll(profile, ",", "-"), strings.Join(services, " "), strings.Join(members, " ")))
+	lab.recordDCSQuorumRecoveryProbe(ctx, caseDir, profile, afterPhase, services, "pacman-primary")
+	writeNemesisScheduleEvent(scheduleFile, scheduleName, "stop", fmt.Sprintf(":target %q :targets %q :members %q :result :ok", targets, targets, strings.Join(members, " ")))
 }
 
 func (lab *harnessLab) dcsFullRestart(ctx context.Context, caseDir, scheduleFile, profile string, services []string) {
@@ -486,7 +495,8 @@ func (lab *harnessLab) dcsFullRestart(ctx context.Context, caseDir, scheduleFile
 }
 
 func (lab *harnessLab) dcsSlowNetwork(ctx context.Context, caseDir, scheduleFile, profile string, services []string) {
-	appendFile(scheduleFile, fmt.Sprintf("{:time %q :nemesis :dcs-slow-network :action :start :targets %q}\n", time.Now().UTC().Format(time.RFC3339), strings.Join(services, " ")))
+	targets := strings.Join(services, " ")
+	writeNemesisScheduleEvent(scheduleFile, "dcs-slow-network", "start", fmt.Sprintf(":target %q :targets %q", targets, targets))
 	_ = lab.recordDCSQuorumProbe(ctx, caseDir, profile, "before-dcs-slow-network", services, "pacman-primary")
 	for _, service := range services {
 		_ = lab.slowNetworkOn(ctx, service)
@@ -496,8 +506,8 @@ func (lab *harnessLab) dcsSlowNetwork(ctx context.Context, caseDir, scheduleFile
 	for _, service := range services {
 		_ = lab.slowNetworkOff(ctx, service)
 	}
-	_ = lab.recordDCSQuorumProbe(ctx, caseDir, profile, "after-dcs-slow-network", services, "pacman-primary")
-	appendFile(scheduleFile, fmt.Sprintf("{:time %q :nemesis :dcs-slow-network :action :stop :targets %q :result :ok}\n", time.Now().UTC().Format(time.RFC3339), strings.Join(services, " ")))
+	lab.recordDCSQuorumRecoveryProbe(ctx, caseDir, profile, "after-dcs-slow-network", services, "pacman-primary")
+	writeNemesisScheduleEvent(scheduleFile, "dcs-slow-network", "stop", fmt.Sprintf(":target %q :targets %q :result :ok", targets, targets))
 }
 
 func (lab *harnessLab) stopDCSMember(ctx context.Context, service string) error {
@@ -529,7 +539,7 @@ func (lab *harnessLab) startDCSMember(ctx context.Context, service string) error
 func (lab *harnessLab) failoverChain(ctx context.Context, caseDir, scheduleFile string) {
 	chainFile := filepath.Join(caseDir, "failover-chain.jsonl")
 	_ = os.WriteFile(chainFile, nil, 0o644)
-	appendFile(scheduleFile, fmt.Sprintf("{:time %q :nemesis :failover-chain :action :start :target %q}\n", time.Now().UTC().Format(time.RFC3339), lab.currentPrimaryName(ctx)))
+	writeNemesisScheduleEvent(scheduleFile, "failover-chain", "start", fmt.Sprintf(":target %q", lab.currentPrimaryName(ctx)))
 	step := 0
 	for _, target := range []string{"alpha-2", "alpha-3", "alpha-1"} {
 		_ = lab.waitForClusterSwitchoverReady(ctx, 90*time.Second)
@@ -553,14 +563,14 @@ func (lab *harnessLab) failoverChain(ctx context.Context, caseDir, scheduleFile 
 			"exitStatus":    status,
 			"output":        output,
 		})
-		appendFile(scheduleFile, fmt.Sprintf("{:time %q :nemesis :failover-chain :action :step :source %q :target %q :exit-status %d}\n", time.Now().UTC().Format(time.RFC3339), source, target, status))
+		writeNemesisScheduleEvent(scheduleFile, "failover-chain", "step", fmt.Sprintf(":source %q :target %q :exit-status %d", source, target, status))
 		if status != 0 {
 			break
 		}
 		time.Sleep(2 * time.Second)
 	}
 	time.Sleep(lab.cfg.nemesisHold)
-	appendFile(scheduleFile, fmt.Sprintf("{:time %q :nemesis :failover-chain :action :stop :target %q :result :ok}\n", time.Now().UTC().Format(time.RFC3339), lab.currentPrimaryName(ctx)))
+	writeNemesisScheduleEvent(scheduleFile, "failover-chain", "stop", fmt.Sprintf(":target %q :result :ok", lab.currentPrimaryName(ctx)))
 }
 
 func (lab *harnessLab) settleAfterNemesis(caseDir, profile string) {

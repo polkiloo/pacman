@@ -126,6 +126,7 @@ func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, c
 	checks := map[string]error{
 		"workload":                         workloadStatus,
 		"nemesis":                          nemesisStatus,
+		"case_history":                     validateCaseHistoryArtifact(caseHistory, workload, nemesis, runID),
 		"workload_checker":                 lab.checkWorkloadProfile(ctx, workload, runID, caseDir),
 		"primary_checker":                  runChecker(func() error { return execSinglePrimaryChecker(caseDir) }),
 		"acknowledged_checker":             lab.checkAcknowledgedWrite(ctx, workload, runID, caseDir),
@@ -141,6 +142,8 @@ func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, c
 		"vip_routing_checker":              runChecker(func() error { return execVIPRoutingChecker(workload, nemesis, caseDir) }),
 		"synchronous_replication_checker":  lab.checkSynchronousReplication(ctx, workload, caseDir),
 		"synchronous_standby_kill_checker": lab.checkSynchronousStandbyKill(nemesis, caseDir),
+		"maximum_lag_on_failover_checker":  lab.checkMaximumLagOnFailover(nemesis, caseDir),
+		"patroni_check_timeline_checker":   lab.checkPatroniCheckTimeline(nemesis, caseDir),
 		"strict_sync_checker":              lab.checkStrictSyncNoStandby(nemesis, caseDir),
 		"nemesis_schedule_checker_status": runChecker(func() error {
 			return validateNemesisScheduleFile(workload, nemesis, filepath.Join(caseDir, "nemesis-schedule.edn"))
@@ -158,7 +161,7 @@ func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, c
 		writeCaseEvent(caseHistory, ":case", "ok", "workload", fmt.Sprintf("{:workload %q :nemesis %q :run-id %q}", workload, nemesis, runID))
 		appendFile(campaignHistory, mustRead(caseHistory))
 		_, _ = writeEDNEvent(campaignHistory, workload+"/"+nemesis, "ok", fmt.Sprintf("%q", runID))
-		recordCaseResult(caseResults, workload, nemesis, true, "checkers passed")
+		recordCaseResult(caseResults, workload, nemesis, runID, caseHistory, true, "checkers passed", collectCaseCheckerReports(caseDir))
 		return nil
 	}
 
@@ -166,7 +169,7 @@ func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, c
 	writeCaseEvent(caseHistory, ":case", "fail", "workload", fmt.Sprintf("{:workload %q :nemesis %q :run-id %q :details %q}", workload, nemesis, runID, details))
 	appendFile(campaignHistory, mustRead(caseHistory))
 	_, _ = writeEDNEvent(campaignHistory, workload+"/"+nemesis, "fail", fmt.Sprintf("%q", runID))
-	recordCaseResult(caseResults, workload, nemesis, false, details)
+	recordCaseResult(caseResults, workload, nemesis, runID, caseHistory, false, details, collectCaseCheckerReports(caseDir))
 	return fmt.Errorf("%s", details)
 }
 
@@ -179,13 +182,223 @@ func writeCaseEvent(path, process, status, functionName, value string) {
 	appendFile(path, line)
 }
 
-func recordCaseResult(path, workload, nemesis string, valid bool, details string) {
+func recordCaseResult(path, workload, nemesis, runID, historyPath string, valid bool, details string, checkerReports map[string]caseCheckerReport) {
 	appendJSONL(path, map[string]any{
-		"workload": workload,
-		"nemesis":  nemesis,
-		"valid":    valid,
-		"details":  details,
+		"workload":       workload,
+		"nemesis":        nemesis,
+		"runId":          runID,
+		"valid":          valid,
+		"details":        details,
+		"history":        historyPath,
+		"historyFormat":  "edn",
+		"historyEvents":  countLines(historyPath),
+		"checkerReports": checkerReports,
 	})
+}
+
+func collectCaseCheckerReports(caseDir string) map[string]caseCheckerReport {
+	specs := []struct {
+		key  string
+		file string
+	}{
+		{key: "splitBrain", file: singlePrimaryCheckerFile},
+		{key: "acknowledgedWritePreservation", file: acknowledgedWriteCheckerFile},
+		{key: "timelineConvergence", file: timelineCheckerFile},
+		{key: "failoverRejoin", file: oldPrimaryRejoinCheckerFile},
+	}
+
+	reports := make(map[string]caseCheckerReport, len(specs))
+	for _, spec := range specs {
+		reports[spec.key] = readCaseCheckerReport(caseDir, spec.file)
+	}
+	return reports
+}
+
+func readCaseCheckerReport(caseDir, file string) caseCheckerReport {
+	report := caseCheckerReport{File: file}
+	path := filepath.Join(caseDir, file)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		report.Error = "missing checker artifact"
+		valid := false
+		report.Valid = &valid
+		return report
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		report.Error = fmt.Sprintf("invalid checker artifact: %v", err)
+		valid := false
+		report.Valid = &valid
+		return report
+	}
+
+	report.Checker = stringValue(raw["checker"])
+	report.Valid = boolPointer(raw["valid"])
+	report.Applicable = boolPointer(raw["applicable"])
+	report.Error = stringValue(raw["error"])
+	report.Reason = stringValue(raw["reason"])
+	report.Summary = summarizeCaseCheckerReport(file, raw)
+	report.Facts = selectedCheckerFacts(file, raw)
+	return report
+}
+
+func summarizeCaseCheckerReport(file string, raw map[string]any) string {
+	if errText := stringValue(raw["error"]); errText != "" {
+		return errText
+	}
+	if reason := stringValue(raw["reason"]); reason != "" {
+		return reason
+	}
+
+	switch file {
+	case singlePrimaryCheckerFile:
+		return fmt.Sprintf("valid=%s samples=%s violationSamples=%d",
+			fieldString(raw, "valid"),
+			fieldString(raw, "samples"),
+			arrayLength(raw["violationSamples"]))
+	case acknowledgedWriteCheckerFile:
+		return fmt.Sprintf("valid=%s expectedAcknowledged=%s observedExactlyOnce=%s missingAcknowledged=%s duplicateAcknowledged=%s",
+			fieldString(raw, "valid"),
+			fieldString(raw, "expectedAcknowledged"),
+			fieldString(raw, "observedExactlyOnce"),
+			fieldString(raw, "missingAcknowledged"),
+			fieldString(raw, "duplicateAcknowledged"))
+	case timelineCheckerFile:
+		return fmt.Sprintf("valid=%s promotionObserved=%s timelineAdvanced=%s replicasConverged=%s oldPrimarySafe=%s",
+			fieldString(raw, "valid"),
+			fieldString(raw, "promotionObserved"),
+			fieldString(raw, "timelineAdvanced"),
+			fieldString(raw, "replicasConverged"),
+			fieldString(raw, "oldPrimarySafe"))
+	case oldPrimaryRejoinCheckerFile:
+		return fmt.Sprintf("valid=%s promotionObserved=%s oldPrimaryRejoined=%s oldPrimarySafeOrRejoined=%s unsafeAfterPromotion=%s initialPrimary=%s finalPrimary=%s",
+			fieldString(raw, "valid"),
+			fieldString(raw, "promotionObserved"),
+			fieldString(raw, "oldPrimaryRejoined"),
+			fieldString(raw, "oldPrimarySafeOrRejoined"),
+			fieldString(raw, "oldPrimaryUnsafeAfterPromotion"),
+			memberName(raw["initialPrimary"]),
+			memberName(raw["finalPrimary"]))
+	default:
+		return fmt.Sprintf("valid=%s", fieldString(raw, "valid"))
+	}
+}
+
+func selectedCheckerFacts(file string, raw map[string]any) map[string]any {
+	switch file {
+	case singlePrimaryCheckerFile:
+		return selectFields(raw, "observations", "samples", "writableObservations", "violationSamples")
+	case acknowledgedWriteCheckerFile:
+		return selectFields(raw, "workload", "runId", "finalPrimary", "finalPrimaryService", "asyncLossAllowed", "expectedAcknowledged", "observedExactlyOnce", "missingAcknowledged", "duplicateAcknowledged", "unacknowledgedObserved")
+	case timelineCheckerFile:
+		return selectFields(raw, "promotionObserved", "timelineAdvanced", "replicasConverged", "oldPrimarySafe", "initialSample", "finalSample", "oldPrimaryFinalState")
+	case oldPrimaryRejoinCheckerFile:
+		return selectFields(raw, "nemesis", "promotionObserved", "initialPrimary", "finalPrimary", "oldPrimaryRejoined", "oldPrimarySafeOrRejoined", "oldPrimaryUnsafeAfterPromotion", "oldPrimaryFinalState")
+	default:
+		return nil
+	}
+}
+
+func selectFields(raw map[string]any, fields ...string) map[string]any {
+	selected := make(map[string]any, len(fields))
+	for _, field := range fields {
+		if value, ok := raw[field]; ok {
+			selected[field] = value
+		}
+	}
+	if len(selected) == 0 {
+		return nil
+	}
+	return selected
+}
+
+func stringValue(value any) string {
+	text, _ := value.(string)
+	return text
+}
+
+func boolPointer(value any) *bool {
+	boolean, ok := value.(bool)
+	if !ok {
+		return nil
+	}
+	return &boolean
+}
+
+func fieldString(raw map[string]any, field string) string {
+	value, ok := raw[field]
+	if !ok {
+		return "unknown"
+	}
+	return fmt.Sprint(value)
+}
+
+func arrayLength(value any) int {
+	values, ok := value.([]any)
+	if !ok {
+		return 0
+	}
+	return len(values)
+}
+
+func memberName(value any) string {
+	object, ok := value.(map[string]any)
+	if !ok {
+		return "unknown"
+	}
+	member := stringValue(object["member"])
+	if member == "" {
+		return "unknown"
+	}
+	return member
+}
+
+func validateCaseHistoryArtifact(path, workload, nemesis, runID string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read case history: %w", err)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	events := 0
+	hasCaseInvoke := false
+	hasWorkloadEvent := false
+	for index, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		events++
+		if !strings.HasPrefix(line, "{:") || !strings.HasSuffix(line, "}") {
+			return fmt.Errorf("history line %d is not an EDN map", index+1)
+		}
+		for _, token := range []string{":time", ":process", ":type", ":f", ":value"} {
+			if !strings.Contains(line, token) {
+				return fmt.Errorf("history line %d is missing %s", index+1, token)
+			}
+		}
+		if strings.Contains(line, ":process :case") &&
+			strings.Contains(line, ":type :invoke") &&
+			strings.Contains(line, fmt.Sprintf(":workload %q", workload)) &&
+			strings.Contains(line, fmt.Sprintf(":nemesis %q", nemesis)) &&
+			strings.Contains(line, fmt.Sprintf(":run-id %q", runID)) {
+			hasCaseInvoke = true
+		}
+		if !strings.Contains(line, ":process :case") {
+			hasWorkloadEvent = true
+		}
+	}
+	if events == 0 {
+		return fmt.Errorf("case history is empty")
+	}
+	if !hasCaseInvoke {
+		return fmt.Errorf("case history is missing case invoke event")
+	}
+	if !hasWorkloadEvent {
+		return fmt.Errorf("case history is missing workload events")
+	}
+	return nil
 }
 
 func appendJSONL(path string, value any) {

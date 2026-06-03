@@ -166,6 +166,8 @@ func defaultJepsenCases() []jepsenCase {
 		{Slug: "append-sync-sync-standby-kill", Spec: "append-sync:sync-standby-kill", Description: "Synchronous append workload while killing an active synchronous standby.", PatroniOnly: true},
 		{Slug: "append-sync-two-none", Spec: "append-sync-two:none", Description: "Synchronous append workload with synchronous_node_count=2.", PatroniOnly: true},
 		{Slug: "append-strict-sync-no-standby", Spec: "append-strict-sync:no-standby", Description: "Strict synchronous append workload while stopping both standbys.", PatroniOnly: true},
+		{Slug: "append-max-lag-lagging-replica-failover", Spec: "append-max-lag:lagging-replica-failover", Description: "Append workload while failing over with one replica above maximum_lag_on_failover.", PatroniOnly: true},
+		{Slug: "append-check-timeline-stale-timeline-failover", Spec: "append-check-timeline:stale-timeline-failover", Description: "Append workload while check_timeline blocks promotion of a stale-timeline replica.", PatroniOnly: true},
 	}
 }
 

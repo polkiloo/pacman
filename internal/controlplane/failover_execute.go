@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -64,6 +65,15 @@ func (store *MemoryStateStore) prepareFailoverExecution(promoter PromotionExecut
 		return preparedFailoverExecution{}, err
 	}
 
+	if _, err := selectFailoverCandidate(evaluateFailoverCandidates(spec, status), operation.ToMember); err != nil {
+		failed := failIneligibleFailoverExecution(operation, executedAt)
+		store.journalOperationLocked(failed, executedAt)
+		store.refreshSourceOfTruthLocked(executedAt)
+		store.mu.Unlock()
+		store.persistFailedFailoverExecution(failed)
+		return preparedFailoverExecution{}, err
+	}
+
 	if spec.Failover.FencingRequired && fencer == nil {
 		store.mu.Unlock()
 		return preparedFailoverExecution{}, ErrFailoverFencingHookRequired
@@ -88,6 +98,26 @@ func (store *MemoryStateStore) prepareFailoverExecution(promoter PromotionExecut
 		previousEpoch: status.CurrentEpoch,
 		executedAt:    executedAt,
 	}, nil
+}
+
+func failIneligibleFailoverExecution(operation cluster.Operation, completedAt time.Time) cluster.Operation {
+	updated := operation.Clone()
+	updated.State = cluster.OperationStateFailed
+	updated.Result = cluster.OperationResultFailed
+	updated.CompletedAt = completedAt
+	updated.Message = fmt.Sprintf("automatic failover candidate %s is no longer eligible", updated.ToMember)
+
+	return updated
+}
+
+func (store *MemoryStateStore) persistFailedFailoverExecution(operation cluster.Operation) {
+	if err := store.persistJournaledOperation(context.Background(), operation); err != nil {
+		store.logger.Error("failed to persist rejected failover operation", "operation_id", operation.ID, "error", err)
+	}
+
+	if err := store.refreshCache(context.Background()); err != nil {
+		store.logger.Error("failed to refresh cache after rejected failover", "operation_id", operation.ID, "error", err)
+	}
 }
 
 func runFailoverFencing(ctx context.Context, prepared preparedFailoverExecution, fencer FencingHook) error {

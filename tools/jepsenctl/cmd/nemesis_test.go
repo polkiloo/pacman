@@ -23,6 +23,7 @@ func TestValidateNemesisSchedule(t *testing.T) {
 			nemesis:  "none",
 			schedule: `
 {:time "2026-05-01T00:00:01Z" :nemesis :none :action :start :target "none"}
+{:time "2026-05-01T00:00:02Z" :nemesis :none :action :heal :target "none" :result :ok}
 {:time "2026-05-01T00:00:02Z" :nemesis :none :action :stop :target "none" :result :ok}
 `,
 		},
@@ -32,6 +33,7 @@ func TestValidateNemesisSchedule(t *testing.T) {
 			nemesis:  "kill",
 			schedule: `
 {:time "2026-05-01T00:00:01Z" :nemesis :kill :action :start :target "alpha-1"}
+{:time "2026-05-01T00:00:02Z" :nemesis :kill :action :heal :target "alpha-1" :promoted "alpha-2" :result :ok}
 {:time "2026-05-01T00:00:02Z" :nemesis :kill :action :stop :target "alpha-1" :promoted "alpha-2" :result :ok}
 `,
 		},
@@ -41,6 +43,7 @@ func TestValidateNemesisSchedule(t *testing.T) {
 			nemesis:  "packet,kill",
 			schedule: `
 {:time "2026-05-01T00:00:01Z" :nemesis :packet-kill :action :start :target "alpha-1"}
+{:time "2026-05-01T00:00:02Z" :nemesis :packet-kill :action :heal :target "alpha-1" :result :ok}
 {:time "2026-05-01T00:00:02Z" :nemesis :packet-kill :action :stop :target "alpha-1" :result :ok}
 `,
 		},
@@ -50,6 +53,7 @@ func TestValidateNemesisSchedule(t *testing.T) {
 			nemesis:  "switchover",
 			schedule: `
 {:time "2026-05-01T00:00:01Z" :nemesis :switchover :action :start :source "alpha-1" :target "alpha-2"}
+{:time "2026-05-01T00:00:02Z" :nemesis :switchover :action :heal :source "alpha-1" :target "alpha-2" :exit-status 0}
 {:time "2026-05-01T00:00:02Z" :nemesis :switchover :action :stop :source "alpha-1" :target "alpha-2" :exit-status 0}
 `,
 		},
@@ -59,6 +63,7 @@ func TestValidateNemesisSchedule(t *testing.T) {
 			nemesis:  "no-standby",
 			schedule: `
 {:time "2026-05-01T00:00:01Z" :nemesis :no-standby :action :start :target "patroni-1" :standbys "patroni-replica patroni-replica-2"}
+{:time "2026-05-01T00:00:02Z" :nemesis :no-standby :action :heal :target "patroni-1" :standbys "patroni-replica patroni-replica-2" :result :ok}
 {:time "2026-05-01T00:00:02Z" :nemesis :no-standby :action :stop :target "patroni-1" :standbys "patroni-replica patroni-replica-2" :result :ok}
 `,
 		},
@@ -68,7 +73,28 @@ func TestValidateNemesisSchedule(t *testing.T) {
 			nemesis:  "sync-standby-kill",
 			schedule: `
 {:time "2026-05-01T00:00:01Z" :nemesis :sync-standby-kill :action :start :target "patroni-2" :service "patroni-replica"}
+{:time "2026-05-01T00:00:02Z" :nemesis :sync-standby-kill :action :heal :target "patroni-2" :service "patroni-replica" :result :ok}
 {:time "2026-05-01T00:00:02Z" :nemesis :sync-standby-kill :action :stop :target "patroni-2" :service "patroni-replica" :result :ok}
+`,
+		},
+		{
+			name:     "accepts maximum lag failover",
+			workload: "append-max-lag",
+			nemesis:  maximumLagOnFailoverNemesis,
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :lagging-replica-failover :action :start :target "patroni-1" :lagging-replica "patroni-2" :eligible-replica "patroni-3"}
+{:time "2026-05-01T00:00:02Z" :nemesis :lagging-replica-failover :action :heal :target "patroni-1" :lagging-replica "patroni-2" :eligible-replica "patroni-3" :promoted "patroni-3" :result :ok}
+{:time "2026-05-01T00:00:02Z" :nemesis :lagging-replica-failover :action :stop :target "patroni-1" :lagging-replica "patroni-2" :eligible-replica "patroni-3" :promoted "patroni-3" :result :ok}
+`,
+		},
+		{
+			name:     "accepts Patroni check timeline failover",
+			workload: "append-check-timeline",
+			nemesis:  patroniCheckTimelineNemesis,
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :stale-timeline-failover :action :start :target "patroni-1" :stale-replica "patroni-2" :eligible-replica "patroni-3"}
+{:time "2026-05-01T00:00:02Z" :nemesis :stale-timeline-failover :action :heal :target "patroni-1" :stale-replica "patroni-2" :eligible-replica "patroni-3" :promoted "patroni-3" :result :ok}
+{:time "2026-05-01T00:00:02Z" :nemesis :stale-timeline-failover :action :stop :target "patroni-1" :stale-replica "patroni-2" :eligible-replica "patroni-3" :promoted "patroni-3" :result :ok}
 `,
 		},
 		{
@@ -78,6 +104,7 @@ func TestValidateNemesisSchedule(t *testing.T) {
 			schedule: `
 {:time "2026-05-01T00:00:01Z" :nemesis :failover-chain :action :start :target "alpha-1"}
 {:time "2026-05-01T00:00:02Z" :nemesis :failover-chain :action :step :source "alpha-1" :target "alpha-2" :exit-status 0}
+{:time "2026-05-01T00:00:03Z" :nemesis :failover-chain :action :heal :target "alpha-2" :result :ok}
 {:time "2026-05-01T00:00:03Z" :nemesis :failover-chain :action :stop :target "alpha-2" :result :ok}
 `,
 		},
@@ -90,6 +117,16 @@ func TestValidateNemesisSchedule(t *testing.T) {
 {:time "2026-05-01T00:00:02Z" :nemesis :packet :action :stop :target "alpha-1"}
 `,
 			wantErr: []string{`action "stop" missing command result`},
+		},
+		{
+			name:     "rejects missing heal",
+			workload: "append-failover",
+			nemesis:  "packet",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :packet :action :start :target "alpha-1"}
+{:time "2026-05-01T00:00:02Z" :nemesis :packet :action :stop :target "alpha-1" :result :ok}
+`,
+			wantErr: []string{`missing heal action`},
 		},
 		{
 			name:     "rejects workload mismatch",

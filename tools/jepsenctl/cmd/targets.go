@@ -195,10 +195,18 @@ func (target jepsenTarget) supportsCase(workload, nemesis string) bool {
 		(workload == "append-sync" && nemesis == "kill") ||
 		(workload == "append-sync" && nemesis == "sync-standby-kill") ||
 		(workload == "append-sync-two" && nemesis == "none") ||
-		(workload == "append-strict-sync" && nemesis == "no-standby")
+		(workload == "append-strict-sync" && nemesis == "no-standby") ||
+		(workload == "append-max-lag" && nemesis == maximumLagOnFailoverNemesis) ||
+		(workload == "append-check-timeline" && nemesis == patroniCheckTimelineNemesis)
 }
 
 func isPatroniOnlyWorkload(workload string) bool {
-	_, ok := patroniSynchronousProfile(workload)
+	if _, ok := patroniSynchronousProfile(workload); ok {
+		return true
+	}
+	if _, ok := resolvePatroniMaximumLagOnFailoverProfile(workload); ok {
+		return true
+	}
+	_, ok := resolvePatroniCheckTimelineProfile(workload)
 	return ok
 }

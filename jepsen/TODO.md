@@ -8,8 +8,8 @@ The goal is to prove PACMAN's core HA safety claims first:
 - [x] PACMAN never exposes two writable PostgreSQL primaries at the same time.
 - [x] Acknowledged writes are preserved, or any async-mode loss is explicitly
       measured and reported as allowed data loss.
-- [ ] Failover promotes only eligible replicas.
-- [ ] A former primary rejoins safely and does not silently continue on a
+- [x] Failover promotes only eligible replicas.
+- [x] A former primary rejoins safely and does not silently continue on a
       divergent timeline.
 - [x] Surviving nodes converge to one PostgreSQL timeline after failover.
 - [x] Client write routing follows the current PACMAN primary.
@@ -69,6 +69,7 @@ Implement these before expanding the campaign matrix.
 Collect these for every MVP-1 run:
 
 - [x] Jepsen operation history.
+- [x] Every MVP case writes machine-checkable history.
 - [x] Failure injection history.
 - [x] PACMAN cluster snapshot after run.
 - [x] PACMAN history snapshot after run.
@@ -161,9 +162,9 @@ surface.
 
 - [x] `synchronous_mode=true`.
 - [x] `synchronous_mode_strict=true`.
-- [ ] `maximum_lag_on_failover`.
-- [ ] `check_timeline=true`.
-- [ ] `patronictl pause` / `resume`.
+- [x] `maximum_lag_on_failover`.
+- [x] `check_timeline=true`.
+- [x] `patronictl pause` / `resume`.
 - [x] Patroni dynamic config changes through DCS.
 
 ## Go Automation Migration Plan
@@ -263,14 +264,14 @@ MVP-1 is done when:
 
 - [x] The suite deploys and destroys a clean PACMAN three-data-node cluster.
 - [x] Every MVP case is runnable individually.
-- [ ] Every MVP case writes machine-checkable history.
-- [ ] Every nemesis action records target, start, heal, and command result.
-- [ ] Every failed run produces enough logs and snapshots to explain the failure.
-- [ ] Checkers report:
+- [x] Every MVP case writes machine-checkable history.
+- [x] Every nemesis action records target, start, heal, and command result.
+- [x] Every failed run produces enough logs and snapshots to explain the failure.
+- [x] Checkers report:
   - [x] split-brain result;
   - [x] acknowledged write preservation result;
   - [x] timeline convergence result;
-  - [ ] failover/rejoin summary.
+  - [x] failover/rejoin summary.
 - [ ] `append-smoke:none` is stable across repeated local runs.
 - [x] `append-failover:kill` is stable enough to run as a manual CI smoke.
 - [ ] Unsupported configurations are documented separately from

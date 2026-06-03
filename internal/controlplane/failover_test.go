@@ -565,6 +565,64 @@ func TestMemoryStateStoreExecuteFailoverSkipsOptionalFencing(t *testing.T) {
 	}
 }
 
+func TestMemoryStateStoreExecuteFailoverRejectsCandidateThatBecameIneligible(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.March, 29, 10, 30, 0, 0, time.UTC)
+	store := seededFailoverStore(t, cluster.ClusterSpec{
+		ClusterName: "alpha",
+		Failover: cluster.FailoverPolicy{
+			Mode: cluster.FailoverModeAutomatic,
+		},
+		Members: []cluster.MemberSpec{
+			{Name: "alpha-1"},
+			{Name: "alpha-2", Priority: 100},
+			{Name: "alpha-3", Priority: 50},
+		},
+	}, []agentmodel.NodeStatus{
+		failoverNodeStatus("alpha-1", cluster.MemberRolePrimary, cluster.MemberStateFailed, now, false, 16, 0),
+		failoverNodeStatus("alpha-2", cluster.MemberRoleReplica, cluster.MemberStateStreaming, now, true, 16, 0),
+		failoverNodeStatus("alpha-3", cluster.MemberRoleReplica, cluster.MemberStateStreaming, now, true, 16, 0),
+	})
+	setTestNow(store, func() time.Time { return now.Add(5 * time.Second) })
+
+	intent, err := store.CreateFailoverIntent(context.Background(), FailoverIntentRequest{})
+	if err != nil {
+		t.Fatalf("create failover intent: %v", err)
+	}
+	if intent.Candidate != "alpha-2" {
+		t.Fatalf("candidate: got %q want alpha-2", intent.Candidate)
+	}
+
+	if _, err := store.PublishNodeStatus(context.Background(), failoverNodeStatus("alpha-2", cluster.MemberRoleReplica, cluster.MemberStateFailed, now.Add(time.Second), false, 16, 0)); err != nil {
+		t.Fatalf("publish ineligible candidate status: %v", err)
+	}
+
+	promoter := &recordingPromoter{}
+	if _, err := store.ExecuteFailover(context.Background(), promoter, nil); !errors.Is(err, ErrFailoverNoEligibleCandidates) {
+		t.Fatalf("execute failover error: got %v want %v", err, ErrFailoverNoEligibleCandidates)
+	}
+	if len(promoter.requests) != 0 {
+		t.Fatalf("promotion requests: got %+v want none", promoter.requests)
+	}
+	if _, ok := store.ActiveOperation(); ok {
+		t.Fatal("expected rejected stale failover intent to clear active operation")
+	}
+
+	history := store.History()
+	if len(history) != 1 || history[0].OperationID != intent.Operation.ID || history[0].Result != cluster.OperationResultFailed {
+		t.Fatalf("expected rejected failover history entry, got %+v", history)
+	}
+
+	retry, err := store.CreateFailoverIntent(context.Background(), FailoverIntentRequest{})
+	if err != nil {
+		t.Fatalf("create replacement failover intent: %v", err)
+	}
+	if retry.Candidate != "alpha-3" {
+		t.Fatalf("replacement candidate: got %q want alpha-3", retry.Candidate)
+	}
+}
+
 func TestMemoryStateStoreExecuteFailoverRejectsInvalidExecutionPrerequisites(t *testing.T) {
 	t.Parallel()
 

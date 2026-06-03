@@ -254,6 +254,8 @@ components:
         retry_timeout:
           type: integer
           minimum: 1
+        pause:
+          type: boolean
         maximum_lag_on_failover:
           type: integer
           format: int64

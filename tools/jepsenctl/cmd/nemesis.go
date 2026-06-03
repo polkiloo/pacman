@@ -134,6 +134,9 @@ func validateNemesisSchedule(workload, nemesis string, entries []nemesisSchedule
 	if actions["stop"] == 0 {
 		problems = append(problems, "missing stop action")
 	}
+	if actions["heal"] == 0 {
+		problems = append(problems, "missing heal action")
+	}
 	if nemesis == "failover-chain" && actions["step"] == 0 {
 		problems = append(problems, "failover-chain schedule missing step action")
 	}
@@ -283,7 +286,7 @@ func scheduleNemesisName(nemesis string) string {
 
 func actionRequiresTarget(action string) bool {
 	switch action {
-	case "start", "stop", "step":
+	case "start", "heal", "stop", "step":
 		return true
 	default:
 		return false
@@ -292,7 +295,7 @@ func actionRequiresTarget(action string) bool {
 
 func actionCompletesCommand(action string) bool {
 	switch action {
-	case "stop", "step":
+	case "heal", "stop", "step":
 		return true
 	default:
 		return false
@@ -327,6 +330,8 @@ func nemesisAllowedForWorkload(workload, nemesis string) bool {
 		"append-sync":               {"kill": {}, "sync-standby-kill": {}},
 		"append-sync-two":           {"none": {}},
 		"append-strict-sync":        {"no-standby": {}},
+		"append-max-lag":            {maximumLagOnFailoverNemesis: {}},
+		"append-check-timeline":     {patroniCheckTimelineNemesis: {}},
 		"open-transaction-failover": {"kill": {}},
 		"vip-routing":               {"switchover": {}},
 		"append-dcs-quorum":         {"dcs-kill-one": {}, "dcs-lose-majority": {}, "primary-dcs-majority-partition": {}, "dcs-full-restart": {}, "dcs-slow-network": {}},

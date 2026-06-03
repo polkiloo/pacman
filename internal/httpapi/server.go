@@ -142,6 +142,8 @@ func (srv *Server) registerRoutes() {
 	srv.addProbeRoute("/replica", srv.handleReplica)
 	srv.app.Get("/openapi.yaml", srv.handleOpenAPIDocument)
 	srv.app.Head("/openapi.yaml", srv.handleOpenAPIDocument)
+	srv.app.Get("/config", srv.apiCommonMiddleware(), srv.authMiddleware(AccessScopeClusterRead), srv.handlePatroniConfigGet)
+	srv.app.Patch("/config", srv.apiCommonMiddleware(), srv.authMiddleware(AccessScopeClusterWrite), srv.requireJSONContentTypeMiddleware(), srv.handlePatroniConfigPatch)
 
 	v1 := srv.app.Group("/api/v1", srv.apiCommonMiddleware())
 	v1.Get("/cluster", srv.authMiddleware(AccessScopeClusterRead), srv.handleClusterStatus)

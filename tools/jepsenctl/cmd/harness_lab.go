@@ -50,6 +50,8 @@ type harnessConfig struct {
 	dcsRestartServices           []string
 	dcsSlowServices              []string
 	dcsSlowMinLatencyMS          int
+	dcsRecoveryTimeout           time.Duration
+	dcsRecoveryInterval          time.Duration
 	allowAsyncLoss               bool
 	synchronousStandbyTimeout    time.Duration
 	synchronousStandbyInterval   time.Duration
@@ -109,6 +111,8 @@ func newHarnessLab(options harnessOptions) *harnessLab {
 		dcsRestartServices:           strings.Fields(envOrDefault("PACMAN_JEPSEN_DCS_RESTART_SERVICES", "pacman-dcs pacman-dcs-2 pacman-dcs-3")),
 		dcsSlowServices:              strings.Fields(envOrDefault("PACMAN_JEPSEN_DCS_SLOW_SERVICES", "pacman-dcs pacman-dcs-2 pacman-dcs-3")),
 		dcsSlowMinLatencyMS:          envInt("PACMAN_JEPSEN_DCS_SLOW_MIN_LATENCY_MS", 100),
+		dcsRecoveryTimeout:           time.Duration(envInt("PACMAN_JEPSEN_DCS_RECOVERY_TIMEOUT_SECONDS", 10)) * time.Second,
+		dcsRecoveryInterval:          time.Duration(envInt("PACMAN_JEPSEN_DCS_RECOVERY_INTERVAL_SECONDS", 1)) * time.Second,
 		allowAsyncLoss:               envOrDefault("PACMAN_JEPSEN_ALLOW_ASYNC_LOSS", "false") == "true",
 		synchronousStandbyTimeout:    time.Duration(envInt("PACMAN_JEPSEN_SYNCHRONOUS_STANDBY_TIMEOUT_SECONDS", 60)) * time.Second,
 		synchronousStandbyInterval:   time.Duration(envInt("PACMAN_JEPSEN_SYNCHRONOUS_STANDBY_INTERVAL_SECONDS", 1)) * time.Second,
