@@ -69,6 +69,7 @@ Implement these before expanding the campaign matrix.
 Collect these for every MVP-1 run:
 
 - [x] Jepsen operation history.
+- [x] Every MVP case writes machine-checkable history.
 - [x] Failure injection history.
 - [x] PACMAN cluster snapshot after run.
 - [x] PACMAN history snapshot after run.
@@ -163,7 +164,7 @@ surface.
 - [x] `synchronous_mode_strict=true`.
 - [x] `maximum_lag_on_failover`.
 - [x] `check_timeline=true`.
-- [ ] `patronictl pause` / `resume`.
+- [x] `patronictl pause` / `resume`.
 - [x] Patroni dynamic config changes through DCS.
 
 ## Go Automation Migration Plan
@@ -263,7 +264,7 @@ MVP-1 is done when:
 
 - [x] The suite deploys and destroys a clean PACMAN three-data-node cluster.
 - [x] Every MVP case is runnable individually.
-- [ ] Every MVP case writes machine-checkable history.
+- [x] Every MVP case writes machine-checkable history.
 - [ ] Every nemesis action records target, start, heal, and command result.
 - [ ] Every failed run produces enough logs and snapshots to explain the failure.
 - [ ] Checkers report:

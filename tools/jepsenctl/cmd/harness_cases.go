@@ -126,6 +126,7 @@ func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, c
 	checks := map[string]error{
 		"workload":                         workloadStatus,
 		"nemesis":                          nemesisStatus,
+		"case_history":                     validateCaseHistoryArtifact(caseHistory, workload, nemesis, runID),
 		"workload_checker":                 lab.checkWorkloadProfile(ctx, workload, runID, caseDir),
 		"primary_checker":                  runChecker(func() error { return execSinglePrimaryChecker(caseDir) }),
 		"acknowledged_checker":             lab.checkAcknowledgedWrite(ctx, workload, runID, caseDir),
@@ -160,7 +161,7 @@ func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, c
 		writeCaseEvent(caseHistory, ":case", "ok", "workload", fmt.Sprintf("{:workload %q :nemesis %q :run-id %q}", workload, nemesis, runID))
 		appendFile(campaignHistory, mustRead(caseHistory))
 		_, _ = writeEDNEvent(campaignHistory, workload+"/"+nemesis, "ok", fmt.Sprintf("%q", runID))
-		recordCaseResult(caseResults, workload, nemesis, true, "checkers passed")
+		recordCaseResult(caseResults, workload, nemesis, runID, caseHistory, true, "checkers passed")
 		return nil
 	}
 
@@ -168,7 +169,7 @@ func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, c
 	writeCaseEvent(caseHistory, ":case", "fail", "workload", fmt.Sprintf("{:workload %q :nemesis %q :run-id %q :details %q}", workload, nemesis, runID, details))
 	appendFile(campaignHistory, mustRead(caseHistory))
 	_, _ = writeEDNEvent(campaignHistory, workload+"/"+nemesis, "fail", fmt.Sprintf("%q", runID))
-	recordCaseResult(caseResults, workload, nemesis, false, details)
+	recordCaseResult(caseResults, workload, nemesis, runID, caseHistory, false, details)
 	return fmt.Errorf("%s", details)
 }
 
@@ -181,13 +182,64 @@ func writeCaseEvent(path, process, status, functionName, value string) {
 	appendFile(path, line)
 }
 
-func recordCaseResult(path, workload, nemesis string, valid bool, details string) {
+func recordCaseResult(path, workload, nemesis, runID, historyPath string, valid bool, details string) {
 	appendJSONL(path, map[string]any{
-		"workload": workload,
-		"nemesis":  nemesis,
-		"valid":    valid,
-		"details":  details,
+		"workload":      workload,
+		"nemesis":       nemesis,
+		"runId":         runID,
+		"valid":         valid,
+		"details":       details,
+		"history":       historyPath,
+		"historyFormat": "edn",
+		"historyEvents": countLines(historyPath),
 	})
+}
+
+func validateCaseHistoryArtifact(path, workload, nemesis, runID string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read case history: %w", err)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	events := 0
+	hasCaseInvoke := false
+	hasWorkloadEvent := false
+	for index, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		events++
+		if !strings.HasPrefix(line, "{:") || !strings.HasSuffix(line, "}") {
+			return fmt.Errorf("history line %d is not an EDN map", index+1)
+		}
+		for _, token := range []string{":time", ":process", ":type", ":f", ":value"} {
+			if !strings.Contains(line, token) {
+				return fmt.Errorf("history line %d is missing %s", index+1, token)
+			}
+		}
+		if strings.Contains(line, ":process :case") &&
+			strings.Contains(line, ":type :invoke") &&
+			strings.Contains(line, fmt.Sprintf(":workload %q", workload)) &&
+			strings.Contains(line, fmt.Sprintf(":nemesis %q", nemesis)) &&
+			strings.Contains(line, fmt.Sprintf(":run-id %q", runID)) {
+			hasCaseInvoke = true
+		}
+		if !strings.Contains(line, ":process :case") {
+			hasWorkloadEvent = true
+		}
+	}
+	if events == 0 {
+		return fmt.Errorf("case history is empty")
+	}
+	if !hasCaseInvoke {
+		return fmt.Errorf("case history is missing case invoke event")
+	}
+	if !hasWorkloadEvent {
+		return fmt.Errorf("case history is missing workload events")
+	}
+	return nil
 }
 
 func appendJSONL(path string, value any) {

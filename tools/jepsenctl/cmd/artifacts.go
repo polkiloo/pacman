@@ -75,10 +75,14 @@ type artifactSummaryOptions struct {
 }
 
 type caseResult struct {
-	Workload string `json:"workload"`
-	Nemesis  string `json:"nemesis"`
-	Valid    bool   `json:"valid"`
-	Details  string `json:"details"`
+	Workload      string `json:"workload"`
+	Nemesis       string `json:"nemesis"`
+	RunID         string `json:"runId"`
+	Valid         bool   `json:"valid"`
+	Details       string `json:"details"`
+	History       string `json:"history"`
+	HistoryFormat string `json:"historyFormat"`
+	HistoryEvents int    `json:"historyEvents"`
 }
 
 type checkerResult struct {

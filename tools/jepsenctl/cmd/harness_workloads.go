@@ -226,6 +226,7 @@ COMMIT;`, isolation, sqlLiteral(runID), sqlLiteral(postOpID), sqlLiteral(finalPr
 }
 
 func (lab *harnessLab) runVIPRoutingWorkload(ctx context.Context, runID, caseDir, isolation string) error {
+	history := filepath.Join(caseDir, "history.edn")
 	routeFile := filepath.Join(caseDir, "vip-routing.jsonl")
 	_ = os.WriteFile(routeFile, nil, 0o644)
 	deadline := time.Now().Add(lab.cfg.defaultDuration + lab.cfg.nemesisHold + 4*time.Second)
@@ -236,6 +237,7 @@ func (lab *harnessLab) runVIPRoutingWorkload(ctx context.Context, runID, caseDir
 		opID := fmt.Sprintf("%s-vip-routing-%d", runID, op)
 		primaryBefore := lab.currentPrimaryName(ctx)
 		vipBefore := lab.vipHolder(ctx)
+		writeCaseEvent(history, strconv.Itoa(op%lab.cfg.defaultClients), "invoke", "vip-write", fmt.Sprintf("{:op-id %q :primary %q :vip-holder %q}", opID, primaryBefore, vipBefore))
 		sql := fmt.Sprintf(`
 BEGIN ISOLATION LEVEL %s;
 WITH inserted AS (
@@ -264,6 +266,7 @@ COMMIT;`, isolation, sqlLiteral(runID), sqlLiteral(opID), op%lab.cfg.defaultKeys
 		}
 		if err != nil {
 			sample["error"] = err.Error()
+			writeCaseEvent(history, strconv.Itoa(op%lab.cfg.defaultClients), "fail", "vip-write", fmt.Sprintf("{:op-id %q :primary-before %q :primary-after %q :vip-holder-before %q :vip-holder-after %q}", opID, primaryBefore, primaryAfter, vipBefore, vipAfter))
 		} else {
 			parts := strings.Split(lastNonEmptyLine(output), "\t")
 			if len(parts) >= 3 {
@@ -273,6 +276,7 @@ COMMIT;`, isolation, sqlLiteral(runID), sqlLiteral(opID), op%lab.cfg.defaultKeys
 			}
 			appendFile(filepath.Join(caseDir, "acknowledged-op-ids.txt"), opID+"\n")
 			okCount++
+			writeCaseEvent(history, strconv.Itoa(op%lab.cfg.defaultClients), "ok", "vip-write", fmt.Sprintf("{:op-id %q :primary-before %q :primary-after %q :vip-holder-before %q :vip-holder-after %q}", opID, primaryBefore, primaryAfter, vipBefore, vipAfter))
 		}
 		appendJSONL(routeFile, sample)
 		time.Sleep(time.Second)

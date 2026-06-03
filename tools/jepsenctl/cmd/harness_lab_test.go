@@ -273,6 +273,49 @@ func TestHarnessFileAndJSONHelpers(t *testing.T) {
 	}
 }
 
+func TestCaseHistoryArtifactValidation(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	historyPath := filepath.Join(dir, "history.edn")
+	runID := "20260603T120000Z-append-smoke__none"
+	writeCaseEvent(historyPath, ":case", "invoke", "workload", fmt.Sprintf("{:workload %q :nemesis %q :run-id %q}", "append-smoke", "none", runID))
+	writeCaseEvent(historyPath, "0", "invoke", "append", fmt.Sprintf("{:op-id %q}", runID+"-append-1"))
+	writeCaseEvent(historyPath, "0", "ok", "append", fmt.Sprintf("{:op-id %q}", runID+"-append-1"))
+
+	if err := validateCaseHistoryArtifact(historyPath, "append-smoke", "none", runID); err != nil {
+		t.Fatalf("validate case history: %v", err)
+	}
+
+	resultsPath := filepath.Join(dir, "case-results.jsonl")
+	recordCaseResult(resultsPath, "append-smoke", "none", runID, historyPath, true, "checkers passed")
+	results, err := readCaseResults(resultsPath)
+	if err != nil {
+		t.Fatalf("read case results: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results: got %d want 1", len(results))
+	}
+	result := results[0]
+	if result.RunID != runID || result.History != historyPath || result.HistoryFormat != "edn" || result.HistoryEvents != 3 {
+		t.Fatalf("history metadata: %+v", result)
+	}
+}
+
+func TestCaseHistoryArtifactValidationRejectsMissingWorkloadEvents(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	historyPath := filepath.Join(dir, "history.edn")
+	runID := "20260603T120000Z-append-smoke__none"
+	writeCaseEvent(historyPath, ":case", "invoke", "workload", fmt.Sprintf("{:workload %q :nemesis %q :run-id %q}", "append-smoke", "none", runID))
+
+	err := validateCaseHistoryArtifact(historyPath, "append-smoke", "none", runID)
+	if err == nil || !strings.Contains(err.Error(), "missing workload events") {
+		t.Fatalf("err: got %v want missing workload events", err)
+	}
+}
+
 func TestVerifyThreeDataNodeClusterWaitsForHealthyShape(t *testing.T) {
 	dir := t.TempDir()
 	runner := &scriptedRunner{outputs: []string{
