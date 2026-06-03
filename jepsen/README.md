@@ -50,6 +50,11 @@ matrix finishes, the harness bootstraps a fresh lab and runs one post-campaign
 manual switchover using the current cluster membership to select a healthy
 non-primary target.
 
+`append-failover:primary-dcs-partition` is an explicit opt-in case, not part of
+the passing nightly matrix. It isolates the current primary from all DCS nodes
+while PostgreSQL and replication remain up, and is expected to expose whether
+the product can fence an old primary before another node promotes.
+
 Run one case at a time by name:
 
 ```bash
