@@ -1047,7 +1047,7 @@ func TestRepositoryDocumentPatroniDynamicConfigSchema(t *testing.T) {
 
 	dynamicConfig := mustSchema(t, document, "PatroniDynamicConfig")
 
-	for _, property := range []string{"ttl", "loop_wait", "retry_timeout", "maximum_lag_on_failover", "postgresql"} {
+	for _, property := range []string{"ttl", "loop_wait", "retry_timeout", "pause", "maximum_lag_on_failover", "postgresql"} {
 		if _, ok := dynamicConfig.Property(property); !ok {
 			t.Fatalf("PatroniDynamicConfig is missing %s", property)
 		}

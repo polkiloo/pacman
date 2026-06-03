@@ -2519,6 +2519,155 @@ func TestPutMaintenanceReturns400OnUpdateError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// GET/PATCH /config
+// ---------------------------------------------------------------------------
+
+func TestGetPatroniConfigReturnsDynamicConfig(t *testing.T) {
+	t.Parallel()
+
+	response := performRequest(t, New("alpha-1", testNodeStatusStore{
+		clusterSpec: cluster.ClusterSpec{
+			ClusterName: "alpha",
+			Maintenance: cluster.MaintenanceDesiredState{
+				Enabled: true,
+			},
+			Failover: cluster.FailoverPolicy{
+				MaximumLagBytes: 2097152,
+				CheckTimeline:   true,
+			},
+			Postgres: cluster.PostgresPolicy{
+				SynchronousMode: cluster.SynchronousModeStrict,
+				UsePgRewind:     true,
+				Parameters:      map[string]any{"max_connections": "200"},
+			},
+		},
+		hasSpec:     true,
+		maintenance: cluster.MaintenanceModeStatus{Enabled: true},
+	}, discardLogger(), Config{}), "/config")
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	var body map[string]any
+	decodeJSONResponse(t, response, &body)
+
+	if body["pause"] != true {
+		t.Fatalf("pause: got %v, want true", body["pause"])
+	}
+	if body["maximum_lag_on_failover"] != float64(2097152) {
+		t.Fatalf("maximum_lag_on_failover: got %v", body["maximum_lag_on_failover"])
+	}
+	if body["synchronous_mode"] != true || body["synchronous_mode_strict"] != true {
+		t.Fatalf("unexpected synchronous config: %+v", body)
+	}
+}
+
+func TestPatchPatroniConfigPauseEnablesMaintenance(t *testing.T) {
+	t.Parallel()
+
+	response := performRequestBodyWithHeaders(
+		t,
+		New("alpha-1", testNodeStatusStore{
+			clusterSpec: cluster.ClusterSpec{ClusterName: "alpha"},
+			hasSpec:     true,
+		}, discardLogger(), Config{}),
+		http.MethodPatch,
+		"/config",
+		[]byte(`{"pause":true}`),
+		map[string]string{"Content-Type": "application/json"},
+	)
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	var body map[string]any
+	decodeJSONResponse(t, response, &body)
+	if body["pause"] != true {
+		t.Fatalf("pause: got %v, want true", body["pause"])
+	}
+}
+
+func TestPatchPatroniConfigNullPauseDisablesMaintenance(t *testing.T) {
+	t.Parallel()
+
+	response := performRequestBodyWithHeaders(
+		t,
+		New("alpha-1", testNodeStatusStore{
+			clusterSpec: cluster.ClusterSpec{ClusterName: "alpha"},
+			hasSpec:     true,
+			maintenance: cluster.MaintenanceModeStatus{Enabled: true},
+		}, discardLogger(), Config{}),
+		http.MethodPatch,
+		"/config",
+		[]byte(`{"pause":null}`),
+		map[string]string{"Content-Type": "application/json"},
+	)
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusOK)
+	}
+
+	var body map[string]any
+	decodeJSONResponse(t, response, &body)
+	if body["pause"] != false {
+		t.Fatalf("pause: got %v, want false", body["pause"])
+	}
+}
+
+func TestPatchPatroniConfigRejectsUnsupportedFields(t *testing.T) {
+	t.Parallel()
+
+	response := performRequestBodyWithHeaders(
+		t,
+		New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{}),
+		http.MethodPatch,
+		"/config",
+		[]byte(`{"pause":true,"ttl":30}`),
+		map[string]string{"Content-Type": "application/json"},
+	)
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusBadRequest)
+	}
+
+	var body errorResponseJSON
+	decodeJSONResponse(t, response, &body)
+	if body.Error != "unsupported_config_patch" {
+		t.Fatalf("error: got %q, want unsupported_config_patch", body.Error)
+	}
+}
+
+func TestPatchPatroniConfigRejectsInvalidPause(t *testing.T) {
+	t.Parallel()
+
+	response := performRequestBodyWithHeaders(
+		t,
+		New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{}),
+		http.MethodPatch,
+		"/config",
+		[]byte(`{"pause":"true"}`),
+		map[string]string{"Content-Type": "application/json"},
+	)
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusBadRequest)
+	}
+
+	var body errorResponseJSON
+	decodeJSONResponse(t, response, &body)
+	if body.Error != "invalid_config_request" {
+		t.Fatalf("error: got %q, want invalid_config_request", body.Error)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/v1/diagnostics
 // ---------------------------------------------------------------------------
 
