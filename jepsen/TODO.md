@@ -265,13 +265,13 @@ MVP-1 is done when:
 - [x] The suite deploys and destroys a clean PACMAN three-data-node cluster.
 - [x] Every MVP case is runnable individually.
 - [x] Every MVP case writes machine-checkable history.
-- [ ] Every nemesis action records target, start, heal, and command result.
-- [ ] Every failed run produces enough logs and snapshots to explain the failure.
-- [ ] Checkers report:
+- [x] Every nemesis action records target, start, heal, and command result.
+- [x] Every failed run produces enough logs and snapshots to explain the failure.
+- [x] Checkers report:
   - [x] split-brain result;
   - [x] acknowledged write preservation result;
   - [x] timeline convergence result;
-  - [ ] failover/rejoin summary.
+  - [x] failover/rejoin summary.
 - [ ] `append-smoke:none` is stable across repeated local runs.
 - [x] `append-failover:kill` is stable enough to run as a manual CI smoke.
 - [ ] Unsupported configurations are documented separately from

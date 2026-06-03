@@ -13,6 +13,7 @@ func TestCollectArtifactIndex(t *testing.T) {
 
 	store := t.TempDir()
 	writeTestFile(t, filepath.Join(store, "index.html"), "<html></html>\n")
+	writeTestFile(t, filepath.Join(store, "failure-diagnostics.json"), "{}\n")
 	writeTestFile(t, filepath.Join(store, "cases", "append__none", "checker.json"), "{}\n")
 	writeTestFile(t, filepath.Join(store, "cases", "append__none", "primary-observations.jsonl"), "{}\n")
 	writeTestFile(t, filepath.Join(store, "cases", "append__none", "debug.tmp"), "ignored\n")
@@ -25,6 +26,7 @@ func TestCollectArtifactIndex(t *testing.T) {
 	want := []string{
 		filepath.Join(store, "cases", "append__none", "checker.json"),
 		filepath.Join(store, "cases", "append__none", "primary-observations.jsonl"),
+		filepath.Join(store, "failure-diagnostics.json"),
 		filepath.Join(store, "index.html"),
 	}
 	assertStringSlicesEqual(t, paths, want)

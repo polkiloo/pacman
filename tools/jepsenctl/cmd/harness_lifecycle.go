@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -132,6 +133,9 @@ func (lab *harnessLab) collectArtifacts(ctx context.Context, runDir string, vali
 	if err := lab.writeResultsFile(runDir, valid); err != nil {
 		return err
 	}
+	if !valid {
+		lab.writeFailureDiagnostics(runDir)
+	}
 	return lab.writeArtifactIndexHTML(runDir, valid)
 }
 
@@ -184,6 +188,142 @@ func (lab *harnessLab) writeResultsFile(runDir string, valid bool) error {
 	return os.WriteFile(filepath.Join(runDir, "results.edn"), []byte(value), 0o644)
 }
 
+func (lab *harnessLab) writeFailureDiagnostics(runDir string) {
+	rootArtifacts := []string{
+		"results.edn",
+		"jepsen-history.edn",
+		"nemesis-schedule.edn",
+		"case-results.jsonl",
+		"docker-compose-ps.txt",
+		"docker-compose.log",
+	}
+	if lab.options.target.supportsPatroniLab() {
+		rootArtifacts = append(rootArtifacts, "patroni-cluster-after.json", "patroni-rest-cluster-after.json")
+	} else {
+		rootArtifacts = append(rootArtifacts, "pacman-cluster-after.json", "pacman-history.json")
+	}
+	if _, err := os.Stat(filepath.Join(runDir, "nightly-failures.txt")); err == nil {
+		rootArtifacts = append(rootArtifacts, "nightly-failures.txt")
+	}
+
+	diagnostics := map[string]any{
+		"generatedAt":       time.Now().UTC().Format(time.RFC3339),
+		"target":            lab.options.target.Name,
+		"targetStore":       lab.options.target.StoreName,
+		"campaign":          envOrDefault("PACMAN_JEPSEN_CAMPAIGN", lab.options.campaign),
+		"requiredArtifacts": artifactPresence(runDir, rootArtifacts),
+		"logDirectories": map[string]any{
+			"node-logs":     directoryDiagnostics(filepath.Join(runDir, "node-logs")),
+			"postgres-logs": directoryDiagnostics(filepath.Join(runDir, "postgres-logs")),
+			"dcs-logs":      directoryDiagnostics(filepath.Join(runDir, "dcs-logs")),
+		},
+		"cases":    caseDiagnostics(filepath.Join(runDir, "cases")),
+		"failures": collectFailureSummary(runDir),
+	}
+	writeJSON(filepath.Join(runDir, "failure-diagnostics.json"), diagnostics)
+}
+
+func artifactPresence(root string, relativePaths []string) []map[string]any {
+	results := make([]map[string]any, 0, len(relativePaths))
+	for _, relativePath := range relativePaths {
+		path := filepath.Join(root, relativePath)
+		info, err := os.Stat(path)
+		results = append(results, map[string]any{
+			"path":      relativePath,
+			"present":   err == nil,
+			"sizeBytes": fileSizeForInfo(info, err),
+		})
+	}
+	return results
+}
+
+func directoryDiagnostics(path string) map[string]any {
+	files := []string{}
+	totalBytes := int64(0)
+	_ = filepath.WalkDir(path, func(entryPath string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return nil
+		}
+		relative, relErr := filepath.Rel(path, entryPath)
+		if relErr != nil {
+			relative = filepath.Base(entryPath)
+		}
+		files = append(files, relative)
+		if info, statErr := entry.Info(); statErr == nil {
+			totalBytes += info.Size()
+		}
+		return nil
+	})
+	sort.Strings(files)
+	return map[string]any{
+		"present":    dirExists(path),
+		"fileCount":  len(files),
+		"totalBytes": totalBytes,
+		"files":      files,
+	}
+}
+
+func caseDiagnostics(casesDir string) []map[string]any {
+	entries, err := os.ReadDir(casesDir)
+	if err != nil {
+		return nil
+	}
+	required := []string{
+		"history.edn",
+		"nemesis.log",
+		"nemesis-schedule.edn",
+		"primary-observations.jsonl",
+		"pacman-cluster-snapshots.jsonl",
+		"checker.json",
+	}
+	var cases []map[string]any
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		caseDir := filepath.Join(casesDir, entry.Name())
+		checkers := filesWithSuffix(caseDir, "checker.json")
+		cases = append(cases, map[string]any{
+			"name":              entry.Name(),
+			"requiredArtifacts": artifactPresence(caseDir, required),
+			"checkerArtifacts":  checkers,
+		})
+	}
+	sort.Slice(cases, func(left, right int) bool {
+		return cases[left]["name"].(string) < cases[right]["name"].(string)
+	})
+	return cases
+}
+
+func filesWithSuffix(root, suffix string) []string {
+	var files []string
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.HasSuffix(filepath.Base(path), suffix) {
+			return nil
+		}
+		relative, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			relative = filepath.Base(path)
+		}
+		files = append(files, relative)
+		return nil
+	})
+	sort.Strings(files)
+	return files
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func fileSizeForInfo(info os.FileInfo, err error) int64 {
+	if err != nil || info == nil || info.IsDir() {
+		return 0
+	}
+	return info.Size()
+}
+
 func (lab *harnessLab) writeArtifactIndexHTML(runDir string, valid bool) error {
 	status := "false"
 	if valid {
@@ -204,6 +344,7 @@ func (lab *harnessLab) writeArtifactIndexHTML(runDir string, valid bool) error {
 <p>Status: %s</p>
 <ul>
 <li><a href="results.edn">results.edn</a></li>
+<li><a href="failure-diagnostics.json">failure-diagnostics.json</a></li>
 <li><a href="case-results.jsonl">case-results.jsonl</a></li>
 <li><a href="jepsen-history.edn">jepsen-history.edn</a></li>
 <li><a href="nemesis-schedule.edn">nemesis-schedule.edn</a></li>

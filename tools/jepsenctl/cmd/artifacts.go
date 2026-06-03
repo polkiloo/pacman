@@ -19,6 +19,7 @@ var artifactIndexExactNames = map[string]struct{}{
 	"nemesis-schedule.edn":                            {},
 	"case-results.jsonl":                              {},
 	"nightly-failures.txt":                            {},
+	"failure-diagnostics.json":                        {},
 	"docker-compose-after-destroy.txt":                {},
 	"checker.json":                                    {},
 	"single-primary-checker.json":                     {},
@@ -75,14 +76,15 @@ type artifactSummaryOptions struct {
 }
 
 type caseResult struct {
-	Workload      string `json:"workload"`
-	Nemesis       string `json:"nemesis"`
-	RunID         string `json:"runId"`
-	Valid         bool   `json:"valid"`
-	Details       string `json:"details"`
-	History       string `json:"history"`
-	HistoryFormat string `json:"historyFormat"`
-	HistoryEvents int    `json:"historyEvents"`
+	Workload       string                       `json:"workload"`
+	Nemesis        string                       `json:"nemesis"`
+	RunID          string                       `json:"runId"`
+	Valid          bool                         `json:"valid"`
+	Details        string                       `json:"details"`
+	History        string                       `json:"history"`
+	HistoryFormat  string                       `json:"historyFormat"`
+	HistoryEvents  int                          `json:"historyEvents"`
+	CheckerReports map[string]caseCheckerReport `json:"checkerReports,omitempty"`
 }
 
 type checkerResult struct {
@@ -90,6 +92,17 @@ type checkerResult struct {
 	Valid      *bool  `json:"valid"`
 	Applicable *bool  `json:"applicable"`
 	Error      string `json:"error"`
+}
+
+type caseCheckerReport struct {
+	Checker    string         `json:"checker,omitempty"`
+	File       string         `json:"file"`
+	Valid      *bool          `json:"valid,omitempty"`
+	Applicable *bool          `json:"applicable,omitempty"`
+	Error      string         `json:"error,omitempty"`
+	Reason     string         `json:"reason,omitempty"`
+	Summary    string         `json:"summary,omitempty"`
+	Facts      map[string]any `json:"facts,omitempty"`
 }
 
 func newArtifactsCommand() *cobra.Command {
