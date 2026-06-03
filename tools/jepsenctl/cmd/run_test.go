@@ -126,12 +126,23 @@ func TestDockerCampaignEnvPrefersExplicitCase(t *testing.T) {
 	}
 }
 
-func TestCampaignCasesExcludesPatroniOnlyProfilesFromNightly(t *testing.T) {
+func TestCampaignCasesExcludesOptInProfilesFromNightly(t *testing.T) {
 	t.Setenv("PACMAN_JEPSEN_CASES", "")
 
 	cases := strings.Join(campaignCases("nightly"), " ")
 	if strings.Contains(cases, "append-sync:") || strings.Contains(cases, "append-sync-two:") || strings.Contains(cases, "append-strict-sync:") || strings.Contains(cases, "append-max-lag:") || strings.Contains(cases, "append-check-timeline:") {
 		t.Fatalf("nightly cases included opt-in Patroni profiles: %s", cases)
+	}
+	if strings.Contains(cases, "append-failover:primary-dcs-partition") {
+		t.Fatalf("nightly cases included unsafe primary DCS partition profile: %s", cases)
+	}
+
+	spec, err := resolveCaseSpec("append-failover-primary-dcs-partition")
+	if err != nil {
+		t.Fatalf("resolve unsafe opt-in case: %v", err)
+	}
+	if spec != "append-failover:primary-dcs-partition" {
+		t.Fatalf("unsafe opt-in case spec: got %q", spec)
 	}
 }
 
