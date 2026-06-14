@@ -93,9 +93,9 @@ func runOldPrimaryRejoinChecker(options oldPrimaryRejoinCheckerOptions) (bool, e
 		Observations: 0,
 		Samples:      0,
 	}
-	if options.nemesis == "switchover" {
+	if reason, ok := oldPrimaryRejoinDedicatedCheckerReason(options.nemesis); ok {
 		result.Valid = true
-		result.Reason = "manual switchover is covered by the manual switchover checker"
+		result.Reason = reason
 		if err := writeJSONFile(outputPath, result); err != nil {
 			return false, err
 		}
@@ -123,6 +123,17 @@ func runOldPrimaryRejoinChecker(options oldPrimaryRejoinCheckerOptions) (bool, e
 		return false, err
 	}
 	return result.Valid, nil
+}
+
+func oldPrimaryRejoinDedicatedCheckerReason(nemesis string) (string, bool) {
+	switch nemesis {
+	case "switchover":
+		return "manual switchover is covered by the manual switchover checker", true
+	case "failover-chain":
+		return "failover chain is covered by the failover chain checker", true
+	default:
+		return "", false
+	}
 }
 
 func checkOldPrimaryRejoinAfterFailover(observations []primaryObservation, nemesis string) oldPrimaryRejoinCheckerResult {
