@@ -272,7 +272,7 @@ MVP-1 is done when:
   - [x] acknowledged write preservation result;
   - [x] timeline convergence result;
   - [x] failover/rejoin summary.
-- [ ] `append-smoke:none` is stable across repeated local runs.
+- [x] `append-smoke:none` is stable across repeated local runs.
 - [x] `append-failover:kill` is stable enough to run as a manual CI smoke.
 - [ ] Unsupported configurations are documented separately from
       product regressions.

@@ -91,6 +91,16 @@ PACMAN_JEPSEN_CASE='serializable-txn:packet,kill' make jepsen-docker-case
 go run ./tools/jepsenctl run docker case serializable-txn:packet,kill
 ```
 
+Verify the baseline append smoke case is stable across repeated local Docker
+runs with:
+
+```bash
+make jepsen-docker-stability-append-smoke-none
+```
+
+The stability target builds the RPM once, then runs `append-smoke:none` three
+times by default. Override the loop count with `PACMAN_JEPSEN_STABILITY_RUNS`.
+
 Override the case list when running manually:
 
 ```bash
