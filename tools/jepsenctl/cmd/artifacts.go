@@ -382,7 +382,8 @@ func renderArtifactSummary(options artifactSummaryOptions, statusLabel string, a
 	builder.WriteString("2. Inspect Jepsen HTML reports and checker output.\n")
 	builder.WriteString("3. Inspect `jepsen-history.edn`, `results.edn`, and `nemesis-schedule.edn` around failure windows.\n")
 	builder.WriteString("4. Compare PACMAN cluster/history snapshots with PostgreSQL and DCS logs.\n")
-	builder.WriteString("5. Preserve the seed and full artifact path in any regression issue.\n\n")
+	builder.WriteString("5. Classify unsupported or Patroni-only profiles separately from PACMAN product regressions using `jepsen/UNSUPPORTED.md`.\n")
+	builder.WriteString("6. Preserve the seed and full artifact path in any regression issue.\n\n")
 	builder.WriteString("## Artifact Index\n\n")
 
 	if len(artifactPaths) == 0 {

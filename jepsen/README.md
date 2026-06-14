@@ -55,6 +55,11 @@ the passing nightly matrix. It isolates the current primary from all DCS nodes
 while PostgreSQL and replication remain up, and is expected to expose whether
 the product can fence an old primary before another node promotes.
 
+Unsupported configuration triage is documented separately in
+[`UNSUPPORTED.md`](UNSUPPORTED.md). Use that document to distinguish PACMAN
+product regressions from Patroni-only calibration profiles, unsupported
+workload/nemesis selections, and post-MVP exploratory cases.
+
 Run one case at a time by name:
 
 ```bash
@@ -239,6 +244,8 @@ go run ./tools/jepsenctl artifacts compare-baseline \
 The comparison joins results by the exact `workload:nemesis` profile. PACMAN
 profiles without a matching Patroni baseline are reported as
 `no-matching-profile` and are not compared with a different fault profile.
+Unsupported configuration failures are tracked separately from product
+regressions; see [`UNSUPPORTED.md`](UNSUPPORTED.md).
 
 Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
 `case-results.jsonl`, per-case `history.edn`, `nemesis-schedule.edn`,
