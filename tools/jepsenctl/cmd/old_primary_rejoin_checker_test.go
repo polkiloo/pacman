@@ -151,8 +151,20 @@ func TestOldPrimaryRejoinCheckerFixtures(t *testing.T) {
 func TestOldPrimaryRejoinCheckerSkipsSwitchover(t *testing.T) {
 	t.Parallel()
 
+	assertOldPrimaryRejoinCheckerSkip(t, "switchover", "manual switchover is covered by the manual switchover checker")
+}
+
+func TestOldPrimaryRejoinCheckerSkipsFailoverChain(t *testing.T) {
+	t.Parallel()
+
+	assertOldPrimaryRejoinCheckerSkip(t, "failover-chain", "failover chain is covered by the failover chain checker")
+}
+
+func assertOldPrimaryRejoinCheckerSkip(t *testing.T, nemesis string, reason string) {
+	t.Helper()
+
 	caseDir := t.TempDir()
-	gotValid, err := runOldPrimaryRejoinChecker(oldPrimaryRejoinCheckerOptions{caseDir: caseDir, nemesis: "switchover"})
+	gotValid, err := runOldPrimaryRejoinChecker(oldPrimaryRejoinCheckerOptions{caseDir: caseDir, nemesis: nemesis})
 	if err != nil {
 		t.Fatalf("run old primary rejoin checker: %v", err)
 	}
@@ -163,10 +175,10 @@ func TestOldPrimaryRejoinCheckerSkipsSwitchover(t *testing.T) {
 	var result oldPrimaryRejoinCheckerResult
 	readJSONTestFile(t, filepath.Join(caseDir, oldPrimaryRejoinCheckerFile), &result)
 	if !result.Valid || result.Applicable {
-		t.Fatalf("switchover skip result: valid=%v applicable=%v want valid=true applicable=false", result.Valid, result.Applicable)
+		t.Fatalf("%s skip result: valid=%v applicable=%v want valid=true applicable=false", nemesis, result.Valid, result.Applicable)
 	}
-	if result.Reason != "manual switchover is covered by the manual switchover checker" {
-		t.Fatalf("reason: got %q", result.Reason)
+	if result.Reason != reason {
+		t.Fatalf("reason: got %q want %q", result.Reason, reason)
 	}
 }
 

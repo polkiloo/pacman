@@ -195,6 +195,53 @@ func TestIPTablesPartitionRejectsUnknownPeer(t *testing.T) {
 	}
 }
 
+func TestPacketKillNemesisRestartsAfterNetworkHeal(t *testing.T) {
+	t.Parallel()
+
+	runner := &clusterStatusRunner{
+		initialPrimary:   "alpha-1",
+		promotedPrimary:  "alpha-2",
+		statusAfterCalls: 1,
+	}
+	target, err := resolveJepsenTarget(defaultJepsenTarget)
+	if err != nil {
+		t.Fatalf("resolve target: %v", err)
+	}
+	lab := newHarnessLab(harnessOptions{
+		repoRoot: t.TempDir(),
+		runner:   runner,
+		runOptions: runOptions{
+			target: target,
+		},
+	})
+	lab.cfg.nemesisHold = 0
+	caseDir := t.TempDir()
+	scheduleFile := filepath.Join(caseDir, "nemesis-schedule.edn")
+
+	if err := lab.applyNemesis(context.Background(), "packet,kill", caseDir, scheduleFile); err != nil {
+		t.Fatalf("apply packet,kill nemesis: %v", err)
+	}
+
+	healIndex := runner.firstCommandIndex("iptables -D INPUT")
+	startIndex := runner.firstCommandIndex("exec /usr/bin/pacmand")
+	if healIndex < 0 {
+		t.Fatalf("missing iptables heal command in %v", runner.commands())
+	}
+	if startIndex < 0 {
+		t.Fatalf("missing pacmand restart command in %v", runner.commands())
+	}
+	if startIndex < healIndex {
+		t.Fatalf("pacmand restarted before partition heal:\n%s", strings.Join(runner.commands(), "\n"))
+	}
+
+	schedule := readTestFile(t, scheduleFile)
+	assertContainsAll(t, "packet kill schedule", schedule, []string{
+		`:nemesis :packet-kill :action :start :target "alpha-1"`,
+		`:nemesis :packet-kill :action :heal :target "alpha-1" :promoted "alpha-2" :result :ok`,
+		`:nemesis :packet-kill :action :stop :target "alpha-1" :promoted "alpha-2" :result :ok`,
+	})
+}
+
 func TestHarnessFileAndJSONHelpers(t *testing.T) {
 	t.Parallel()
 
@@ -559,4 +606,66 @@ func (runner *scriptedRunner) Run(_ context.Context, spec commandSpec) (int, err
 		status = runner.statuses[runner.calls-1]
 	}
 	return status, nil
+}
+
+type clusterStatusRunner struct {
+	initialPrimary   string
+	promotedPrimary  string
+	statusAfterCalls int
+	statusCalls      int
+	specs            []commandSpec
+}
+
+func (runner *clusterStatusRunner) Run(_ context.Context, spec commandSpec) (int, error) {
+	runner.specs = append(runner.specs, spec)
+	if spec.stdout != nil && strings.Contains(strings.Join(spec.args, " "), "pacmanctl cluster status") {
+		runner.statusCalls++
+		primary := runner.initialPrimary
+		if runner.statusCalls > runner.statusAfterCalls {
+			primary = runner.promotedPrimary
+		}
+		fmt.Fprint(spec.stdout, clusterStatusJSONWithPrimary(primary))
+	}
+	return 0, nil
+}
+
+func (runner *clusterStatusRunner) commands() []string {
+	commands := make([]string, 0, len(runner.specs))
+	for _, spec := range runner.specs {
+		commands = append(commands, strings.Join(append([]string{spec.name}, spec.args...), " "))
+	}
+	return commands
+}
+
+func (runner *clusterStatusRunner) firstCommandIndex(needle string) int {
+	for index, command := range runner.commands() {
+		if strings.Contains(command, needle) {
+			return index
+		}
+	}
+	return -1
+}
+
+func clusterStatusJSONWithPrimary(primary string) string {
+	members := []string{"alpha-1", "alpha-2", "alpha-3"}
+	status := clusterStatus{
+		Phase:          "healthy",
+		CurrentPrimary: primary,
+	}
+	for _, member := range members {
+		role := "replica"
+		state := "streaming"
+		if member == primary {
+			role = "primary"
+			state = "running"
+		}
+		status.Members = append(status.Members, clusterMember{
+			Name:    member,
+			Role:    role,
+			State:   state,
+			Healthy: true,
+		})
+	}
+	data, _ := json.Marshal(status)
+	return string(data)
 }

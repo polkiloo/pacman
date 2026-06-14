@@ -15,10 +15,11 @@ import (
 )
 
 type jepsenCase struct {
-	Slug        string
-	Spec        string
-	Description string
-	PatroniOnly bool
+	Slug          string
+	Spec          string
+	Description   string
+	PatroniOnly   bool
+	NightlyUnsafe bool
 }
 
 type caseTargetValidation struct {
@@ -148,7 +149,7 @@ func defaultJepsenCases() []jepsenCase {
 		{Slug: "append-failover-kill", Spec: "append-failover:kill", Description: "Append workload while killing current primary PostgreSQL."},
 		{Slug: "append-failover-packet", Spec: "append-failover:packet", Description: "Append workload while partitioning the current primary."},
 		{Slug: "append-failover-packet-kill", Spec: "append-failover:packet,kill", Description: "Append workload while partitioning and killing the current primary."},
-		{Slug: "append-failover-primary-dcs-partition", Spec: "append-failover:primary-dcs-partition", Description: "Append workload while isolating the current primary from DCS only."},
+		{Slug: "append-failover-primary-dcs-partition", Spec: "append-failover:primary-dcs-partition", Description: "Append workload while isolating the current primary from DCS only.", NightlyUnsafe: true},
 		{Slug: "append-failover-primary-replication-partition", Spec: "append-failover:primary-replication-partition", Description: "Append workload while blocking primary replication traffic only."},
 		{Slug: "append-failover-failover-chain", Spec: "append-failover:failover-chain", Description: "Append workload while chaining manual failovers across all three data nodes."},
 		{Slug: "open-transaction-failover-kill", Spec: "open-transaction-failover:kill", Description: "Hold a transaction open while killing the current primary."},

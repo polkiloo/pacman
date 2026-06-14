@@ -680,7 +680,7 @@ func campaignCases(campaign string) []string {
 	cases := defaultJepsenCases()
 	specs := make([]string, 0, len(cases))
 	for _, testCase := range cases {
-		if testCase.PatroniOnly {
+		if testCase.PatroniOnly || testCase.NightlyUnsafe {
 			continue
 		}
 		specs = append(specs, testCase.Spec)

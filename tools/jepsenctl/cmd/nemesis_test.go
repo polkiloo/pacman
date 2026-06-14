@@ -43,8 +43,8 @@ func TestValidateNemesisSchedule(t *testing.T) {
 			nemesis:  "packet,kill",
 			schedule: `
 {:time "2026-05-01T00:00:01Z" :nemesis :packet-kill :action :start :target "alpha-1"}
-{:time "2026-05-01T00:00:02Z" :nemesis :packet-kill :action :heal :target "alpha-1" :result :ok}
-{:time "2026-05-01T00:00:02Z" :nemesis :packet-kill :action :stop :target "alpha-1" :result :ok}
+{:time "2026-05-01T00:00:02Z" :nemesis :packet-kill :action :heal :target "alpha-1" :promoted "alpha-2" :result :ok}
+{:time "2026-05-01T00:00:02Z" :nemesis :packet-kill :action :stop :target "alpha-1" :promoted "alpha-2" :result :ok}
 `,
 		},
 		{

@@ -115,12 +115,35 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 			event("packet-kill", "stop", fmt.Sprintf(":target %q :result :fail :error %q", member, err))
 			return err
 		}
-		_ = lab.stopPostgres(ctx, service)
+		promoted := "unknown"
+		packetKillErr := lab.stopNodeRuntime(ctx, service)
+		if packetKillErr == nil {
+			promoted = lab.waitForCurrentPrimaryNot(ctx, member, 90*time.Second)
+			if promoted == "unknown" {
+				packetKillErr = fmt.Errorf("timed out waiting for promotion after partitioning and stopping %s", member)
+			}
+		}
 		_ = lab.captureClusterSnapshot(ctx, caseDir, "during-nemesis", profile, member, service)
-		time.Sleep(lab.cfg.nemesisHold)
-		_ = lab.startPostgres(ctx, service)
+		if packetKillErr == nil {
+			time.Sleep(lab.cfg.nemesisHold)
+		}
 		lab.iptablesHeal(ctx, service, peers)
-		event("packet-kill", "stop", fmt.Sprintf(":target %q :result :ok", member))
+		if restartErr := lab.startNodeRuntime(ctx, service); restartErr != nil {
+			if packetKillErr == nil {
+				packetKillErr = restartErr
+			} else {
+				packetKillErr = fmt.Errorf("%w; restart failed: %w", packetKillErr, restartErr)
+			}
+		}
+		result := "ok"
+		if packetKillErr != nil {
+			result = "fail"
+		}
+		event("packet-kill", "stop", fmt.Sprintf(":target %q :promoted %q :result :%s", member, promoted, result))
+		if packetKillErr != nil {
+			_ = lab.captureClusterSnapshot(ctx, caseDir, "after-nemesis", profile, member, service)
+			return packetKillErr
+		}
 	case "no-standby":
 		return lab.strictSyncNoStandby(ctx, caseDir, scheduleFile, member, service, peers)
 	case synchronousStandbyKillNemesisProfile:
