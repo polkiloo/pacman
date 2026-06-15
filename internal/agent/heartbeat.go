@@ -30,10 +30,13 @@ func (daemon *Daemon) recordHeartbeat(ctx context.Context) {
 	nodeStatus := daemon.buildNodeStatus(observedAt, postgres)
 	controlPlane := daemon.publishNodeStatus(ctx, nodeStatus)
 	nodeStatus.ControlPlane = controlPlane
-	daemon.reconcileSwitchover(ctx)
-	daemon.reconcileFailover(ctx)
-	daemon.reconcileRejoin(ctx, postgres)
-	daemon.reconcileReplicaFollowPrimary(ctx, postgres)
+	selfDemoted := daemon.reconcilePrimaryControlPlaneReachability(ctx, postgres, controlPlane)
+	if !selfDemoted {
+		daemon.reconcileSwitchover(ctx)
+		daemon.reconcileFailover(ctx)
+		daemon.reconcileRejoin(ctx, postgres)
+		daemon.reconcileReplicaFollowPrimary(ctx, postgres)
+	}
 
 	daemon.mu.Lock()
 	previous := daemon.heartbeat

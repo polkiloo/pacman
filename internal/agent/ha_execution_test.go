@@ -594,7 +594,45 @@ exit 0
 	})
 }
 
-func TestPGCtlStandbyRestarterRestartAsStandbyStartsWithoutWaiting(t *testing.T) {
+func TestPGCtlStandbyRestarterRestartAsStandbyStopsRunningPostgresThenStartsWithoutWaiting(t *testing.T) {
+	t.Parallel()
+
+	binDir, tracePath := writeTracingBinary(t, "pg_ctl", `#!/bin/sh
+trace=%q
+printf '%%s\n' "$*" >> "$trace"
+if [ "$1" = "status" ]; then
+  if [ -f "$trace.stopped" ]; then
+    exit 3
+  fi
+  exit 0
+fi
+if [ "$1" = "stop" ]; then
+  touch "$trace.stopped"
+  exit 0
+fi
+exit 0
+`)
+
+	restarter := &pgCtlStandbyRestarter{
+		pgCtl: &postgres.PGCtl{
+			BinDir:  binDir,
+			DataDir: "/var/lib/postgresql/data",
+		},
+	}
+
+	if err := restarter.RestartAsStandby(context.Background(), controlplane.StandbyRestartRequest{}); err != nil {
+		t.Fatalf("restart standby without waiting: %v", err)
+	}
+
+	assertTraceLines(t, tracePath, []string{
+		"status -D /var/lib/postgresql/data",
+		"stop -D /var/lib/postgresql/data -w -m fast",
+		"status -D /var/lib/postgresql/data",
+		"start -D /var/lib/postgresql/data -W",
+	})
+}
+
+func TestPGCtlStandbyRestarterRestartAsStandbyStartsStoppedPostgresWithoutStop(t *testing.T) {
 	t.Parallel()
 
 	binDir, tracePath := writeTracingBinary(t, "pg_ctl", `#!/bin/sh
@@ -619,7 +657,41 @@ exit 0
 
 	assertTraceLines(t, tracePath, []string{
 		"status -D /var/lib/postgresql/data",
+		"status -D /var/lib/postgresql/data",
 		"start -D /var/lib/postgresql/data -W",
+	})
+}
+
+func TestPGCtlStandbyRestarterRestartAsStandbyDoesNotStartAfterStopFailure(t *testing.T) {
+	t.Parallel()
+
+	binDir, tracePath := writeTracingBinary(t, "pg_ctl", `#!/bin/sh
+trace=%q
+printf '%%s\n' "$*" >> "$trace"
+if [ "$1" = "status" ]; then
+  exit 0
+fi
+if [ "$1" = "stop" ]; then
+  echo stop failed
+  exit 1
+fi
+exit 0
+`)
+
+	restarter := &pgCtlStandbyRestarter{
+		pgCtl: &postgres.PGCtl{
+			BinDir:  binDir,
+			DataDir: "/var/lib/postgresql/data",
+		},
+	}
+
+	if err := restarter.RestartAsStandby(context.Background(), controlplane.StandbyRestartRequest{}); err == nil {
+		t.Fatalf("expected stop failure")
+	}
+
+	assertTraceLines(t, tracePath, []string{
+		"status -D /var/lib/postgresql/data",
+		"stop -D /var/lib/postgresql/data -w -m fast",
 	})
 }
 

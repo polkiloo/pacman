@@ -149,6 +149,15 @@ type pgCtlStandbyRestarter struct {
 }
 
 func (r *pgCtlStandbyRestarter) RestartAsStandby(ctx context.Context, _ controlplane.StandbyRestartRequest) error {
+	running, err := r.pgCtl.Status(ctx)
+	if err != nil {
+		return err
+	}
+	if running {
+		if err := r.pgCtl.Stop(ctx, postgres.ShutdownModeFast); err != nil {
+			return err
+		}
+	}
 	return r.pgCtl.StartNoWait(ctx)
 }
 

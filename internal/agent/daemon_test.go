@@ -971,6 +971,50 @@ func TestDaemonRecordsControlPlanePublishFailure(t *testing.T) {
 	daemon.Wait()
 }
 
+func TestDaemonSelfDemotesPrimaryWhenControlPlanePublishFails(t *testing.T) {
+	t.Parallel()
+
+	binDir, tracePath := writeTracingBinary(t, "pg_ctl", `#!/bin/sh
+trace=%q
+printf '%%s\n' "$*" >> "$trace"
+exit 0
+`)
+
+	var logs bytes.Buffer
+	publisher := failingPublisher{err: errors.New("control plane storage unavailable")}
+
+	daemon, err := NewDaemon(
+		validDataConfig(),
+		logging.New("pacmand", &logs),
+		WithControlPlanePublisher(publisher),
+		WithLocalPostgresCtl(&postgres.PGCtl{
+			BinDir:  binDir,
+			DataDir: "/var/lib/postgresql/data",
+		}),
+		withPostgresProbe(func(context.Context, string) error { return nil }),
+		withPostgresStateProbe(func(context.Context, string) (postgres.Observation, error) {
+			return postgres.Observation{
+				Role:       cluster.MemberRolePrimary,
+				InRecovery: false,
+				Details: postgres.Details{
+					SystemIdentifier: "7599025879359099984",
+					Timeline:         1,
+				},
+			}, nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("new daemon: %v", err)
+	}
+
+	daemon.recordHeartbeat(context.Background())
+
+	assertTraceLines(t, tracePath, []string{
+		"stop -D /var/lib/postgresql/data -w -m fast",
+	})
+	assertContains(t, logs.String(), `"msg":"primary self-demoted after control-plane loss"`)
+}
+
 func TestDaemonStartRejectsSecondStart(t *testing.T) {
 	t.Parallel()
 
