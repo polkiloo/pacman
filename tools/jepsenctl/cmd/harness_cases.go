@@ -253,9 +253,11 @@ func summarizeCaseCheckerReport(file string, raw map[string]any) string {
 
 	switch file {
 	case singlePrimaryCheckerFile:
-		return fmt.Sprintf("valid=%s samples=%s violationSamples=%d",
+		return fmt.Sprintf("valid=%s samples=%s confirmationSamples=%s transitionSamples=%d violationSamples=%d",
 			fieldString(raw, "valid"),
 			fieldString(raw, "samples"),
+			fieldString(raw, "confirmationSamples"),
+			arrayLength(raw["transitionSamples"]),
 			arrayLength(raw["violationSamples"]))
 	case acknowledgedWriteCheckerFile:
 		return fmt.Sprintf("valid=%s expectedAcknowledged=%s observedExactlyOnce=%s missingAcknowledged=%s duplicateAcknowledged=%s",
@@ -288,7 +290,7 @@ func summarizeCaseCheckerReport(file string, raw map[string]any) string {
 func selectedCheckerFacts(file string, raw map[string]any) map[string]any {
 	switch file {
 	case singlePrimaryCheckerFile:
-		return selectFields(raw, "observations", "samples", "writableObservations", "violationSamples")
+		return selectFields(raw, "observations", "samples", "writableObservations", "confirmationSamples", "transitionSamples", "violationSamples")
 	case acknowledgedWriteCheckerFile:
 		return selectFields(raw, "workload", "runId", "finalPrimary", "finalPrimaryService", "asyncLossAllowed", "expectedAcknowledged", "observedExactlyOnce", "missingAcknowledged", "duplicateAcknowledged", "unacknowledgedObserved")
 	case timelineCheckerFile:

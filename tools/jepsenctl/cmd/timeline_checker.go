@@ -148,7 +148,8 @@ func checkTimelineConvergence(observations []primaryObservation) timelineChecker
 	initialPrimary := primaryOf(initialSample)
 	finalPrimary := primaryOf(finalSample)
 	hasPrimaries := initialPrimary != nil && finalPrimary != nil
-	promotionObserved := hasPrimaries && initialPrimary.Member != finalPrimary.Member
+	primaryMemberChanged := hasPrimaries && initialPrimary.Member != finalPrimary.Member
+	promotionObserved := hasPrimaries && (primaryMemberChanged || finalPrimary.Timeline > initialPrimary.Timeline)
 	timelineAdvanced := false
 	if hasPrimaries {
 		timelineAdvanced = !promotionObserved || finalPrimary.Timeline > initialPrimary.Timeline
@@ -164,7 +165,7 @@ func checkTimelineConvergence(observations []primaryObservation) timelineChecker
 	}
 
 	var oldPrimaryFinalState *timelineMemberSummary
-	if promotionObserved {
+	if primaryMemberChanged {
 		for _, observation := range finalSample.Observations {
 			if observation.Member == initialPrimary.Member {
 				summary := summarizeTimelineMember(observation)
@@ -175,7 +176,7 @@ func checkTimelineConvergence(observations []primaryObservation) timelineChecker
 	}
 
 	oldPrimarySafe := true
-	if promotionObserved {
+	if primaryMemberChanged {
 		oldPrimarySafe = false
 		if oldPrimaryFinalState != nil {
 			oldPrimarySafe = !oldPrimaryFinalState.Reachable || (!oldPrimaryFinalState.Writable && oldPrimaryFinalState.Timeline == finalPrimary.Timeline)
@@ -221,8 +222,18 @@ func checkTimelineConvergence(observations []primaryObservation) timelineChecker
 }
 
 func groupTimelineSamples(observations []primaryObservation) []timelineSample {
+	latestRoundBySample := make(map[int]int)
+	for _, observation := range observations {
+		if observation.ProbeRound > latestRoundBySample[observation.SampleID] {
+			latestRoundBySample[observation.SampleID] = observation.ProbeRound
+		}
+	}
+
 	grouped := make(map[int][]primaryObservation)
 	for _, observation := range observations {
+		if observation.ProbeRound != latestRoundBySample[observation.SampleID] {
+			continue
+		}
 		grouped[observation.SampleID] = append(grouped[observation.SampleID], observation)
 	}
 

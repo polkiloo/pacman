@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -46,10 +47,42 @@ func (sampler *primarySampler) stop() {
 }
 
 func (lab *harnessLab) samplePrimaryState(ctx context.Context, sampleID int, observationFile string) error {
-	for _, node := range lab.options.target.DataNodes {
-		member := node.Name
-		service := node.Service
-		output, err := lab.psqlService(ctx, service, `
+	observations := lab.samplePrimaryRound(ctx, sampleID, 0)
+	for _, observation := range observations {
+		appendJSONL(observationFile, observation.record)
+	}
+	if writableProbeCount(observations) <= 1 {
+		return nil
+	}
+
+	for _, observation := range lab.samplePrimaryRound(ctx, sampleID, 1) {
+		appendJSONL(observationFile, observation.record)
+	}
+	return nil
+}
+
+type primaryProbe struct {
+	record   map[string]any
+	writable bool
+}
+
+func (lab *harnessLab) samplePrimaryRound(ctx context.Context, sampleID, probeRound int) []primaryProbe {
+	probes := make([]primaryProbe, len(lab.options.target.DataNodes))
+	var waitGroup sync.WaitGroup
+	for index, node := range lab.options.target.DataNodes {
+		waitGroup.Add(1)
+		go func(index int, node targetNode) {
+			defer waitGroup.Done()
+			probes[index] = lab.probePrimaryNode(ctx, sampleID, probeRound, node)
+		}(index, node)
+	}
+	waitGroup.Wait()
+	return probes
+}
+
+func (lab *harnessLab) probePrimaryNode(ctx context.Context, sampleID, probeRound int, node targetNode) primaryProbe {
+	startedAt := time.Now().UTC()
+	output, err := lab.psqlService(ctx, node.Service, `
 with local as (
   select
     pg_is_in_recovery() as in_recovery,
@@ -69,45 +102,52 @@ select
   end as timeline,
   coalesce(lsn::text, '')
 from observed;`)
-		if err != nil {
-			appendJSONL(observationFile, map[string]any{
-				"sampleId":   sampleID,
-				"observedAt": time.Now().UTC().Format(time.RFC3339),
-				"member":     member,
-				"service":    service,
-				"reachable":  false,
-				"writable":   false,
-				"inRecovery": nil,
-				"timeline":   nil,
-				"lsn":        "",
-				"error":      err.Error(),
-			})
-			continue
-		}
-		parts := strings.Split(lastNonEmptyLine(output), "\t")
-		inRecovery := len(parts) > 0 && parts[0] == "t"
-		timeline := 0
-		if len(parts) > 1 {
-			timeline, _ = strconv.Atoi(parts[1])
-		}
-		lsn := ""
-		if len(parts) > 2 {
-			lsn = parts[2]
-		}
-		appendJSONL(observationFile, map[string]any{
-			"sampleId":   sampleID,
-			"observedAt": time.Now().UTC().Format(time.RFC3339),
-			"member":     member,
-			"service":    service,
-			"reachable":  true,
-			"writable":   !inRecovery,
-			"inRecovery": inRecovery,
-			"timeline":   timeline,
-			"lsn":        lsn,
-			"error":      "",
-		})
+	finishedAt := time.Now().UTC()
+	record := map[string]any{
+		"sampleId":        sampleID,
+		"probeRound":      probeRound,
+		"probeStartedAt":  startedAt.Format(time.RFC3339Nano),
+		"probeFinishedAt": finishedAt.Format(time.RFC3339Nano),
+		"observedAt":      finishedAt.Format(time.RFC3339Nano),
+		"member":          node.Name,
+		"service":         node.Service,
+		"reachable":       err == nil,
+		"writable":        false,
+		"inRecovery":      nil,
+		"timeline":        nil,
+		"lsn":             "",
+		"error":           "",
 	}
-	return nil
+	if err != nil {
+		record["error"] = err.Error()
+		return primaryProbe{record: record}
+	}
+
+	parts := strings.Split(lastNonEmptyLine(output), "\t")
+	inRecovery := len(parts) > 0 && parts[0] == "t"
+	timeline := 0
+	if len(parts) > 1 {
+		timeline, _ = strconv.Atoi(parts[1])
+	}
+	lsn := ""
+	if len(parts) > 2 {
+		lsn = parts[2]
+	}
+	record["writable"] = !inRecovery
+	record["inRecovery"] = inRecovery
+	record["timeline"] = timeline
+	record["lsn"] = lsn
+	return primaryProbe{record: record, writable: !inRecovery}
+}
+
+func writableProbeCount(probes []primaryProbe) int {
+	count := 0
+	for _, probe := range probes {
+		if probe.writable {
+			count++
+		}
+	}
+	return count
 }
 
 func (lab *harnessLab) captureClusterSnapshot(ctx context.Context, caseDir, phase, nemesis, target, service string) error {

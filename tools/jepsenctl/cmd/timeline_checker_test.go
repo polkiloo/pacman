@@ -20,6 +20,8 @@ func TestTimelineCheckerFixtures(t *testing.T) {
 		wantOldPrimarySafe      bool
 		wantReplicaViolations   int
 		wantOldPrimaryFinalName string
+		wantObservations        int
+		wantSamples             int
 	}{
 		{
 			name:                  "accepts stable primary without promotion",
@@ -28,6 +30,8 @@ func TestTimelineCheckerFixtures(t *testing.T) {
 			wantTimelineAdvanced:  true,
 			wantReplicasConverged: true,
 			wantOldPrimarySafe:    true,
+			wantObservations:      6,
+			wantSamples:           2,
 		},
 		{
 			name:                    "accepts promotion with converged replicas",
@@ -38,6 +42,8 @@ func TestTimelineCheckerFixtures(t *testing.T) {
 			wantReplicasConverged:   true,
 			wantOldPrimarySafe:      true,
 			wantOldPrimaryFinalName: "alpha-1",
+			wantObservations:        6,
+			wantSamples:             2,
 		},
 		{
 			name:                    "rejects replica timeline mismatch",
@@ -47,6 +53,8 @@ func TestTimelineCheckerFixtures(t *testing.T) {
 			wantOldPrimarySafe:      true,
 			wantReplicaViolations:   1,
 			wantOldPrimaryFinalName: "alpha-1",
+			wantObservations:        6,
+			wantSamples:             2,
 		},
 		{
 			name:                    "rejects old primary on divergent timeline",
@@ -56,6 +64,19 @@ func TestTimelineCheckerFixtures(t *testing.T) {
 			wantReplicasConverged:   false,
 			wantReplicaViolations:   1,
 			wantOldPrimaryFinalName: "alpha-1",
+			wantObservations:        6,
+			wantSamples:             2,
+		},
+		{
+			name:                  "detects promotion chain returning to initial member",
+			fixture:               "promotion_chain_returns_valid.jsonl",
+			wantValid:             true,
+			wantPromotionObserved: true,
+			wantTimelineAdvanced:  true,
+			wantReplicasConverged: true,
+			wantOldPrimarySafe:    true,
+			wantObservations:      9,
+			wantSamples:           3,
 		},
 	}
 
@@ -82,8 +103,8 @@ func TestTimelineCheckerFixtures(t *testing.T) {
 			if result.Valid != test.wantValid {
 				t.Fatalf("result valid: got %v want %v", result.Valid, test.wantValid)
 			}
-			if result.Observations != 6 || result.Samples != 2 {
-				t.Fatalf("counts: got observations=%d samples=%d want observations=6 samples=2", result.Observations, result.Samples)
+			if result.Observations != test.wantObservations || result.Samples != test.wantSamples {
+				t.Fatalf("counts: got observations=%d samples=%d want observations=%d samples=%d", result.Observations, result.Samples, test.wantObservations, test.wantSamples)
 			}
 			if result.PromotionObserved != test.wantPromotionObserved {
 				t.Fatalf("promotion observed: got %v want %v", result.PromotionObserved, test.wantPromotionObserved)
@@ -130,6 +151,29 @@ func TestTimelineCheckerMissingSamples(t *testing.T) {
 	}
 	if result.Error != "missing primary observations" {
 		t.Fatalf("error: got %q want missing primary observations", result.Error)
+	}
+}
+
+func TestGroupTimelineSamplesUsesLatestProbeRound(t *testing.T) {
+	t.Parallel()
+
+	observations := []primaryObservation{
+		{SampleID: 4, Member: "alpha-1", Reachable: true, Writable: true, Timeline: 2},
+		{SampleID: 4, Member: "alpha-2", Reachable: true, Writable: true, Timeline: 3},
+		{SampleID: 4, ProbeRound: 1, Member: "alpha-1", Reachable: true, Writable: false, Timeline: 3},
+		{SampleID: 4, ProbeRound: 1, Member: "alpha-2", Reachable: true, Writable: true, Timeline: 3},
+	}
+
+	samples := groupTimelineSamples(observations)
+	if len(samples) != 1 {
+		t.Fatalf("samples: got %d want 1", len(samples))
+	}
+	if len(samples[0].Observations) != 2 {
+		t.Fatalf("observations: got %d want 2", len(samples[0].Observations))
+	}
+	writable := writableMembers(samples[0])
+	if len(writable) != 1 || writable[0].Member != "alpha-2" {
+		t.Fatalf("writable members: got %+v want alpha-2", writable)
 	}
 }
 
