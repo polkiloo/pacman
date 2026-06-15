@@ -74,6 +74,7 @@ func TestWriteArtifactSummary(t *testing.T) {
 		"- append-failover:kill case failed",
 		"- append-failover:kill failed: timeline_checker_status=1",
 		"- timeline-convergence checker failed: timeline mismatch",
+		"Classify unsupported or Patroni-only profiles separately from PACMAN product regressions",
 		"- `jepsen/store/pacman/nightly/run/index.html`",
 	})
 

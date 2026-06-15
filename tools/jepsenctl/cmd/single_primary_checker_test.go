@@ -104,6 +104,49 @@ func TestSinglePrimaryCheckerMissingSamples(t *testing.T) {
 	}
 }
 
+func TestSinglePrimaryCheckerConfirmsTimelineTransition(t *testing.T) {
+	t.Parallel()
+
+	observations := []primaryObservation{
+		{SampleID: 14, Member: "alpha-1", Reachable: true, Writable: false, Timeline: 2},
+		{SampleID: 14, Member: "alpha-2", Reachable: true, Writable: true, Timeline: 2},
+		{SampleID: 14, Member: "alpha-3", Reachable: true, Writable: true, Timeline: 3},
+		{SampleID: 14, ProbeRound: 1, Member: "alpha-1", Reachable: true, Writable: false, Timeline: 3},
+		{SampleID: 14, ProbeRound: 1, Member: "alpha-2", Reachable: false, Writable: false},
+		{SampleID: 14, ProbeRound: 1, Member: "alpha-3", Reachable: true, Writable: true, Timeline: 3},
+	}
+
+	result := checkSinglePrimaryObservations(observations)
+	if !result.Valid {
+		t.Fatalf("result valid: got false want true: %+v", result.ViolationSamples)
+	}
+	if result.ConfirmationSamples != 1 || len(result.TransitionSamples) != 1 {
+		t.Fatalf("confirmation result: got samples=%d transitions=%d want 1 and 1", result.ConfirmationSamples, len(result.TransitionSamples))
+	}
+	if len(result.ViolationSamples) != 0 {
+		t.Fatalf("violation samples: got %d want 0", len(result.ViolationSamples))
+	}
+}
+
+func TestSinglePrimaryCheckerRejectsConfirmedSplitBrain(t *testing.T) {
+	t.Parallel()
+
+	observations := []primaryObservation{
+		{SampleID: 7, Member: "alpha-1", Reachable: true, Writable: true, Timeline: 1},
+		{SampleID: 7, Member: "alpha-2", Reachable: true, Writable: true, Timeline: 2},
+		{SampleID: 7, ProbeRound: 1, Member: "alpha-1", Reachable: true, Writable: true, Timeline: 1},
+		{SampleID: 7, ProbeRound: 1, Member: "alpha-2", Reachable: true, Writable: true, Timeline: 2},
+	}
+
+	result := checkSinglePrimaryObservations(observations)
+	if result.Valid {
+		t.Fatalf("result valid: got true want false")
+	}
+	if len(result.ViolationSamples) != 1 || result.ViolationSamples[0].ProbeRound != 1 {
+		t.Fatalf("confirmed violations: got %+v want one round-1 violation", result.ViolationSamples)
+	}
+}
+
 func TestSinglePrimaryCheckerCommandReportsFailure(t *testing.T) {
 	t.Parallel()
 

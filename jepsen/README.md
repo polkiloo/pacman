@@ -55,6 +55,11 @@ the passing nightly matrix. It isolates the current primary from all DCS nodes
 while PostgreSQL and replication remain up, and is expected to expose whether
 the product can fence an old primary before another node promotes.
 
+Unsupported configuration triage is documented separately in
+[`UNSUPPORTED.md`](UNSUPPORTED.md). Use that document to distinguish PACMAN
+product regressions from Patroni-only calibration profiles, unsupported
+workload/nemesis selections, and post-MVP exploratory cases.
+
 Run one case at a time by name:
 
 ```bash
@@ -90,6 +95,16 @@ The same target also accepts the explicit `workload:nemesis` form:
 PACMAN_JEPSEN_CASE='serializable-txn:packet,kill' make jepsen-docker-case
 go run ./tools/jepsenctl run docker case serializable-txn:packet,kill
 ```
+
+Verify the baseline append smoke case is stable across repeated local Docker
+runs with:
+
+```bash
+make jepsen-docker-stability-append-smoke-none
+```
+
+The stability target builds the RPM once, then runs `append-smoke:none` three
+times by default. Override the loop count with `PACMAN_JEPSEN_STABILITY_RUNS`.
 
 Override the case list when running manually:
 
@@ -229,6 +244,8 @@ go run ./tools/jepsenctl artifacts compare-baseline \
 The comparison joins results by the exact `workload:nemesis` profile. PACMAN
 profiles without a matching Patroni baseline are reported as
 `no-matching-profile` and are not compared with a different fault profile.
+Unsupported configuration failures are tracked separately from product
+regressions; see [`UNSUPPORTED.md`](UNSUPPORTED.md).
 
 Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
 `case-results.jsonl`, per-case `history.edn`, `nemesis-schedule.edn`,

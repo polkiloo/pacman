@@ -75,6 +75,13 @@ func (lab *harnessLab) bootstrapLabWithRetries(ctx context.Context, label string
 			lastErr = err
 			fmt.Fprintf(lab.options.stderr, "bootstrap failed for %s on attempt %d/%d: %v\n", label, attempt, attempts, err)
 			if attempt < attempts {
+				if status, destroyErr := lab.destroyLab(ctx); destroyErr != nil || status != 0 {
+					if destroyErr != nil {
+						fmt.Fprintf(lab.options.stderr, "bootstrap retry cleanup for %s failed after attempt %d/%d: %v\n", label, attempt, attempts, destroyErr)
+					} else {
+						fmt.Fprintf(lab.options.stderr, "bootstrap retry cleanup for %s exited with status %d after attempt %d/%d\n", label, status, attempt, attempts)
+					}
+				}
 				time.Sleep(delay)
 			}
 			continue

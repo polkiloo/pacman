@@ -25,32 +25,46 @@ type singlePrimaryCheckerOptions struct {
 }
 
 type primaryObservation struct {
-	SampleID   int             `json:"sampleId"`
-	ObservedAt string          `json:"observedAt,omitempty"`
-	Member     string          `json:"member,omitempty"`
-	Service    string          `json:"service,omitempty"`
-	Reachable  bool            `json:"reachable"`
-	Writable   bool            `json:"writable"`
-	InRecovery json.RawMessage `json:"inRecovery,omitempty"`
-	Timeline   int             `json:"timeline,omitempty"`
-	LSN        string          `json:"lsn,omitempty"`
-	Error      string          `json:"error"`
+	SampleID        int             `json:"sampleId"`
+	ProbeRound      int             `json:"probeRound,omitempty"`
+	ProbeStartedAt  string          `json:"probeStartedAt,omitempty"`
+	ProbeFinishedAt string          `json:"probeFinishedAt,omitempty"`
+	ObservedAt      string          `json:"observedAt,omitempty"`
+	Member          string          `json:"member,omitempty"`
+	Service         string          `json:"service,omitempty"`
+	Reachable       bool            `json:"reachable"`
+	Writable        bool            `json:"writable"`
+	InRecovery      json.RawMessage `json:"inRecovery,omitempty"`
+	Timeline        int             `json:"timeline,omitempty"`
+	LSN             string          `json:"lsn,omitempty"`
+	Error           string          `json:"error"`
 }
 
 type singlePrimaryViolationSample struct {
 	SampleID        int      `json:"sampleId"`
+	ProbeRound      int      `json:"probeRound,omitempty"`
 	ObservedAt      string   `json:"observedAt,omitempty"`
 	WritableMembers []string `json:"writableMembers"`
 	Timelines       []int    `json:"timelines"`
 }
 
+type singlePrimaryTransitionSample struct {
+	SampleID                 int      `json:"sampleId"`
+	InitialWritableMembers   []string `json:"initialWritableMembers"`
+	InitialTimelines         []int    `json:"initialTimelines"`
+	ConfirmedWritableMembers []string `json:"confirmedWritableMembers"`
+	ConfirmedTimelines       []int    `json:"confirmedTimelines"`
+}
+
 type singlePrimaryCheckerResult struct {
-	Checker              string                         `json:"checker"`
-	Valid                bool                           `json:"valid"`
-	Observations         int                            `json:"observations"`
-	Samples              int                            `json:"samples"`
-	WritableObservations int                            `json:"writableObservations"`
-	ViolationSamples     []singlePrimaryViolationSample `json:"violationSamples"`
+	Checker              string                          `json:"checker"`
+	Valid                bool                            `json:"valid"`
+	Observations         int                             `json:"observations"`
+	Samples              int                             `json:"samples"`
+	WritableObservations int                             `json:"writableObservations"`
+	ConfirmationSamples  int                             `json:"confirmationSamples"`
+	TransitionSamples    []singlePrimaryTransitionSample `json:"transitionSamples"`
+	ViolationSamples     []singlePrimaryViolationSample  `json:"violationSamples"`
 }
 
 func newSinglePrimaryCheckerCommand() *cobra.Command {
@@ -99,9 +113,10 @@ func runSinglePrimaryChecker(options singlePrimaryCheckerOptions) (bool, error) 
 	}
 
 	result := singlePrimaryCheckerResult{
-		Checker:          singlePrimaryCheckerName,
-		Valid:            false,
-		ViolationSamples: []singlePrimaryViolationSample{},
+		Checker:           singlePrimaryCheckerName,
+		Valid:             false,
+		TransitionSamples: []singlePrimaryTransitionSample{},
+		ViolationSamples:  []singlePrimaryViolationSample{},
 	}
 	if !fileIsMissingOrEmpty(samplePath) {
 		observations, err := readPrimaryObservations(samplePath)
@@ -149,11 +164,17 @@ func readPrimaryObservations(path string) ([]primaryObservation, error) {
 
 func checkSinglePrimaryObservations(observations []primaryObservation) singlePrimaryCheckerResult {
 	sampleIDs := make(map[int]struct{})
-	writableBySample := make(map[int][]primaryObservation)
+	observationsBySampleRound := make(map[int]map[int][]primaryObservation)
+	writableObservations := 0
 	for _, observation := range observations {
 		sampleIDs[observation.SampleID] = struct{}{}
+		if observationsBySampleRound[observation.SampleID] == nil {
+			observationsBySampleRound[observation.SampleID] = make(map[int][]primaryObservation)
+		}
+		observationsBySampleRound[observation.SampleID][observation.ProbeRound] = append(
+			observationsBySampleRound[observation.SampleID][observation.ProbeRound], observation)
 		if observation.Reachable && observation.Writable {
-			writableBySample[observation.SampleID] = append(writableBySample[observation.SampleID], observation)
+			writableObservations++
 		}
 	}
 
@@ -164,26 +185,38 @@ func checkSinglePrimaryObservations(observations []primaryObservation) singlePri
 	sort.Ints(samples)
 
 	violations := make([]singlePrimaryViolationSample, 0)
-	writableObservations := 0
+	transitions := make([]singlePrimaryTransitionSample, 0)
+	confirmationSamples := 0
 	for _, sampleID := range samples {
-		writable := writableBySample[sampleID]
-		writableObservations += len(writable)
-		if len(writable) <= 1 {
+		rounds := observationsBySampleRound[sampleID]
+		initialWritable := writablePrimaryObservations(rounds[0])
+		if len(initialWritable) <= 1 {
 			continue
 		}
 
-		members := make([]string, 0, len(writable))
-		timelines := make([]int, 0, len(writable))
-		for _, observation := range writable {
-			members = append(members, observation.Member)
-			timelines = append(timelines, observation.Timeline)
+		confirmed, hasConfirmation := rounds[1]
+		if hasConfirmation {
+			confirmationSamples++
+			confirmedWritable := writablePrimaryObservations(confirmed)
+			if isConfirmedPrimaryTransition(initialWritable, confirmedWritable) {
+				initialMembers, initialTimelines := primaryMembersAndTimelines(initialWritable)
+				confirmedMembers, confirmedTimelines := primaryMembersAndTimelines(confirmedWritable)
+				transitions = append(transitions, singlePrimaryTransitionSample{
+					SampleID:                 sampleID,
+					InitialWritableMembers:   initialMembers,
+					InitialTimelines:         initialTimelines,
+					ConfirmedWritableMembers: confirmedMembers,
+					ConfirmedTimelines:       confirmedTimelines,
+				})
+				continue
+			}
+			if len(confirmedWritable) > 1 {
+				violations = append(violations, newSinglePrimaryViolation(sampleID, 1, confirmedWritable))
+				continue
+			}
 		}
-		violations = append(violations, singlePrimaryViolationSample{
-			SampleID:        sampleID,
-			ObservedAt:      writable[0].ObservedAt,
-			WritableMembers: members,
-			Timelines:       timelines,
-		})
+
+		violations = append(violations, newSinglePrimaryViolation(sampleID, 0, initialWritable))
 	}
 
 	return singlePrimaryCheckerResult{
@@ -192,6 +225,60 @@ func checkSinglePrimaryObservations(observations []primaryObservation) singlePri
 		Observations:         len(observations),
 		Samples:              len(samples),
 		WritableObservations: writableObservations,
+		ConfirmationSamples:  confirmationSamples,
+		TransitionSamples:    transitions,
 		ViolationSamples:     violations,
 	}
+}
+
+func writablePrimaryObservations(observations []primaryObservation) []primaryObservation {
+	writable := make([]primaryObservation, 0)
+	for _, observation := range observations {
+		if observation.Reachable && observation.Writable {
+			writable = append(writable, observation)
+		}
+	}
+	return writable
+}
+
+func isConfirmedPrimaryTransition(initial, confirmed []primaryObservation) bool {
+	if len(initial) <= 1 || len(confirmed) != 1 {
+		return false
+	}
+	maxTimeline := initial[0].Timeline
+	distinctTimelines := false
+	for _, observation := range initial[1:] {
+		if observation.Timeline != maxTimeline {
+			distinctTimelines = true
+		}
+		if observation.Timeline > maxTimeline {
+			maxTimeline = observation.Timeline
+		}
+	}
+	return distinctTimelines && confirmed[0].Timeline == maxTimeline
+}
+
+func newSinglePrimaryViolation(sampleID, probeRound int, writable []primaryObservation) singlePrimaryViolationSample {
+	members, timelines := primaryMembersAndTimelines(writable)
+	observedAt := ""
+	if len(writable) > 0 {
+		observedAt = writable[0].ObservedAt
+	}
+	return singlePrimaryViolationSample{
+		SampleID:        sampleID,
+		ProbeRound:      probeRound,
+		ObservedAt:      observedAt,
+		WritableMembers: members,
+		Timelines:       timelines,
+	}
+}
+
+func primaryMembersAndTimelines(observations []primaryObservation) ([]string, []int) {
+	members := make([]string, 0, len(observations))
+	timelines := make([]int, 0, len(observations))
+	for _, observation := range observations {
+		members = append(members, observation.Member)
+		timelines = append(timelines, observation.Timeline)
+	}
+	return members, timelines
 }

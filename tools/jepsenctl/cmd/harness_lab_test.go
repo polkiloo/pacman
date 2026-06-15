@@ -66,6 +66,44 @@ func TestHarnessDispatchValidationAndResultsFile(t *testing.T) {
 	assertContainsAll(t, "results", string(data), []string{":valid? true", `:campaign "case"`, `:target "pacman-3-data"`, `:target-store "pacman"`})
 }
 
+func TestBootstrapRetryDestroysLabBetweenAttempts(t *testing.T) {
+	t.Setenv("PACMAN_JEPSEN_BOOTSTRAP_ATTEMPTS", "2")
+	t.Setenv("PACMAN_JEPSEN_BOOTSTRAP_RETRY_DELAY_SECONDS", "0")
+	t.Setenv("PACMAN_JEPSEN_RESET_LAB", "false")
+
+	target, err := resolveJepsenTarget(defaultJepsenTarget)
+	if err != nil {
+		t.Fatalf("resolve target: %v", err)
+	}
+	var stderr strings.Builder
+	runner := &scriptedRunner{statuses: []int{137, 0, 137}}
+	lab := newHarnessLab(harnessOptions{
+		repoRoot: t.TempDir(),
+		runner:   runner,
+		stderr:   &stderr,
+		runOptions: runOptions{
+			target: target,
+		},
+	})
+
+	err = lab.bootstrapLabWithRetries(context.Background(), "case:append-smoke:none")
+	if err == nil || !strings.Contains(err.Error(), "bootstrap lab exited with status 137") {
+		t.Fatalf("bootstrap error: got %v want status 137", err)
+	}
+	if len(runner.specs) != 3 {
+		t.Fatalf("runner calls: got %d want 3", len(runner.specs))
+	}
+	if got := filepath.Base(runner.specs[0].name); got != "bootstrap-cluster.sh" {
+		t.Fatalf("first command: got %q want bootstrap-cluster.sh", got)
+	}
+	if got := filepath.Base(runner.specs[1].name); got != "destroy-cluster.sh" {
+		t.Fatalf("second command: got %q want destroy-cluster.sh", got)
+	}
+	if got := filepath.Base(runner.specs[2].name); got != "bootstrap-cluster.sh" {
+		t.Fatalf("third command: got %q want bootstrap-cluster.sh", got)
+	}
+}
+
 func TestHarnessTopologyHelpers(t *testing.T) {
 	t.Parallel()
 

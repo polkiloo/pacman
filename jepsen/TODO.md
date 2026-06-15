@@ -120,6 +120,10 @@ These are valuable, but not required for the first PACMAN Jepsen safety suite.
 - [ ] Slow disk / fsync stall.
 - [ ] Clock skew.
 - [ ] Flapping network.
+- [ ] Watchdog required but unavailable.
+- [ ] PACMAN crash on primary while PostgreSQL remains alive.
+- [ ] Slow PostgreSQL shutdown after leader loss.
+- [ ] VM/container pause longer than DCS TTL.
 
 ## Conditional Tracks
 
@@ -145,15 +149,6 @@ Skip until PACMAN has explicit supported semantics for sync/strict-sync behavior
 - [x] Strict-sync no-standby unavailability behavior.
 - [x] Synchronous standby kill.
 - [x] `synchronous_node_count > 1` behavior.
-
-### Fencing and Watchdog
-
-Post-MVP unless PACMAN ships a watchdog/fencing contract.
-
-- [ ] Watchdog required but unavailable.
-- [ ] PACMAN crash on primary while PostgreSQL remains alive.
-- [ ] Slow PostgreSQL shutdown after leader loss.
-- [ ] VM/container pause longer than DCS TTL.
 
 ### Patroni-Specific Configuration
 
@@ -201,7 +196,7 @@ orchestration code that needs a separate port.
          `nightly-failures.txt`, and checker JSON files.
    - [x] Keep GitHub Actions upload wiring in shell/YAML.
 
-5. [ ] Move JSON/JSONL checkers to Go one checker at a time.
+5. [x] Move JSON/JSONL checkers to Go one checker at a time.
    - [x] Start with DCS quorum checker.
    - [x] Move single-primary checker.
    - [x] Move acknowledged-write checker.
@@ -272,7 +267,7 @@ MVP-1 is done when:
   - [x] acknowledged write preservation result;
   - [x] timeline convergence result;
   - [x] failover/rejoin summary.
-- [ ] `append-smoke:none` is stable across repeated local runs.
+- [x] `append-smoke:none` is stable across repeated local runs.
 - [x] `append-failover:kill` is stable enough to run as a manual CI smoke.
-- [ ] Unsupported configurations are documented separately from
+- [x] Unsupported configurations are documented separately from
       product regressions.

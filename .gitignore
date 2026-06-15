@@ -18,6 +18,7 @@ coverage.*
 *.coverprofile
 profile.cov
 .cache/
+.codex/
 .gocache/
 jepsen/store/
 
