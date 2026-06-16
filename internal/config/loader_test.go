@@ -757,6 +757,85 @@ dcs:
 	}
 }
 
+func TestLoadRejectsPermissiveConfigFileWithInlineWALGCredential(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pacmand.yaml")
+	payload := `
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: alpha-1
+postgres:
+  dataDir: /var/lib/postgresql/data
+reinit:
+  walg:
+    repository:
+      provider: s3
+      prefix: s3://pacman-backups/alpha
+    credentials:
+      environment:
+        AWS_SECRET_ACCESS_KEY: secret-key
+bootstrap:
+  clusterName: alpha
+`
+
+	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected sensitive config file permission error")
+	}
+
+	if !errors.Is(err, ErrSensitiveConfigFilePermissions) {
+		t.Fatalf("unexpected error: got %v, want %v", err, ErrSensitiveConfigFilePermissions)
+	}
+}
+
+func TestLoadAllowsPermissiveConfigFileWithFileBackedWALGCredential(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pacmand.yaml")
+	payload := `
+apiVersion: pacman.io/v1alpha1
+kind: NodeConfig
+node:
+  name: alpha-1
+postgres:
+  dataDir: /var/lib/postgresql/data
+reinit:
+  walg:
+    repository:
+      provider: s3
+      prefix: s3://pacman-backups/alpha
+    credentials:
+      environmentFiles:
+        AWS_SECRET_ACCESS_KEY: /run/secrets/aws-secret-access-key
+bootstrap:
+  clusterName: alpha
+`
+
+	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("load file-backed wal-g credential config: %v", err)
+	}
+
+	if loaded.Reinit == nil || loaded.Reinit.WALG == nil {
+		t.Fatalf("expected reinit wal-g config to load, got %+v", loaded.Reinit)
+	}
+	if got := loaded.Reinit.WALG.Credentials.EnvironmentFiles["AWS_SECRET_ACCESS_KEY"]; got != "/run/secrets/aws-secret-access-key" {
+		t.Fatalf("unexpected WAL-G credential file: got %q", got)
+	}
+}
+
 func TestLoadReturnsOpenError(t *testing.T) {
 	t.Parallel()
 

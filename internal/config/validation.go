@@ -94,6 +94,12 @@ func (config Config) Validate() error {
 		}
 	}
 
+	if config.Reinit != nil {
+		if err := config.Reinit.Validate(); err != nil {
+			return err
+		}
+	}
+
 	if config.Bootstrap != nil {
 		if err := config.Bootstrap.Validate(); err != nil {
 			return err
@@ -207,6 +213,134 @@ func (postgres PostgresLocalConfig) Validate() error {
 	}
 
 	return nil
+}
+
+// Validate reports whether the local reinit configuration is coherent enough
+// for pacmand to use when executing destructive replica reinitialization.
+func (reinit ReinitConfig) Validate() error {
+	if reinit.WALG == nil {
+		return ErrReinitWALGConfigRequired
+	}
+
+	return reinit.WALG.Validate()
+}
+
+// Validate reports whether the WAL-G reinit configuration is coherent enough
+// to plan a restore workflow.
+func (walg WALGConfig) Validate() error {
+	if strings.TrimSpace(walg.Binary) == "" {
+		return ErrReinitWALGBinaryRequired
+	}
+
+	if err := walg.Repository.Validate(); err != nil {
+		return err
+	}
+
+	return walg.Credentials.Validate()
+}
+
+// Validate reports whether the WAL-G repository settings identify a supported
+// backup repository.
+func (repository WALGRepositoryConfig) Validate() error {
+	if strings.TrimSpace(string(repository.Provider)) == "" {
+		return ErrReinitWALGRepositoryProviderRequired
+	}
+
+	if !repository.Provider.IsValid() {
+		return ErrReinitWALGRepositoryProviderInvalid
+	}
+
+	if strings.TrimSpace(repository.Prefix) == "" {
+		return ErrReinitWALGRepositoryPrefixRequired
+	}
+
+	return nil
+}
+
+// IsValid reports whether the repository provider is supported.
+func (provider WALGRepositoryProvider) IsValid() bool {
+	switch provider {
+	case WALGRepositoryProviderS3,
+		WALGRepositoryProviderGCS,
+		WALGRepositoryProviderAzure,
+		WALGRepositoryProviderFilesystem:
+		return true
+	default:
+		return false
+	}
+}
+
+// Validate reports whether the WAL-G credential source configuration is
+// unambiguous and uses valid environment variable names.
+func (credentials WALGCredentialsConfig) Validate() error {
+	seen := make(map[string]struct{})
+
+	for _, name := range credentials.InheritEnvironment {
+		normalized, err := normalizeEnvironmentName(name)
+		if err != nil {
+			return err
+		}
+		if _, ok := seen[normalized]; ok {
+			return ErrReinitWALGCredentialSourceConflict
+		}
+		seen[normalized] = struct{}{}
+	}
+
+	for name, value := range credentials.Environment {
+		normalized, err := normalizeEnvironmentName(name)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(value) == "" {
+			return ErrReinitWALGCredentialValueRequired
+		}
+		if _, ok := seen[normalized]; ok {
+			return ErrReinitWALGCredentialSourceConflict
+		}
+		seen[normalized] = struct{}{}
+	}
+
+	for name, path := range credentials.EnvironmentFiles {
+		normalized, err := normalizeEnvironmentName(name)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(path) == "" {
+			return ErrReinitWALGCredentialFileRequired
+		}
+		if _, ok := seen[normalized]; ok {
+			return ErrReinitWALGCredentialSourceConflict
+		}
+		seen[normalized] = struct{}{}
+	}
+
+	return nil
+}
+
+func normalizeEnvironmentName(name string) (string, error) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" || !isValidEnvironmentName(trimmed) {
+		return "", ErrReinitWALGCredentialNameInvalid
+	}
+
+	return trimmed, nil
+}
+
+func isValidEnvironmentName(name string) bool {
+	for index, r := range name {
+		if r >= 'A' && r <= 'Z' {
+			continue
+		}
+		if r >= '0' && r <= '9' && index > 0 {
+			continue
+		}
+		if r == '_' {
+			continue
+		}
+		return false
+	}
+
+	return true
 }
 
 // Validate reports whether the cluster bootstrap configuration is coherent

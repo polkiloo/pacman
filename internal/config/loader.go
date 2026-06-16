@@ -111,6 +111,7 @@ type documentFormatProbe struct {
 	TLS        map[string]any `yaml:"tls"`
 	Security   map[string]any `yaml:"security"`
 	Postgres   map[string]any `yaml:"postgres"`
+	Reinit     map[string]any `yaml:"reinit"`
 
 	Scope      string         `yaml:"scope"`
 	RestAPI    map[string]any `yaml:"restapi"`
@@ -136,7 +137,8 @@ func detectDocumentFormat(payload []byte) DocumentFormat {
 		probe.DCS != nil ||
 		probe.TLS != nil ||
 		probe.Security != nil ||
-		probe.Postgres != nil {
+		probe.Postgres != nil ||
+		probe.Reinit != nil {
 		return DocumentFormatPACMAN
 	}
 

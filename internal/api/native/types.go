@@ -222,6 +222,12 @@ type FailoverRequest struct {
 	RequestedBy string `json:"requestedBy,omitempty"`
 }
 
+type ReinitRequest struct {
+	Member      string `json:"member"`
+	Reason      string `json:"reason,omitempty"`
+	RequestedBy string `json:"requestedBy,omitempty"`
+}
+
 type OperationAcceptedResponse struct {
 	Message   string    `json:"message,omitempty"`
 	Operation Operation `json:"operation"`

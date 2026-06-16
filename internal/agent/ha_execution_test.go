@@ -1605,6 +1605,10 @@ func (stubNodeStatusReader) CreateFailoverIntent(context.Context, controlplane.F
 	return controlplane.FailoverIntent{}, errors.New("unsupported")
 }
 
+func (stubNodeStatusReader) CreateReinitIntent(context.Context, controlplane.ReinitRequest) (controlplane.ReinitIntent, error) {
+	return controlplane.ReinitIntent{}, errors.New("unsupported")
+}
+
 func failoverTestClusterStatus(currentPrimary string, active *cluster.Operation, members ...cluster.MemberStatus) cluster.ClusterStatus {
 	return cluster.ClusterStatus{
 		ClusterName:    "alpha",

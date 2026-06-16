@@ -27,4 +27,5 @@ type diagnosticsSummaryJSON = nativeapi.DiagnosticsSummary
 type memberDiagnosticSummaryJSON = nativeapi.MemberDiagnosticSummary
 type switchoverRequestJSON = nativeapi.SwitchoverRequest
 type failoverRequestJSON = nativeapi.FailoverRequest
+type reinitRequestJSON = nativeapi.ReinitRequest
 type operationAcceptedResponse = nativeapi.OperationAcceptedResponse

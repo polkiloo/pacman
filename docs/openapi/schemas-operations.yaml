@@ -68,6 +68,17 @@ components:
           type: string
         requestedBy:
           type: string
+    ReinitRequest:
+      type: object
+      required:
+        - member
+      properties:
+        member:
+          type: string
+        reason:
+          type: string
+        requestedBy:
+          type: string
     OperationAccepted:
       type: object
       required:

@@ -104,6 +104,14 @@ func withHeartbeatInterval(interval time.Duration) Option {
 	}
 }
 
+func withControlPlanePublishTimeout(timeout time.Duration) Option {
+	return func(daemon *Daemon) {
+		if timeout > 0 {
+			daemon.controlPlanePublishTimeout = timeout
+		}
+	}
+}
+
 func withPostgresProbe(probe postgresAvailabilityProbe) Option {
 	return func(daemon *Daemon) {
 		if probe != nil {

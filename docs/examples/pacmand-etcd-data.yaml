@@ -43,6 +43,19 @@ postgres:
     shared_buffers: "1GB"
     wal_keep_size: "2048MB"
 
+reinit:
+  walg:
+    repository:
+      provider: s3
+      prefix: s3://pacman-backups/alpha
+      region: us-east-1
+    credentials:
+      inheritEnvironment:
+        - AWS_SESSION_TOKEN
+      environmentFiles:
+        AWS_ACCESS_KEY_ID: /run/secrets/aws-access-key-id
+        AWS_SECRET_ACCESS_KEY: /run/secrets/aws-secret-access-key
+
 bootstrap:
   clusterName: alpha
   initialPrimary: alpha-1

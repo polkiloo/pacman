@@ -131,6 +131,8 @@ paths:
     $ref: './openapi/paths-pacman.yaml#/paths/~1api~1v1~1operations~1switchover'
   /api/v1/operations/failover:
     $ref: './openapi/paths-pacman.yaml#/paths/~1api~1v1~1operations~1failover'
+  /api/v1/operations/reinit:
+    $ref: './openapi/paths-pacman.yaml#/paths/~1api~1v1~1operations~1reinit'
 components:
   parameters:
     PatroniLagQuery:
@@ -222,6 +224,8 @@ components:
       $ref: './openapi/schemas-operations.yaml#/components/schemas/SwitchoverRequest'
     FailoverRequest:
       $ref: './openapi/schemas-operations.yaml#/components/schemas/FailoverRequest'
+    ReinitRequest:
+      $ref: './openapi/schemas-operations.yaml#/components/schemas/ReinitRequest'
     OperationAccepted:
       $ref: './openapi/schemas-operations.yaml#/components/schemas/OperationAccepted'
     Operation:

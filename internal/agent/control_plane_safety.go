@@ -20,6 +20,7 @@ func (daemon *Daemon) reconcilePrimaryControlPlaneReachability(ctx context.Conte
 		return false
 	}
 
+	daemon.markSelfDemotedPrimaryForRejoin()
 	daemon.logger.WarnContext(ctx, "primary self-demoted after control-plane loss",
 		daemon.logArgs("agent")...)
 	return true

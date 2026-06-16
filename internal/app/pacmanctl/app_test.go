@@ -53,7 +53,7 @@ func TestRunWithoutCommandPrintsHelp(t *testing.T) {
 		t.Fatalf("run pacmanctl help: %v", err)
 	}
 
-	const want = "pacmanctl commands: cluster status, cluster spec show, cluster switchover, cluster failover, cluster maintenance enable, cluster maintenance disable, members list, history list, node status, diagnostics show, patronictl-compatible: list, topology, history, show-config, pause, resume, switchover, failover\n"
+	const want = "pacmanctl commands: cluster status, cluster spec show, cluster switchover, cluster failover, cluster reinit, cluster maintenance enable, cluster maintenance disable, members list, history list, node status, diagnostics show, patronictl-compatible: list, topology, history, show-config, pause, resume, switchover, failover\n"
 	if got := stdout.String(); got != want {
 		t.Fatalf("unexpected help output: got %q, want %q", got, want)
 	}
@@ -488,6 +488,73 @@ func TestRunClusterFailoverText(t *testing.T) {
 	assertContains(t, output, "failover")
 	assertContains(t, output, "Reason:")
 	assertContains(t, output, "primary lost")
+}
+
+func TestRunClusterReinitText(t *testing.T) {
+	t.Parallel()
+
+	requestedAt := time.Date(2026, time.April, 3, 11, 30, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			t.Fatalf("unexpected method: %s", request.Method)
+		}
+		if request.URL.Path != "/api/v1/operations/reinit" {
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+
+		var body reinitRequestJSON
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		if body.Member != "alpha-2" {
+			t.Fatalf("member: got %q, want %q", body.Member, "alpha-2")
+		}
+		if body.Reason != "reclone replica" {
+			t.Fatalf("reason: got %q, want %q", body.Reason, "reclone replica")
+		}
+		if body.RequestedBy != "ops-bot" {
+			t.Fatalf("requestedBy: got %q, want %q", body.RequestedBy, "ops-bot")
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusAccepted)
+		if err := json.NewEncoder(writer).Encode(operationAcceptedResponse{
+			Message: "reinit accepted",
+			Operation: operationJSON{
+				ID:          "ri-1",
+				Kind:        "reinit",
+				State:       "accepted",
+				RequestedBy: "ops-bot",
+				RequestedAt: requestedAt,
+				Reason:      "reclone replica",
+				FromMember:  "alpha-1",
+				ToMember:    "alpha-2",
+			},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New(Params{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+
+	err := app.Run(context.Background(), []string{"-api-url", server.URL, "cluster", "reinit", "-member", "alpha-2", "-reason", "reclone replica", "-requested-by", "ops-bot"})
+	if err != nil {
+		t.Fatalf("run cluster reinit: %v", err)
+	}
+
+	output := stdout.String()
+	assertContains(t, output, "Kind:")
+	assertContains(t, output, "reinit")
+	assertContains(t, output, "To Member:")
+	assertContains(t, output, "alpha-2")
 }
 
 func TestRunClusterMaintenanceEnableText(t *testing.T) {

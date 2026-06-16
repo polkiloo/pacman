@@ -1015,6 +1015,54 @@ exit 0
 	assertContains(t, logs.String(), `"msg":"primary self-demoted after control-plane loss"`)
 }
 
+func TestDaemonSelfDemotesPrimaryWhenControlPlanePublishHangs(t *testing.T) {
+	t.Parallel()
+
+	binDir, tracePath := writeTracingBinary(t, "pg_ctl", `#!/bin/sh
+trace=%q
+printf '%%s\n' "$*" >> "$trace"
+exit 0
+`)
+
+	var logs bytes.Buffer
+	daemon, err := NewDaemon(
+		validDataConfig(),
+		logging.New("pacmand", &logs),
+		WithControlPlanePublisher(blockingPublisher{}),
+		WithLocalPostgresCtl(&postgres.PGCtl{
+			BinDir:  binDir,
+			DataDir: "/var/lib/postgresql/data",
+		}),
+		withControlPlanePublishTimeout(10*time.Millisecond),
+		withPostgresProbe(func(context.Context, string) error { return nil }),
+		withPostgresStateProbe(func(context.Context, string) (postgres.Observation, error) {
+			return postgres.Observation{
+				Role:       cluster.MemberRolePrimary,
+				InRecovery: false,
+				Details: postgres.Details{
+					SystemIdentifier: "7599025879359099984",
+					Timeline:         1,
+				},
+			}, nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("new daemon: %v", err)
+	}
+
+	daemon.recordHeartbeat(context.Background())
+
+	heartbeat := daemon.Heartbeat()
+	if heartbeat.ControlPlane.ClusterReachable {
+		t.Fatalf("expected control plane to be marked unreachable, got %+v", heartbeat.ControlPlane)
+	}
+
+	assertTraceLines(t, tracePath, []string{
+		"stop -D /var/lib/postgresql/data -w -m fast",
+	})
+	assertContains(t, logs.String(), `"msg":"primary self-demoted after control-plane loss"`)
+}
+
 func TestDaemonStartRejectsSecondStart(t *testing.T) {
 	t.Parallel()
 
@@ -1781,6 +1829,13 @@ func (publisher failingPublisher) PublishNodeStatus(context.Context, agentmodel.
 	return agentmodel.ControlPlaneStatus{ClusterReachable: false}, publisher.err
 }
 
+type blockingPublisher struct{}
+
+func (publisher blockingPublisher) PublishNodeStatus(ctx context.Context, _ agentmodel.NodeStatus) (agentmodel.ControlPlaneStatus, error) {
+	<-ctx.Done()
+	return agentmodel.ControlPlaneStatus{ClusterReachable: false}, ctx.Err()
+}
+
 type staticControlPlaneStore struct {
 	clusterStatus cluster.ClusterStatus
 }
@@ -1827,4 +1882,8 @@ func (store staticControlPlaneStore) CancelSwitchover(context.Context) (cluster.
 
 func (store staticControlPlaneStore) CreateFailoverIntent(context.Context, controlplane.FailoverIntentRequest) (controlplane.FailoverIntent, error) {
 	return controlplane.FailoverIntent{}, errors.New("unsupported")
+}
+
+func (store staticControlPlaneStore) CreateReinitIntent(context.Context, controlplane.ReinitRequest) (controlplane.ReinitIntent, error) {
+	return controlplane.ReinitIntent{}, errors.New("unsupported")
 }

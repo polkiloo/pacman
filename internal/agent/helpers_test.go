@@ -7,6 +7,7 @@ import (
 
 	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
 	"github.com/polkiloo/pacman/internal/cluster"
+	"github.com/polkiloo/pacman/internal/config"
 )
 
 func TestDaemonNodeStatusReturnsClone(t *testing.T) {
@@ -71,6 +72,49 @@ func TestSameWALProgress(t *testing.T) {
 	changed.ReplayLSN = "0/5000200"
 	if sameWALProgress(base, changed) {
 		t.Fatal("expected different wal progress to mismatch")
+	}
+}
+
+func TestBuildNodeStatusMarksSelfDemotedPrimaryForRejoin(t *testing.T) {
+	t.Parallel()
+
+	observedAt := time.Date(2026, time.June, 16, 12, 40, 41, 0, time.UTC)
+	daemon := &Daemon{
+		config: config.Config{
+			Node: config.NodeConfig{
+				Name: "alpha-1",
+				Role: cluster.NodeRoleData,
+			},
+		},
+		nodeStatus: agentmodel.NodeStatus{
+			NodeName: "alpha-1",
+			Role:     cluster.MemberRolePrimary,
+			Postgres: agentmodel.PostgresStatus{
+				Managed: true,
+				Role:    cluster.MemberRolePrimary,
+				Details: agentmodel.PostgresDetails{
+					SystemIdentifier: "7651952092439597593",
+					Timeline:         1,
+				},
+			},
+		},
+		selfDemotedPrimary: true,
+	}
+
+	status := daemon.buildNodeStatus(observedAt, agentmodel.PostgresStatus{
+		Managed: true,
+		Up:      false,
+		Role:    cluster.MemberRoleUnknown,
+	})
+
+	if status.Role != cluster.MemberRoleReplica || status.Postgres.Role != cluster.MemberRoleReplica {
+		t.Fatalf("expected self-demoted primary to publish replica role, got %+v", status)
+	}
+	if status.State != cluster.MemberStateNeedsRejoin || !status.NeedsRejoin {
+		t.Fatalf("expected self-demoted primary to publish needs_rejoin, got %+v", status)
+	}
+	if status.Postgres.Details.SystemIdentifier != "7651952092439597593" || status.Postgres.Details.Timeline != 1 {
+		t.Fatalf("expected preserved postgres identity, got %+v", status.Postgres.Details)
 	}
 }
 
