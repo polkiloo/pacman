@@ -19,7 +19,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] add test workflow
 - [x] add structured logging
 - [x] add `testcontainers-go` integration test environment for `pacmand` and `pacmanctl` with `postgres:17`
-- [ ] add metrics scaffolding
+- [x] add metrics scaffolding
 - [ ] add local development scripts
 
 ---
@@ -159,22 +159,23 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 
 ### Replica Reinit / Recloning
 
-- [ ] define explicit `reinit` operation model distinct from former-primary rejoin
-- [ ] define operator-triggered reinit API and `pacmanctl` command surface
-- [ ] define validation rules for eligible reinit targets (not primary, not witness, known member, healthy source primary)
-- [ ] block reinit while failover / switchover / rejoin is already in progress
-- [ ] define config surface for reinit / basebackup settings and credential sourcing
-- [ ] select the replication source for reinit (`current primary` by default, optional preferred source later)
+- [x] define explicit `reinit` operation model distinct from former-primary rejoin
+- [x] define operator-triggered reinit API and `pacmanctl` command surface
+- [x] define validation rules for eligible reinit targets (not primary, not witness, known member, healthy source primary)
+- [x] block reinit while failover / switchover / rejoin is already in progress
+- [ ] define config surface for reinit / WAL-G repository settings and credential sourcing
+- [ ] select the WAL-G restore source for reinit (`LATEST` backup by default, optional explicit backup name / restore target later)
 - [ ] stop PostgreSQL cleanly on the target before destructive reinit steps
 - [ ] implement safe data-directory wipe / archive handling before reclone
-- [ ] implement `pg_basebackup` workflow for full replica reinit
-- [ ] recreate standby / replication configuration after basebackup
-- [ ] start PostgreSQL as a standby after reinit completes
-- [ ] verify system identifier, timeline, slot attachment, and streaming health after reinit
+- [ ] implement WAL-G restore workflow for full replica reinit using `wal-g backup-fetch`
+- [ ] render WAL-G recovery settings, including `restore_command`, before PostgreSQL starts
+- [ ] recreate standby / replication configuration after WAL-G restore
+- [ ] start PostgreSQL as a standby after WAL-G restore completes and WAL replay can catch up
+- [ ] verify system identifier, timeline, restored backup metadata, slot attachment, and streaming health after reinit
 - [ ] record reinit progress and result in operation journal / history
 - [ ] expose reinit state and last result in member / cluster status
 - [ ] add unit tests for reinit validation, planning, and operation-state transitions
-- [ ] add integration tests for `pg_basebackup`-driven reinit and post-reinit replication recovery
+- [ ] add integration tests for WAL-G-driven reinit and post-restore replication recovery
 
 ---
 
