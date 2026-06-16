@@ -28,25 +28,32 @@ dcs_client_endpoints="http://pacman-dcs:2379,http://pacman-dcs-2:2379,http://pac
 dcs_initial_cluster="alpha-dcs=http://pacman-dcs:2380,alpha-dcs-2=http://pacman-dcs-2:2380,alpha-dcs-3=http://pacman-dcs-3:2380"
 
 find_runtime_rpm() {
-  local candidate name
-  local candidates=()
+  local candidate candidate_mtime name newest newest_mtime
 
   if [[ ! -d "${rpm_dir}" ]]; then
     return 1
   fi
 
-  while IFS= read -r candidate; do
-    candidates+=("${candidate}")
-  done < <(find "${rpm_dir}" -maxdepth 1 -type f -name 'pacman-*.rpm' ! -name 'pacman-postgresql17-agent-*' ! -name '*.src.rpm' -print | sort)
-
-  for (( candidate_index=${#candidates[@]} - 1; candidate_index >= 0; candidate_index-- )); do
-    candidate=${candidates[${candidate_index}]}
+  newest=""
+  newest_mtime=0
+  while IFS= read -r -d '' candidate; do
     name=$(basename "${candidate}")
-    if [[ -f "${candidate}" && "${name}" != pacman-postgresql17-agent-* && "${name}" != *.src.rpm ]]; then
-      printf '%s\n' "${candidate}"
-      return 0
+    if [[ ! -f "${candidate}" || "${name}" == pacman-postgresql17-agent-* || "${name}" == *.src.rpm ]]; then
+      continue
     fi
-  done
+    if ! candidate_mtime=$(stat -c '%Y' "${candidate}" 2>/dev/null); then
+      candidate_mtime=$(stat -f '%m' "${candidate}")
+    fi
+    if [[ -z "${newest}" || "${candidate_mtime}" -gt "${newest_mtime}" || ( "${candidate_mtime}" -eq "${newest_mtime}" && "${candidate}" > "${newest}" ) ]]; then
+      newest=${candidate}
+      newest_mtime=${candidate_mtime}
+    fi
+  done < <(find "${rpm_dir}" -maxdepth 1 -type f -name 'pacman-*.rpm' ! -name 'pacman-postgresql17-agent-*' ! -name '*.src.rpm' -print0)
+
+  if [[ -n "${newest}" ]]; then
+    printf '%s\n' "${newest}"
+    return 0
+  fi
 
   return 1
 }
