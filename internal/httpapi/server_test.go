@@ -1135,7 +1135,7 @@ func TestPrimaryReturnsServiceUnavailableWhenPostgresDown(t *testing.T) {
 	}
 }
 
-func TestPrimaryReturnsServiceUnavailableWithoutControlPlaneLeader(t *testing.T) {
+func TestPrimaryReturnsOKWithoutControlPlaneLeader(t *testing.T) {
 	t.Parallel()
 
 	status := primaryNodeStatus("alpha-1", time.Now().UTC())
@@ -1147,8 +1147,8 @@ func TestPrimaryReturnsServiceUnavailableWithoutControlPlaneLeader(t *testing.T)
 	}, discardLogger(), Config{}), "/primary")
 	defer response.Body.Close()
 
-	if response.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusServiceUnavailable)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusOK)
 	}
 }
 

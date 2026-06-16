@@ -240,7 +240,7 @@ func parseLSN(s string) int64 {
 }
 
 // handlePrimary returns 200 only when the local node is the writable primary
-// with a fresh control-plane leader lock. Mirrors Patroni GET /primary
+// with a fresh control-plane publication. Mirrors Patroni GET /primary
 // semantics while failing closed during DCS partitions.
 func (srv *Server) handlePrimary(c *fiber.Ctx) error {
 	status := srv.buildNodeStatus()
@@ -260,7 +260,6 @@ func (srv *Server) primaryReady(node agentmodel.NodeStatus) bool {
 	return node.Role == cluster.MemberRolePrimary &&
 		node.Postgres.Up &&
 		node.ControlPlane.ClusterReachable &&
-		node.ControlPlane.Leader &&
 		controlPlanePublicationFresh(node.ControlPlane, srv.primaryControlPlaneWindow)
 }
 
