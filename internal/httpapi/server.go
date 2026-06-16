@@ -32,6 +32,7 @@ type NodeStatusReader interface {
 	CreateSwitchoverIntent(context.Context, controlplane.SwitchoverRequest) (controlplane.SwitchoverIntent, error)
 	CancelSwitchover(context.Context) (cluster.Operation, error)
 	CreateFailoverIntent(context.Context, controlplane.FailoverIntentRequest) (controlplane.FailoverIntent, error)
+	CreateReinitIntent(context.Context, controlplane.ReinitRequest) (controlplane.ReinitIntent, error)
 }
 
 // OpenAPIDocumentProvider returns the published OpenAPI YAML served by pacmand.
@@ -157,6 +158,7 @@ func (srv *Server) registerRoutes() {
 	v1.Post("/operations/switchover", srv.authMiddleware(AccessScopeClusterWrite), srv.requireJSONContentTypeMiddleware(), srv.handleSwitchoverCreate)
 	v1.Delete("/operations/switchover", srv.authMiddleware(AccessScopeClusterWrite), srv.handleSwitchoverCancel)
 	v1.Post("/operations/failover", srv.authMiddleware(AccessScopeClusterWrite), srv.requireJSONContentTypeMiddleware(), srv.handleFailoverCreate)
+	v1.Post("/operations/reinit", srv.authMiddleware(AccessScopeClusterWrite), srv.requireJSONContentTypeMiddleware(), srv.handleReinitCreate)
 	v1.Post("/promote", srv.authMiddleware(AccessScopeClusterWrite), srv.handlePromote)
 
 	srv.app.Use("/api/v1", srv.apiNotFoundMiddleware())

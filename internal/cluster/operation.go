@@ -13,6 +13,7 @@ const (
 	OperationKindSwitchover        OperationKind = "switchover"
 	OperationKindFailover          OperationKind = "failover"
 	OperationKindRejoin            OperationKind = "rejoin"
+	OperationKindReinit            OperationKind = "reinit"
 	OperationKindMaintenanceChange OperationKind = "maintenance_change"
 )
 
@@ -20,6 +21,7 @@ var operationKinds = []OperationKind{
 	OperationKindSwitchover,
 	OperationKindFailover,
 	OperationKindRejoin,
+	OperationKindReinit,
 	OperationKindMaintenanceChange,
 }
 
@@ -35,7 +37,7 @@ func (kind OperationKind) String() string {
 // IsValid reports whether the value is a supported operation kind.
 func (kind OperationKind) IsValid() bool {
 	switch kind {
-	case OperationKindSwitchover, OperationKindFailover, OperationKindRejoin, OperationKindMaintenanceChange:
+	case OperationKindSwitchover, OperationKindFailover, OperationKindRejoin, OperationKindReinit, OperationKindMaintenanceChange:
 		return true
 	default:
 		return false

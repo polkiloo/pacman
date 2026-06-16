@@ -36,6 +36,7 @@ const (
 var (
 	errAPIURLRequired          = errors.New("pacmanctl api-url is required")
 	errCandidateRequired       = errors.New("switchover candidate is required: use -candidate")
+	errReinitMemberRequired    = errors.New("reinit member is required: use -member")
 	errNodeNameRequired        = errors.New("node name is required: use `node status NODE_NAME` or -node")
 	errUnsupportedOutputFormat = errors.New("unsupported output format")
 )
@@ -235,7 +236,7 @@ func sanitizeLogAPIURL(raw string) string {
 }
 
 func (a *App) printCommandHelp() error {
-	_, err := fmt.Fprintln(a.stdout, "pacmanctl commands: cluster status, cluster spec show, cluster switchover, cluster failover, cluster maintenance enable, cluster maintenance disable, members list, history list, node status, diagnostics show, patronictl-compatible: list, topology, history, show-config, pause, resume, switchover, failover")
+	_, err := fmt.Fprintln(a.stdout, "pacmanctl commands: cluster status, cluster spec show, cluster switchover, cluster failover, cluster reinit, cluster maintenance enable, cluster maintenance disable, members list, history list, node status, diagnostics show, patronictl-compatible: list, topology, history, show-config, pause, resume, switchover, failover")
 	return err
 }
 
@@ -285,6 +286,22 @@ func (a *App) runCluster(ctx context.Context, client *apiClient, args []string) 
 
 		response, err := client.failover(ctx, failoverRequestJSON{
 			Candidate:   options.candidate,
+			Reason:      options.reason,
+			RequestedBy: options.requestedBy,
+		})
+		if err != nil {
+			return err
+		}
+
+		return renderOutput(a.stdout, options.format, response, renderOperationAcceptedText)
+	case "reinit":
+		options, err := parseReinitCommandOptions(args[1:], a.stderr)
+		if err != nil {
+			return err
+		}
+
+		response, err := client.reinit(ctx, reinitRequestJSON{
+			Member:      options.member,
 			Reason:      options.reason,
 			RequestedBy: options.requestedBy,
 		})
@@ -501,6 +518,13 @@ type failoverCommandOptions struct {
 	requestedBy string
 }
 
+type reinitCommandOptions struct {
+	format      string
+	member      string
+	reason      string
+	requestedBy string
+}
+
 type maintenanceCommandOptions struct {
 	format      string
 	reason      string
@@ -601,6 +625,45 @@ func parseFailoverCommandOptions(args []string, stderr io.Writer) (failoverComma
 	return failoverCommandOptions{
 		format:      normalizedFormat,
 		candidate:   strings.TrimSpace(candidate),
+		reason:      strings.TrimSpace(reason),
+		requestedBy: strings.TrimSpace(requestedBy),
+	}, nil
+}
+
+func parseReinitCommandOptions(args []string, stderr io.Writer) (reinitCommandOptions, error) {
+	fs := flag.NewFlagSet("cluster reinit", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	var member string
+	var reason string
+	var requestedBy string
+	format := defaultOutputFormat
+
+	fs.StringVar(&member, "member", "", "replica member to reinitialize")
+	fs.StringVar(&reason, "reason", "", "operator reason for the reinit")
+	fs.StringVar(&requestedBy, "requested-by", "", "operator identity")
+	addOutputFormatFlags(fs, &format)
+
+	if err := fs.Parse(args); err != nil {
+		return reinitCommandOptions{}, err
+	}
+	if len(fs.Args()) > 0 {
+		return reinitCommandOptions{}, fmt.Errorf("unexpected arguments for cluster reinit: %s", strings.Join(fs.Args(), " "))
+	}
+
+	normalizedFormat, err := validateOutputFormat(format)
+	if err != nil {
+		return reinitCommandOptions{}, err
+	}
+
+	trimmedMember := strings.TrimSpace(member)
+	if trimmedMember == "" {
+		return reinitCommandOptions{}, errReinitMemberRequired
+	}
+
+	return reinitCommandOptions{
+		format:      normalizedFormat,
+		member:      trimmedMember,
 		reason:      strings.TrimSpace(reason),
 		requestedBy: strings.TrimSpace(requestedBy),
 	}, nil

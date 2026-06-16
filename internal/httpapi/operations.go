@@ -107,6 +107,42 @@ func (srv *Server) handleFailoverCreate(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusAccepted).JSON(buildOperationAcceptedResponse(intent.Operation))
 }
 
+func (srv *Server) handleReinitCreate(c *fiber.Ctx) error {
+	if len(c.Body()) == 0 {
+		return writeAPIError(c, fiber.StatusBadRequest, "invalid_reinit_request", "reinit request body must be valid JSON")
+	}
+
+	var requestBody reinitRequestJSON
+	if err := c.BodyParser(&requestBody); err != nil {
+		return writeAPIError(c, fiber.StatusBadRequest, "invalid_reinit_request", "reinit request body must be valid JSON")
+	}
+
+	request := controlplane.ReinitRequest{
+		Member:      strings.TrimSpace(requestBody.Member),
+		Reason:      strings.TrimSpace(requestBody.Reason),
+		RequestedBy: strings.TrimSpace(requestBody.RequestedBy),
+	}
+
+	requestContext := paclog.WithMember(srv.requestContext(c), request.Member)
+	c.SetUserContext(requestContext)
+
+	intent, err := srv.store.CreateReinitIntent(requestContext, request)
+	if err != nil {
+		return writeReinitCreateError(c, err)
+	}
+
+	requestContext = paclog.WithOperation(requestContext, intent.Operation.ID, string(intent.Operation.Kind))
+	c.SetUserContext(requestContext)
+	srv.logRequest(
+		c,
+		slog.LevelInfo,
+		"accepted reinit request",
+		append(auditLogAttrs("reinit.requested"), operationLogAttrs(intent.Operation)...)...,
+	)
+
+	return c.Status(fiber.StatusAccepted).JSON(buildOperationAcceptedResponse(intent.Operation))
+}
+
 func (srv *Server) handleOpenAPIDocument(c *fiber.Ctx) error {
 	document, err := srv.publishedOpenAPIDocument()
 	if err != nil {
@@ -218,5 +254,25 @@ func writeFailoverCreateError(c *fiber.Ctx, err error) error {
 		return writeAPIError(c, fiber.StatusServiceUnavailable, "failover_unavailable", err.Error())
 	default:
 		return writeAPIError(c, fiber.StatusInternalServerError, "internal_error", "failed to create failover intent")
+	}
+}
+
+func writeReinitCreateError(c *fiber.Ctx, err error) error {
+	switch {
+	case errors.Is(err, controlplane.ErrReinitTargetRequired):
+		return writeAPIError(c, fiber.StatusBadRequest, "invalid_reinit_request", err.Error())
+	case errors.Is(err, controlplane.ErrReinitOperationInProgress):
+		return writeAPIError(c, fiber.StatusConflict, "reinit_conflict", err.Error())
+	case errors.Is(err, controlplane.ErrReinitTargetUnknown),
+		errors.Is(err, controlplane.ErrReinitTargetIsCurrentPrimary),
+		errors.Is(err, controlplane.ErrReinitTargetIsWitness),
+		errors.Is(err, controlplane.ErrReinitSourcePrimaryUnknown),
+		errors.Is(err, controlplane.ErrReinitSourcePrimaryUnhealthy):
+		return writeAPIError(c, fiber.StatusPreconditionFailed, "reinit_precondition_failed", err.Error())
+	case errors.Is(err, controlplane.ErrClusterSpecRequired),
+		errors.Is(err, controlplane.ErrReinitObservedStateRequired):
+		return writeAPIError(c, fiber.StatusServiceUnavailable, "reinit_unavailable", err.Error())
+	default:
+		return writeAPIError(c, fiber.StatusInternalServerError, "internal_error", "failed to create reinit intent")
 	}
 }

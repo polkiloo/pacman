@@ -141,6 +141,15 @@ func (client *apiClient) failover(ctx context.Context, request failoverRequestJS
 	return response, nil
 }
 
+func (client *apiClient) reinit(ctx context.Context, request reinitRequestJSON) (operationAcceptedResponse, error) {
+	var response operationAcceptedResponse
+	if err := client.doJSON(ctx, http.MethodPost, "/api/v1/operations/reinit", request, &response); err != nil {
+		return operationAcceptedResponse{}, err
+	}
+
+	return response, nil
+}
+
 func (client *apiClient) getJSON(ctx context.Context, path string, target any) error {
 	return client.doJSON(ctx, http.MethodGet, path, nil, target)
 }

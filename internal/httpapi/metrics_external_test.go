@@ -208,6 +208,10 @@ func (store metricsTestStore) CreateFailoverIntent(context.Context, controlplane
 	return controlplane.FailoverIntent{}, nil
 }
 
+func (store metricsTestStore) CreateReinitIntent(context.Context, controlplane.ReinitRequest) (controlplane.ReinitIntent, error) {
+	return controlplane.ReinitIntent{}, nil
+}
+
 func (store metricsTestStore) OperationTraceCounts() []cluster.OperationTraceCount {
 	items := make([]cluster.OperationTraceCount, len(store.traceCounts))
 	copy(items, store.traceCounts)

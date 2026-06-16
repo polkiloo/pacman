@@ -3207,6 +3207,119 @@ func TestPostFailoverMapsControlPlaneErrors(t *testing.T) {
 	}
 }
 
+func TestPostReinitReturnsAcceptedOperationAndRequestMetadata(t *testing.T) {
+	t.Parallel()
+
+	requestedAt := time.Date(2026, time.April, 2, 11, 0, 0, 0, time.UTC)
+	var captured controlplane.ReinitRequest
+
+	response := performRequestBodyWithHeaders(
+		t,
+		New("alpha-1", testNodeStatusStore{
+			lastReinitRequest: &captured,
+			reinitIntent: controlplane.ReinitIntent{
+				Operation: cluster.Operation{
+					ID:          "reinit-1",
+					Kind:        cluster.OperationKindReinit,
+					State:       cluster.OperationStateAccepted,
+					RequestedBy: "ops",
+					RequestedAt: requestedAt,
+					Reason:      "reclone lagged replica",
+					FromMember:  "alpha-1",
+					ToMember:    "alpha-2",
+					Result:      cluster.OperationResultPending,
+					Message:     "replica reinitialization for alpha-2 from alpha-1 accepted",
+				},
+			},
+		}, discardLogger(), Config{}),
+		http.MethodPost,
+		"/api/v1/operations/reinit",
+		[]byte("{\"member\":\" alpha-2 \",\"reason\":\" reclone lagged replica \",\"requestedBy\":\" ops \"}"),
+		map[string]string{"Content-Type": "application/json"},
+	)
+
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusAccepted)
+	}
+
+	var body operationAcceptedResponse
+	decodeJSONResponse(t, response, &body)
+
+	if body.Operation.Kind != "reinit" || body.Operation.ToMember != "alpha-2" {
+		t.Fatalf("unexpected reinit response: %+v", body.Operation)
+	}
+
+	if captured.Member != "alpha-2" || captured.Reason != "reclone lagged replica" || captured.RequestedBy != "ops" {
+		t.Fatalf("unexpected captured reinit request: %+v", captured)
+	}
+}
+
+func TestPostReinitRejectsEmptyBody(t *testing.T) {
+	t.Parallel()
+
+	response := performRequestBodyWithHeaders(
+		t,
+		New("alpha-1", testNodeStatusStore{}, discardLogger(), Config{}),
+		http.MethodPost,
+		"/api/v1/operations/reinit",
+		nil,
+		map[string]string{"Content-Type": "application/json"},
+	)
+
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusBadRequest)
+	}
+
+	var body errorResponseJSON
+	decodeJSONResponse(t, response, &body)
+
+	if body.Error != "invalid_reinit_request" {
+		t.Fatalf("error: got %q, want %q", body.Error, "invalid_reinit_request")
+	}
+}
+
+func TestPostReinitMapsControlPlaneErrors(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		err      error
+		wantCode int
+		wantErr  string
+	}{
+		{name: "invalid", err: controlplane.ErrReinitTargetRequired, wantCode: http.StatusBadRequest, wantErr: "invalid_reinit_request"},
+		{name: "conflict", err: controlplane.ErrReinitOperationInProgress, wantCode: http.StatusConflict, wantErr: "reinit_conflict"},
+		{name: "precondition", err: controlplane.ErrReinitTargetIsCurrentPrimary, wantCode: http.StatusPreconditionFailed, wantErr: "reinit_precondition_failed"},
+		{name: "unavailable", err: controlplane.ErrReinitObservedStateRequired, wantCode: http.StatusServiceUnavailable, wantErr: "reinit_unavailable"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			response := performRequestBodyWithHeaders(
+				t,
+				New("alpha-1", testNodeStatusStore{reinitErr: tc.err}, discardLogger(), Config{}),
+				http.MethodPost,
+				"/api/v1/operations/reinit",
+				[]byte("{\"member\":\"alpha-2\"}"),
+				map[string]string{"Content-Type": "application/json"},
+			)
+
+			if response.StatusCode != tc.wantCode {
+				t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, tc.wantCode)
+			}
+
+			var body errorResponseJSON
+			decodeJSONResponse(t, response, &body)
+
+			if body.Error != tc.wantErr {
+				t.Fatalf("error: got %q, want %q", body.Error, tc.wantErr)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // buildNodeStatus — full field coverage
 // ---------------------------------------------------------------------------
@@ -3668,6 +3781,10 @@ type testNodeStatusStore struct {
 	failoverIntent           controlplane.FailoverIntent
 	failoverErr              error
 	captureFailoverContext   func(context.Context)
+	lastReinitRequest        *controlplane.ReinitRequest
+	reinitIntent             controlplane.ReinitIntent
+	reinitErr                error
+	captureReinitContext     func(context.Context)
 }
 
 func (store testNodeStatusStore) NodeStatus(nodeName string) (agentmodel.NodeStatus, bool) {
@@ -3810,6 +3927,26 @@ func (store testNodeStatusStore) CreateFailoverIntent(ctx context.Context, reque
 	}
 
 	return store.failoverIntent.Clone(), nil
+}
+
+func (store testNodeStatusStore) CreateReinitIntent(ctx context.Context, request controlplane.ReinitRequest) (controlplane.ReinitIntent, error) {
+	if err := ctx.Err(); err != nil {
+		return controlplane.ReinitIntent{}, err
+	}
+	if store.captureReinitContext != nil {
+		store.captureReinitContext(ctx)
+	}
+
+	if store.lastReinitRequest != nil {
+		captured := request.Clone()
+		*store.lastReinitRequest = captured
+	}
+
+	if store.reinitErr != nil {
+		return controlplane.ReinitIntent{}, store.reinitErr
+	}
+
+	return store.reinitIntent.Clone(), nil
 }
 
 type testAuthorizer struct {

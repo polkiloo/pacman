@@ -1828,3 +1828,7 @@ func (store staticControlPlaneStore) CancelSwitchover(context.Context) (cluster.
 func (store staticControlPlaneStore) CreateFailoverIntent(context.Context, controlplane.FailoverIntentRequest) (controlplane.FailoverIntent, error) {
 	return controlplane.FailoverIntent{}, errors.New("unsupported")
 }
+
+func (store staticControlPlaneStore) CreateReinitIntent(context.Context, controlplane.ReinitRequest) (controlplane.ReinitIntent, error) {
+	return controlplane.ReinitIntent{}, errors.New("unsupported")
+}

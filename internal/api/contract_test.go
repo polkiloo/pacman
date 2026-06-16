@@ -827,6 +827,7 @@ func TestRepositoryDocumentPatroniAdminAndNativeRoutesRequireSecurity(t *testing
 		{path: "/api/v1/operations/switchover", method: "post"},
 		{path: "/api/v1/operations/switchover", method: "delete"},
 		{path: "/api/v1/operations/failover", method: "post"},
+		{path: "/api/v1/operations/reinit", method: "post"},
 	}
 
 	for _, testCase := range securedPaths {

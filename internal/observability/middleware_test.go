@@ -127,3 +127,7 @@ func (reader testStateReader) CancelSwitchover(context.Context) (cluster.Operati
 func (reader testStateReader) CreateFailoverIntent(context.Context, controlplane.FailoverIntentRequest) (controlplane.FailoverIntent, error) {
 	return controlplane.FailoverIntent{}, nil
 }
+
+func (reader testStateReader) CreateReinitIntent(context.Context, controlplane.ReinitRequest) (controlplane.ReinitIntent, error) {
+	return controlplane.ReinitIntent{}, nil
+}

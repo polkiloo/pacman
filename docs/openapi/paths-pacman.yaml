@@ -369,6 +369,62 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /api/v1/operations/reinit:
+    post:
+      security:
+        - bearerAuth: []
+        - mutualTLS: []
+      tags:
+        - Operations
+      summary: Request replica reinitialization
+      description: |
+        Requests a destructive reinitialization of an existing non-primary data
+        member. This operation is distinct from former-primary rejoin: PACMAN
+        records an explicit `reinit` operation, validates that the target is a
+        known non-witness member, and requires a healthy current primary as the
+        restore source before accepting the intent.
+      operationId: postReinit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReinitRequest'
+      responses:
+        '202':
+          description: Reinit intent accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationAccepted'
+        '400':
+          description: Invalid reinit request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Another conflicting topology operation is already active
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '412':
+          description: Reinit preconditions are not satisfied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Cluster is not in a state where reinit can be attempted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 components:
   responses:
     Unauthorized:
@@ -401,6 +457,8 @@ components:
       $ref: './schemas-operations.yaml#/components/schemas/SwitchoverRequest'
     FailoverRequest:
       $ref: './schemas-operations.yaml#/components/schemas/FailoverRequest'
+    ReinitRequest:
+      $ref: './schemas-operations.yaml#/components/schemas/ReinitRequest'
     OperationAccepted:
       $ref: './schemas-operations.yaml#/components/schemas/OperationAccepted'
     ErrorResponse:

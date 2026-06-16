@@ -14,6 +14,7 @@ func TestOperationKinds(t *testing.T) {
 		OperationKindSwitchover,
 		OperationKindFailover,
 		OperationKindRejoin,
+		OperationKindReinit,
 		OperationKindMaintenanceChange,
 	}
 
@@ -42,6 +43,7 @@ func TestOperationKindValidation(t *testing.T) {
 		{name: "switchover", kind: OperationKindSwitchover, valid: true, zero: false, stringValue: "switchover"},
 		{name: "failover", kind: OperationKindFailover, valid: true, zero: false, stringValue: "failover"},
 		{name: "rejoin", kind: OperationKindRejoin, valid: true, zero: false, stringValue: "rejoin"},
+		{name: "reinit", kind: OperationKindReinit, valid: true, zero: false, stringValue: "reinit"},
 		{name: "maintenance change", kind: OperationKindMaintenanceChange, valid: true, zero: false, stringValue: "maintenance_change"},
 		{name: "zero", kind: "", valid: false, zero: true, stringValue: ""},
 		{name: "invalid", kind: OperationKind("rebalance"), valid: false, zero: false, stringValue: "rebalance"},
