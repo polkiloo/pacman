@@ -1135,6 +1135,58 @@ func TestPrimaryReturnsServiceUnavailableWhenPostgresDown(t *testing.T) {
 	}
 }
 
+func TestPrimaryReturnsServiceUnavailableWithoutControlPlaneLeader(t *testing.T) {
+	t.Parallel()
+
+	status := primaryNodeStatus("alpha-1", time.Now().UTC())
+	status.ControlPlane.Leader = false
+
+	response := performRequest(t, New("alpha-1", testNodeStatusStore{
+		nodeStatus: status,
+		hasNode:    true,
+	}, discardLogger(), Config{}), "/primary")
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
+func TestPrimaryReturnsServiceUnavailableWhenControlPlanePublicationStale(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	status := primaryNodeStatus("alpha-1", now.Add(-10*time.Second))
+	status.ControlPlane.LastHeartbeatAt = now.Add(-10 * time.Second)
+
+	response := performRequest(t, New("alpha-1", testNodeStatusStore{
+		nodeStatus: status,
+		hasNode:    true,
+	}, discardLogger(), Config{PrimaryControlPlaneWindow: time.Second}), "/primary")
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
+func TestPrimaryReturnsServiceUnavailableWhenControlPlaneUnreachable(t *testing.T) {
+	t.Parallel()
+
+	status := primaryNodeStatus("alpha-1", time.Now().UTC())
+	status.ControlPlane.ClusterReachable = false
+
+	response := performRequest(t, New("alpha-1", testNodeStatusStore{
+		nodeStatus: status,
+		hasNode:    true,
+	}, discardLogger(), Config{}), "/primary")
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("unexpected status: got %d, want %d", response.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
 func TestPrimaryReturnsServiceUnavailableWhenNodeAbsent(t *testing.T) {
 	t.Parallel()
 
@@ -4164,6 +4216,12 @@ func primaryNodeStatus(nodeName string, now time.Time) agentmodel.NodeStatus {
 				ServerVersion: 170002,
 				Timeline:      1,
 			},
+		},
+		ControlPlane: agentmodel.ControlPlaneStatus{
+			ClusterReachable: true,
+			Leader:           true,
+			LastHeartbeatAt:  now,
+			LastDCSSeenAt:    now,
 		},
 	}
 }

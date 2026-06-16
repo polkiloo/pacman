@@ -51,6 +51,10 @@ type Config struct {
 	// LivenessWindow is the maximum allowed age of the last heartbeat before
 	// GET /liveness returns 503. Defaults to 30 seconds.
 	LivenessWindow time.Duration
+	// PrimaryControlPlaneWindow is the maximum allowed age of the last
+	// successful control-plane publication before GET /primary returns 503.
+	// Defaults to 5 seconds.
+	PrimaryControlPlaneWindow time.Duration
 	// TLSConfig optionally enables TLS for the external PACMAN HTTP API.
 	// When nil, the server listens in plaintext.
 	TLSConfig *tls.Config
@@ -71,19 +75,20 @@ var errServerAlreadyStarted = errors.New("http api server is already started")
 
 // Server is the PACMAN HTTP API server.
 type Server struct {
-	app            *fiber.App
-	nodeName       string
-	store          NodeStatusReader
-	logger         *slog.Logger
-	livenessWindow time.Duration
-	tlsConfig      *tls.Config
-	authorizer     Authorizer
-	openAPIDoc     OpenAPIDocumentProvider
-	localPromoter  LocalPromoter
-	requestSeq     atomic.Uint64
-	openAPILoad    sync.Once
-	openAPIBytes   []byte
-	openAPIErr     error
+	app                       *fiber.App
+	nodeName                  string
+	store                     NodeStatusReader
+	logger                    *slog.Logger
+	livenessWindow            time.Duration
+	primaryControlPlaneWindow time.Duration
+	tlsConfig                 *tls.Config
+	authorizer                Authorizer
+	openAPIDoc                OpenAPIDocumentProvider
+	localPromoter             LocalPromoter
+	requestSeq                atomic.Uint64
+	openAPILoad               sync.Once
+	openAPIBytes              []byte
+	openAPIErr                error
 
 	mu       sync.Mutex
 	runDone  chan struct{}
@@ -98,16 +103,21 @@ func New(nodeName string, store NodeStatusReader, logger *slog.Logger, cfg Confi
 	if lw <= 0 {
 		lw = 30 * time.Second
 	}
+	pcpw := cfg.PrimaryControlPlaneWindow
+	if pcpw <= 0 {
+		pcpw = 5 * time.Second
+	}
 
 	srv := &Server{
-		nodeName:       nodeName,
-		store:          store,
-		logger:         logger,
-		livenessWindow: lw,
-		tlsConfig:      cfg.TLSConfig,
-		authorizer:     cfg.Authorizer,
-		openAPIDoc:     cfg.OpenAPIDocument,
-		localPromoter:  cfg.LocalPromoter,
+		nodeName:                  nodeName,
+		store:                     store,
+		logger:                    logger,
+		livenessWindow:            lw,
+		primaryControlPlaneWindow: pcpw,
+		tlsConfig:                 cfg.TLSConfig,
+		authorizer:                cfg.Authorizer,
+		openAPIDoc:                cfg.OpenAPIDocument,
+		localPromoter:             cfg.LocalPromoter,
 	}
 
 	if srv.openAPIDoc == nil {
