@@ -27,6 +27,11 @@ func (config Config) Redacted() Config {
 		redacted.Security = &security
 	}
 
+	if redacted.Reinit != nil {
+		reinit := redacted.Reinit.Redacted()
+		redacted.Reinit = &reinit
+	}
+
 	return redacted
 }
 
@@ -34,7 +39,8 @@ func (config Config) Redacted() Config {
 // material rather than referencing it indirectly by file path.
 func (config Config) HasInlineSecrets() bool {
 	return (config.DCS != nil && config.DCS.HasInlineSecrets()) ||
-		(config.Security != nil && config.Security.HasInlineSecrets())
+		(config.Security != nil && config.Security.HasInlineSecrets()) ||
+		(config.Reinit != nil && config.Reinit.HasInlineSecrets())
 }
 
 // LogValue implements slog.LogValuer so structured logging redacts secret
@@ -83,6 +89,82 @@ func (security SecurityConfig) Redacted() SecurityConfig {
 // material rather than referencing it by file path.
 func (security SecurityConfig) HasInlineSecrets() bool {
 	return strings.TrimSpace(security.AdminBearerToken) != ""
+}
+
+// Redacted returns a copy of the reinit config with secret-bearing fields
+// masked so it can be logged or formatted safely.
+func (reinit ReinitConfig) Redacted() ReinitConfig {
+	redacted := reinit
+
+	if redacted.WALG != nil {
+		walg := redacted.WALG.Redacted()
+		redacted.WALG = &walg
+	}
+
+	return redacted
+}
+
+// HasInlineSecrets reports whether the reinit config directly embeds secret
+// material rather than referencing it by file path or environment name.
+func (reinit ReinitConfig) HasInlineSecrets() bool {
+	return reinit.WALG != nil && reinit.WALG.HasInlineSecrets()
+}
+
+// Redacted returns a copy of the WAL-G config with secret-bearing fields masked
+// so it can be logged or formatted safely.
+func (walg WALGConfig) Redacted() WALGConfig {
+	redacted := walg
+	redacted.Credentials = redacted.Credentials.Redacted()
+
+	return redacted
+}
+
+// HasInlineSecrets reports whether the WAL-G config directly embeds secret
+// material rather than referencing it by file path or environment name.
+func (walg WALGConfig) HasInlineSecrets() bool {
+	return walg.Credentials.HasInlineSecrets()
+}
+
+// Redacted returns a copy of the WAL-G credentials config with secret-bearing
+// fields masked so it can be logged or formatted safely.
+func (credentials WALGCredentialsConfig) Redacted() WALGCredentialsConfig {
+	redacted := credentials
+
+	if redacted.Environment != nil {
+		redacted.Environment = make(map[string]string, len(credentials.Environment))
+		for name, value := range credentials.Environment {
+			if strings.TrimSpace(value) == "" {
+				redacted.Environment[name] = value
+				continue
+			}
+			redacted.Environment[name] = redactedSecretValue
+		}
+	}
+
+	if redacted.EnvironmentFiles != nil {
+		redacted.EnvironmentFiles = make(map[string]string, len(credentials.EnvironmentFiles))
+		for name, path := range credentials.EnvironmentFiles {
+			if strings.TrimSpace(path) == "" {
+				redacted.EnvironmentFiles[name] = path
+				continue
+			}
+			redacted.EnvironmentFiles[name] = redactedSecretValue
+		}
+	}
+
+	return redacted
+}
+
+// HasInlineSecrets reports whether the WAL-G credential config directly embeds
+// secret material rather than referencing it by file path or environment name.
+func (credentials WALGCredentialsConfig) HasInlineSecrets() bool {
+	for _, value := range credentials.Environment {
+		if strings.TrimSpace(value) != "" {
+			return true
+		}
+	}
+
+	return false
 }
 
 func validateSensitiveFileMode(mode fs.FileMode) error {

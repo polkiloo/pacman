@@ -11,6 +11,7 @@ const (
 	DefaultControlAddress        = "0.0.0.0:9090"
 	DefaultPostgresListenAddress = "127.0.0.1"
 	DefaultPostgresPort          = 5432
+	DefaultWALGBinary            = "wal-g"
 )
 
 // WithDefaults returns a copy of the config with omitted fields filled using
@@ -49,6 +50,11 @@ func (config Config) WithDefaults() Config {
 	if defaulted.Postgres != nil {
 		postgres := defaulted.Postgres.WithDefaults()
 		defaulted.Postgres = &postgres
+	}
+
+	if defaulted.Reinit != nil {
+		reinit := defaulted.Reinit.WithDefaults()
+		defaulted.Reinit = &reinit
 	}
 
 	if defaulted.Bootstrap != nil {
@@ -102,6 +108,31 @@ func (postgres PostgresLocalConfig) WithDefaults() PostgresLocalConfig {
 
 	if defaulted.Port == 0 {
 		defaulted.Port = DefaultPostgresPort
+	}
+
+	return defaulted
+}
+
+// WithDefaults returns a copy of the reinit config with omitted fields filled
+// using PACMAN defaults.
+func (reinit ReinitConfig) WithDefaults() ReinitConfig {
+	defaulted := reinit
+
+	if defaulted.WALG != nil {
+		walg := defaulted.WALG.WithDefaults()
+		defaulted.WALG = &walg
+	}
+
+	return defaulted
+}
+
+// WithDefaults returns a copy of the WAL-G config with omitted fields filled
+// using PACMAN defaults.
+func (walg WALGConfig) WithDefaults() WALGConfig {
+	defaulted := walg
+
+	if defaulted.Binary == "" {
+		defaulted.Binary = DefaultWALGBinary
 	}
 
 	return defaulted

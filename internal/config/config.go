@@ -25,6 +25,7 @@ type Config struct {
 	TLS        *TLSConfig              `yaml:"tls,omitempty" json:"tls,omitempty"`
 	Security   *SecurityConfig         `yaml:"security,omitempty" json:"security,omitempty"`
 	Postgres   *PostgresLocalConfig    `yaml:"postgres,omitempty" json:"postgres,omitempty"`
+	Reinit     *ReinitConfig           `yaml:"reinit,omitempty" json:"reinit,omitempty"`
 	Bootstrap  *ClusterBootstrapConfig `yaml:"bootstrap,omitempty" json:"bootstrap,omitempty"`
 }
 
@@ -66,6 +67,47 @@ type PostgresLocalConfig struct {
 	Parameters          map[string]string `yaml:"parameters,omitempty" json:"parameters,omitempty"`
 	ReplicationUser     string            `yaml:"replicationUser,omitempty" json:"replicationUser,omitempty"`
 	ReplicationPassword string            `yaml:"replicationPassword,omitempty" json:"replicationPassword,omitempty"`
+}
+
+// ReinitConfig captures node-local settings for destructive replica
+// reinitialization workflows.
+type ReinitConfig struct {
+	WALG *WALGConfig `yaml:"walg,omitempty" json:"walg,omitempty"`
+}
+
+// WALGConfig captures WAL-G settings used by reinit restore workflows.
+type WALGConfig struct {
+	Binary      string                `yaml:"binary,omitempty" json:"binary,omitempty"`
+	Repository  WALGRepositoryConfig  `yaml:"repository,omitempty" json:"repository,omitempty"`
+	Credentials WALGCredentialsConfig `yaml:"credentials,omitempty" json:"credentials,omitempty"`
+}
+
+// WALGRepositoryProvider identifies the WAL-G storage backend.
+type WALGRepositoryProvider string
+
+const (
+	WALGRepositoryProviderS3         WALGRepositoryProvider = "s3"
+	WALGRepositoryProviderGCS        WALGRepositoryProvider = "gcs"
+	WALGRepositoryProviderAzure      WALGRepositoryProvider = "azure"
+	WALGRepositoryProviderFilesystem WALGRepositoryProvider = "filesystem"
+)
+
+// WALGRepositoryConfig describes the WAL-G backup repository location.
+type WALGRepositoryConfig struct {
+	Provider WALGRepositoryProvider `yaml:"provider,omitempty" json:"provider,omitempty"`
+	Prefix   string                 `yaml:"prefix,omitempty" json:"prefix,omitempty"`
+	Endpoint string                 `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
+	Region   string                 `yaml:"region,omitempty" json:"region,omitempty"`
+}
+
+// WALGCredentialsConfig describes how pacmand sources environment variables
+// that are passed to WAL-G. Inline environment values are treated as secrets;
+// environmentFiles values name files whose trimmed contents are used as the
+// corresponding environment variable values.
+type WALGCredentialsConfig struct {
+	InheritEnvironment []string          `yaml:"inheritEnvironment,omitempty" json:"inheritEnvironment,omitempty"`
+	Environment        map[string]string `yaml:"environment,omitempty" json:"environment,omitempty"`
+	EnvironmentFiles   map[string]string `yaml:"environmentFiles,omitempty" json:"environmentFiles,omitempty"`
 }
 
 // ClusterBootstrapConfig captures the initial cluster formation intent before a
