@@ -31,6 +31,13 @@ func (daemon *Daemon) buildNodeStatus(observedAt time.Time, postgres agentmodel.
 		status = preserveManagedPostgresIdentity(previous, status)
 	}
 
+	if daemon.selfDemotedPrimaryRejoinPending() && status.Postgres.Managed {
+		status.Role = cluster.MemberRoleReplica
+		status.State = cluster.MemberStateNeedsRejoin
+		status.NeedsRejoin = true
+		status.Postgres.Role = cluster.MemberRoleReplica
+	}
+
 	return status
 }
 
@@ -77,10 +84,34 @@ func preserveManagedPostgresIdentity(previous, current agentmodel.NodeStatus) ag
 	return current
 }
 
-func (daemon *Daemon) publishNodeStatus(ctx context.Context, status agentmodel.NodeStatus) agentmodel.ControlPlaneStatus {
-	daemon.campaignLeader(ctx, status.NodeName)
+func (daemon *Daemon) selfDemotedPrimaryRejoinPending() bool {
+	daemon.mu.RLock()
+	defer daemon.mu.RUnlock()
 
-	published, err := daemon.statePublisher.PublishNodeStatus(ctx, status)
+	return daemon.selfDemotedPrimary
+}
+
+func (daemon *Daemon) markSelfDemotedPrimaryForRejoin() {
+	daemon.mu.Lock()
+	defer daemon.mu.Unlock()
+
+	daemon.selfDemotedPrimary = true
+}
+
+func (daemon *Daemon) clearSelfDemotedPrimaryRejoin() {
+	daemon.mu.Lock()
+	defer daemon.mu.Unlock()
+
+	daemon.selfDemotedPrimary = false
+}
+
+func (daemon *Daemon) publishNodeStatus(ctx context.Context, status agentmodel.NodeStatus) agentmodel.ControlPlaneStatus {
+	publishCtx, cancel := context.WithTimeout(ctx, daemon.controlPlanePublishTimeout)
+	defer cancel()
+
+	daemon.campaignLeader(publishCtx, status.NodeName)
+
+	published, err := daemon.statePublisher.PublishNodeStatus(publishCtx, status)
 	if err != nil {
 		published.ClusterReachable = false
 		published.PublishError = err.Error()

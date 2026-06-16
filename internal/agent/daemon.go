@@ -22,36 +22,39 @@ import (
 )
 
 const (
-	defaultHeartbeatInterval    = 1 * time.Second
-	defaultPostgresProbeTimeout = 500 * time.Millisecond
-	defaultPeerProbeTimeout     = 1 * time.Second
+	defaultHeartbeatInterval          = 1 * time.Second
+	defaultControlPlanePublishTimeout = 750 * time.Millisecond
+	defaultPostgresProbeTimeout       = 500 * time.Millisecond
+	defaultPeerProbeTimeout           = 1 * time.Second
 )
 
 // Daemon runs the node-local PACMAN agent.
 type Daemon struct {
-	config                config.Config
-	logger                *slog.Logger
-	now                   func() time.Time
-	heartbeatInterval     time.Duration
-	postgresProbe         postgresAvailabilityProbe
-	postgresStateProbe    postgresStateProbe
-	statePublisher        controlplane.NodeStatePublisher
-	stateReader           httpapi.NodeStatusReader
-	apiServer             httpServer
-	apiTLSConfig          *tls.Config
-	apiAuthorizer         httpapi.Authorizer
-	apiMiddlewares        []httpapi.MiddlewareFactory
-	apiServerDisabled     bool
-	peerServer            httpServer
-	peerServerTLSConfig   *tls.Config
-	peerClientTLSConfig   *tls.Config
-	probeTimeout          time.Duration
-	peerProbeTimeout      time.Duration
-	pgCtl                 *postgres.PGCtl
-	adminToken            string
-	startedFlag           atomic.Bool
-	replicaFollowPrimary  string
-	replicaFollowTimeline int64
+	config                     config.Config
+	logger                     *slog.Logger
+	now                        func() time.Time
+	heartbeatInterval          time.Duration
+	controlPlanePublishTimeout time.Duration
+	postgresProbe              postgresAvailabilityProbe
+	postgresStateProbe         postgresStateProbe
+	statePublisher             controlplane.NodeStatePublisher
+	stateReader                httpapi.NodeStatusReader
+	apiServer                  httpServer
+	apiTLSConfig               *tls.Config
+	apiAuthorizer              httpapi.Authorizer
+	apiMiddlewares             []httpapi.MiddlewareFactory
+	apiServerDisabled          bool
+	peerServer                 httpServer
+	peerServerTLSConfig        *tls.Config
+	peerClientTLSConfig        *tls.Config
+	probeTimeout               time.Duration
+	peerProbeTimeout           time.Duration
+	pgCtl                      *postgres.PGCtl
+	adminToken                 string
+	startedFlag                atomic.Bool
+	replicaFollowPrimary       string
+	replicaFollowTimeline      int64
+	selfDemotedPrimary         bool
 
 	mu         sync.RWMutex
 	started    agentmodel.Startup
@@ -87,17 +90,18 @@ func NewDaemon(cfg config.Config, logger *slog.Logger, options ...Option) (*Daem
 	}
 
 	daemon := &Daemon{
-		config:             defaulted,
-		logger:             logger,
-		now:                time.Now,
-		heartbeatInterval:  defaultHeartbeatInterval,
-		postgresProbe:      dialPostgresAvailability,
-		postgresStateProbe: postgres.QueryObservation,
-		statePublisher:     store,
-		stateReader:        store,
-		apiAuthorizer:      apiAuthorizer,
-		probeTimeout:       defaultPostgresProbeTimeout,
-		peerProbeTimeout:   defaultPeerProbeTimeout,
+		config:                     defaulted,
+		logger:                     logger,
+		now:                        time.Now,
+		heartbeatInterval:          defaultHeartbeatInterval,
+		controlPlanePublishTimeout: defaultControlPlanePublishTimeout,
+		postgresProbe:              dialPostgresAvailability,
+		postgresStateProbe:         postgres.QueryObservation,
+		statePublisher:             store,
+		stateReader:                store,
+		apiAuthorizer:              apiAuthorizer,
+		probeTimeout:               defaultPostgresProbeTimeout,
+		peerProbeTimeout:           defaultPeerProbeTimeout,
 	}
 
 	for _, option := range options {

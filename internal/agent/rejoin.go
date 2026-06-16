@@ -243,6 +243,7 @@ func (daemon *Daemon) reconcileRejoin(ctx context.Context, currentPostgres agent
 
 func (daemon *Daemon) advanceRejoinFinalPhases(ctx context.Context, engine controlplane.RejoinEngine, nodeName string) {
 	if _, err := engine.CompleteRejoin(ctx); err == nil {
+		daemon.clearSelfDemotedPrimaryRejoin()
 		daemon.logger.InfoContext(ctx, "rejoin completed",
 			daemon.logArgs("agent", slog.String("node", nodeName))...)
 		return
