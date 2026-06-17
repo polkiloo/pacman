@@ -53,6 +53,8 @@ reinit:
       provider: s3
       prefix: s3://pacman-backups/alpha
       region: us-east-1
+    restore:
+      backupName: LATEST
     credentials:
       inheritEnvironment:
         - AWS_SESSION_TOKEN

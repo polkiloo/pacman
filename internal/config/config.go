@@ -79,6 +79,7 @@ type ReinitConfig struct {
 type WALGConfig struct {
 	Binary      string                `yaml:"binary,omitempty" json:"binary,omitempty"`
 	Repository  WALGRepositoryConfig  `yaml:"repository,omitempty" json:"repository,omitempty"`
+	Restore     WALGRestoreConfig     `yaml:"restore,omitempty" json:"restore,omitempty"`
 	Credentials WALGCredentialsConfig `yaml:"credentials,omitempty" json:"credentials,omitempty"`
 }
 
@@ -98,6 +99,11 @@ type WALGRepositoryConfig struct {
 	Prefix   string                 `yaml:"prefix,omitempty" json:"prefix,omitempty"`
 	Endpoint string                 `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
 	Region   string                 `yaml:"region,omitempty" json:"region,omitempty"`
+}
+
+// WALGRestoreConfig selects the base backup used by WAL-G restore workflows.
+type WALGRestoreConfig struct {
+	BackupName string `yaml:"backupName,omitempty" json:"backupName,omitempty"`
 }
 
 // WALGCredentialsConfig describes how pacmand sources environment variables

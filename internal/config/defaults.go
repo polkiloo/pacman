@@ -12,6 +12,7 @@ const (
 	DefaultPostgresListenAddress = "127.0.0.1"
 	DefaultPostgresPort          = 5432
 	DefaultWALGBinary            = "wal-g"
+	DefaultWALGRestoreBackupName = "LATEST"
 )
 
 // WithDefaults returns a copy of the config with omitted fields filled using
@@ -133,6 +134,20 @@ func (walg WALGConfig) WithDefaults() WALGConfig {
 
 	if defaulted.Binary == "" {
 		defaulted.Binary = DefaultWALGBinary
+	}
+
+	defaulted.Restore = defaulted.Restore.WithDefaults()
+
+	return defaulted
+}
+
+// WithDefaults returns a copy of the WAL-G restore config with omitted fields
+// filled using PACMAN defaults.
+func (restore WALGRestoreConfig) WithDefaults() WALGRestoreConfig {
+	defaulted := restore
+
+	if strings.TrimSpace(defaulted.BackupName) == "" {
+		defaulted.BackupName = DefaultWALGRestoreBackupName
 	}
 
 	return defaulted
