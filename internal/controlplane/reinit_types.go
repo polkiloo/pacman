@@ -16,6 +16,7 @@ type ReinitEngine interface {
 	ValidateReinit(context.Context, ReinitRequest) (ReinitValidation, error)
 	CreateReinitIntent(context.Context, ReinitRequest) (ReinitIntent, error)
 	ExecuteReinitStopPostgres(context.Context, string, ReinitPostgresStopExecutor) (ReinitExecution, error)
+	ExecuteReinitArchiveDataDir(context.Context, string, ReinitDataDirArchiveExecutor) (ReinitExecution, error)
 }
 
 // ReinitRequest captures operator metadata attached to a destructive replica
@@ -84,12 +85,38 @@ type ReinitPostgresStopRequest struct {
 	CurrentEpoch       cluster.Epoch
 }
 
+// ReinitDataDirArchiveExecutor archives the local data directory after
+// PostgreSQL is stopped and before WAL-G restores into a clean directory.
+type ReinitDataDirArchiveExecutor interface {
+	ArchiveDataDir(context.Context, ReinitDataDirArchiveRequest) (ReinitDataDirArchiveResult, error)
+}
+
+// ReinitDataDirArchiveRequest describes the local target whose data directory
+// should be archived before reclone.
+type ReinitDataDirArchiveRequest struct {
+	Operation          cluster.Operation
+	Validation         ReinitValidation
+	TargetNode         agentmodel.NodeStatus
+	CurrentPrimaryNode agentmodel.NodeStatus
+	CurrentEpoch       cluster.Epoch
+}
+
+// ReinitDataDirArchiveResult reports the archived data directory selected by
+// the local executor.
+type ReinitDataDirArchiveResult struct {
+	DataDir     string
+	ArchivePath string
+	Archived    bool
+}
+
 // ReinitExecution captures the outcome of executing a reinit phase.
 type ReinitExecution struct {
 	Operation       cluster.Operation
 	Validation      ReinitValidation
 	CurrentEpoch    cluster.Epoch
 	PostgresStopped bool
+	DataDirArchived bool
+	ArchivePath     string
 	ExecutedAt      time.Time
 }
 

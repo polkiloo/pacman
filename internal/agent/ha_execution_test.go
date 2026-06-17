@@ -797,6 +797,33 @@ func TestDaemonAdvanceRejoinFinalPhases(t *testing.T) {
 	})
 }
 
+func TestLocalReinitDataDirArchiverArchivesWithOperationID(t *testing.T) {
+	t.Parallel()
+
+	dataDir := filepath.Join(t.TempDir(), "data")
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "PG_VERSION"), []byte("17\n"), 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	archiver := &localReinitDataDirArchiver{dataDir: dataDir}
+	result, err := archiver.ArchiveDataDir(context.Background(), controlplane.ReinitDataDirArchiveRequest{
+		Operation: cluster.Operation{ID: "reinit-20260617T120000Z"},
+	})
+	if err != nil {
+		t.Fatalf("archive data dir: %v", err)
+	}
+
+	if !result.Archived || !strings.Contains(result.ArchivePath, "reinit-20260617T120000Z") {
+		t.Fatalf("unexpected archive result: %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(result.ArchivePath, "PG_VERSION")); err != nil {
+		t.Fatalf("expected marker in archive: %v", err)
+	}
+}
+
 func TestDaemonReconcileReinit(t *testing.T) {
 	t.Parallel()
 
@@ -817,10 +844,10 @@ func TestDaemonReconcileReinit(t *testing.T) {
 		assertContains(t, logs.String(), `"msg":"reinit PostgreSQL stopped"`)
 	})
 
-	t.Run("skips when PostgreSQL is already down", func(t *testing.T) {
+	t.Run("archives data directory when PostgreSQL is already down", func(t *testing.T) {
 		t.Parallel()
 
-		engine := &recordingReinitPublisher{}
+		engine := &recordingReinitPublisher{stopErr: controlplane.ErrReinitExecutionChanged}
 		daemon, _ := newReinitTestDaemon(t, engine)
 
 		daemon.reconcileReinit(context.Background(), agentmodel.PostgresStatus{
@@ -828,9 +855,26 @@ func TestDaemonReconcileReinit(t *testing.T) {
 			Up:      false,
 		})
 
-		if engine.stopCalls != 0 {
-			t.Fatalf("expected no reinit stop call, got %d", engine.stopCalls)
+		if engine.stopCalls != 1 || engine.archiveCalls != 1 || engine.archiveMember != "alpha-2" {
+			t.Fatalf("unexpected reinit calls: stop=%d archive=%d member=%q", engine.stopCalls, engine.archiveCalls, engine.archiveMember)
 		}
+	})
+
+	t.Run("publishes stopped phase when PostgreSQL is already down", func(t *testing.T) {
+		t.Parallel()
+
+		engine := &recordingReinitPublisher{}
+		daemon, logs := newReinitTestDaemon(t, engine)
+
+		daemon.reconcileReinit(context.Background(), agentmodel.PostgresStatus{
+			Managed: true,
+			Up:      false,
+		})
+
+		if engine.stopCalls != 1 || engine.archiveCalls != 0 {
+			t.Fatalf("unexpected reinit calls: stop=%d archive=%d", engine.stopCalls, engine.archiveCalls)
+		}
+		assertContains(t, logs.String(), `"msg":"reinit PostgreSQL stopped"`)
 	})
 
 	t.Run("suppresses missing active reinit operation", func(t *testing.T) {
@@ -1689,9 +1733,12 @@ func (publisher *recordingRejoinPublisher) CompleteRejoin(context.Context) (cont
 }
 
 type recordingReinitPublisher struct {
-	stopCalls  int
-	stopMember string
-	stopErr    error
+	stopCalls     int
+	stopMember    string
+	stopErr       error
+	archiveCalls  int
+	archiveMember string
+	archiveErr    error
 }
 
 func (*recordingReinitPublisher) PublishNodeStatus(context.Context, agentmodel.NodeStatus) (agentmodel.ControlPlaneStatus, error) {
@@ -1710,6 +1757,12 @@ func (publisher *recordingReinitPublisher) ExecuteReinitStopPostgres(_ context.C
 	publisher.stopCalls++
 	publisher.stopMember = member
 	return controlplane.ReinitExecution{}, publisher.stopErr
+}
+
+func (publisher *recordingReinitPublisher) ExecuteReinitArchiveDataDir(_ context.Context, member string, _ controlplane.ReinitDataDirArchiveExecutor) (controlplane.ReinitExecution, error) {
+	publisher.archiveCalls++
+	publisher.archiveMember = member
+	return controlplane.ReinitExecution{ArchivePath: "/archive/data"}, publisher.archiveErr
 }
 
 type stubNodeStatusReader struct {

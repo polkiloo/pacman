@@ -60,6 +60,8 @@ var (
 	ErrReinitExecutionRequired              = errors.New("reinit execution requires an active reinit operation")
 	ErrReinitExecutionChanged               = errors.New("reinit execution changed during continuation")
 	ErrReinitPostgresStopExecutorRequired   = errors.New("reinit PostgreSQL stop requires a stop executor")
+	ErrReinitDataDirArchiveExecutorRequired = errors.New("reinit data directory archive requires an archive executor")
+	ErrReinitPostgresStopRequired           = errors.New("reinit data directory archive requires stopped PostgreSQL")
 	ErrLeaderCandidateRequired              = errors.New("leader candidate is required")
 	ErrLeaderCandidateUnknown               = errors.New("leader candidate is not registered")
 	ErrSourceOfTruthStateRequired           = errors.New("cluster source of truth requires desired or observed state")
