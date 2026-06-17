@@ -36,6 +36,7 @@ var (
 	ErrReinitWALGRepositoryProviderRequired = errors.New("config reinit walg repository provider is required")
 	ErrReinitWALGRepositoryProviderInvalid  = errors.New("config reinit walg repository provider is invalid")
 	ErrReinitWALGRepositoryPrefixRequired   = errors.New("config reinit walg repository prefix is required")
+	ErrReinitWALGRestoreDataDirRequired     = errors.New("config reinit walg restore dataDir is required")
 	ErrReinitWALGCredentialNameInvalid      = errors.New("config reinit walg credentials contain an invalid environment variable name")
 	ErrReinitWALGCredentialValueRequired    = errors.New("config reinit walg credentials contain an empty environment value")
 	ErrReinitWALGCredentialFileRequired     = errors.New("config reinit walg credentials contain an empty environment file path")

@@ -30,6 +30,10 @@ func TestReinitWALGDefaults(t *testing.T) {
 		t.Fatalf("unexpected wal-g binary default: got %q, want %q", got.Reinit.WALG.Binary, DefaultWALGBinary)
 	}
 
+	if got.Reinit.WALG.Restore.BackupName != DefaultWALGRestoreBackupName {
+		t.Fatalf("unexpected wal-g restore backup default: got %q, want %q", got.Reinit.WALG.Restore.BackupName, DefaultWALGRestoreBackupName)
+	}
+
 	if cfg.Reinit == nil || cfg.Reinit.WALG == nil || cfg.Reinit.WALG.Binary != "" {
 		t.Fatalf("expected defaults to avoid mutating original, got %+v", cfg.Reinit)
 	}
@@ -139,6 +143,171 @@ func TestReinitConfigValidate(t *testing.T) {
 			err := testCase.reinit.Validate()
 			if !errors.Is(err, testCase.wantErr) {
 				t.Fatalf("validate reinit error: got %v, want %v", err, testCase.wantErr)
+			}
+		})
+	}
+}
+
+func TestWALGBackupFetchCommandSelectsRestoreSource(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name       string
+		walg       WALGConfig
+		dataDir    string
+		wantBinary string
+		wantArgs   []string
+		wantErr    error
+	}{
+		{
+			name: "latest backup by default",
+			walg: WALGConfig{
+				Repository: WALGRepositoryConfig{
+					Provider: WALGRepositoryProviderFilesystem,
+					Prefix:   "/var/lib/pacman/walg",
+				},
+			},
+			dataDir:    "/var/lib/postgresql/17/main",
+			wantBinary: DefaultWALGBinary,
+			wantArgs:   []string{"backup-fetch", "/var/lib/postgresql/17/main", DefaultWALGRestoreBackupName},
+		},
+		{
+			name: "explicit backup name",
+			walg: WALGConfig{
+				Binary: "/usr/local/bin/wal-g",
+				Repository: WALGRepositoryConfig{
+					Provider: WALGRepositoryProviderFilesystem,
+					Prefix:   "/var/lib/pacman/walg",
+				},
+				Restore: WALGRestoreConfig{BackupName: "base_000000010000000000000005"},
+			},
+			dataDir:    " /restore/pgdata ",
+			wantBinary: "/usr/local/bin/wal-g",
+			wantArgs:   []string{"backup-fetch", "/restore/pgdata", "base_000000010000000000000005"},
+		},
+		{
+			name: "missing data dir",
+			walg: WALGConfig{
+				Repository: WALGRepositoryConfig{
+					Provider: WALGRepositoryProviderFilesystem,
+					Prefix:   "/var/lib/pacman/walg",
+				},
+			},
+			wantErr: ErrReinitWALGRestoreDataDirRequired,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			gotBinary, gotArgs, err := testCase.walg.BackupFetchCommand(testCase.dataDir)
+			if !errors.Is(err, testCase.wantErr) {
+				t.Fatalf("backup-fetch command error: got %v, want %v", err, testCase.wantErr)
+			}
+			if testCase.wantErr != nil {
+				return
+			}
+			if gotBinary != testCase.wantBinary {
+				t.Fatalf("backup-fetch binary: got %q, want %q", gotBinary, testCase.wantBinary)
+			}
+			if !reflect.DeepEqual(gotArgs, testCase.wantArgs) {
+				t.Fatalf("backup-fetch args: got %+v, want %+v", gotArgs, testCase.wantArgs)
+			}
+		})
+	}
+}
+
+func TestWALGRestoreEnvironmentIncludesRepositoryAndCredentials(t *testing.T) {
+	t.Parallel()
+
+	walg := WALGConfig{
+		Binary: DefaultWALGBinary,
+		Repository: WALGRepositoryConfig{
+			Provider: WALGRepositoryProviderS3,
+			Prefix:   "s3://pacman-backups/alpha",
+			Endpoint: "https://s3.example.test",
+			Region:   "us-east-1",
+		},
+		Credentials: WALGCredentialsConfig{
+			InheritEnvironment: []string{"AWS_SESSION_TOKEN"},
+			EnvironmentFiles: map[string]string{
+				"AWS_ACCESS_KEY_ID": "/run/secrets/aws-access-key-id",
+			},
+		},
+	}
+
+	got, err := walg.RestoreEnvironment(
+		func(name string) (string, bool) {
+			if name == "AWS_SESSION_TOKEN" {
+				return "session-token", true
+			}
+			return "", false
+		},
+		func(path string) ([]byte, error) {
+			if path != "/run/secrets/aws-access-key-id" {
+				t.Fatalf("unexpected credential file path: %q", path)
+			}
+			return []byte("access-key\n"), nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("restore environment: %v", err)
+	}
+
+	want := map[string]string{
+		"WALG_S3_PREFIX":    "s3://pacman-backups/alpha",
+		"AWS_ENDPOINT":      "https://s3.example.test",
+		"AWS_REGION":        "us-east-1",
+		"AWS_SESSION_TOKEN": "session-token",
+		"AWS_ACCESS_KEY_ID": "access-key",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected restore environment: got %+v, want %+v", got, want)
+	}
+}
+
+func TestWALGRepositoryEnvironmentProviders(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name       string
+		repository WALGRepositoryConfig
+		want       map[string]string
+	}{
+		{
+			name: "gcs",
+			repository: WALGRepositoryConfig{
+				Provider: WALGRepositoryProviderGCS,
+				Prefix:   "gs://pacman-backups/alpha",
+			},
+			want: map[string]string{"WALG_GS_PREFIX": "gs://pacman-backups/alpha"},
+		},
+		{
+			name: "azure",
+			repository: WALGRepositoryConfig{
+				Provider: WALGRepositoryProviderAzure,
+				Prefix:   "azure://pacman-backups/alpha",
+			},
+			want: map[string]string{"WALG_AZ_PREFIX": "azure://pacman-backups/alpha"},
+		},
+		{
+			name: "filesystem",
+			repository: WALGRepositoryConfig{
+				Provider: WALGRepositoryProviderFilesystem,
+				Prefix:   "/var/lib/pacman/walg",
+			},
+			want: map[string]string{"WALG_FILE_PREFIX": "/var/lib/pacman/walg"},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := testCase.repository.Environment()
+			if !reflect.DeepEqual(got, testCase.want) {
+				t.Fatalf("repository environment: got %+v, want %+v", got, testCase.want)
 			}
 		})
 	}
