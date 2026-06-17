@@ -17,6 +17,7 @@ type ReinitEngine interface {
 	CreateReinitIntent(context.Context, ReinitRequest) (ReinitIntent, error)
 	ExecuteReinitStopPostgres(context.Context, string, ReinitPostgresStopExecutor) (ReinitExecution, error)
 	ExecuteReinitArchiveDataDir(context.Context, string, ReinitDataDirArchiveExecutor) (ReinitExecution, error)
+	ExecuteReinitWALGRestore(context.Context, string, ReinitWALGRestoreExecutor) (ReinitExecution, error)
 }
 
 // ReinitRequest captures operator metadata attached to a destructive replica
@@ -109,6 +110,29 @@ type ReinitDataDirArchiveResult struct {
 	Archived    bool
 }
 
+// ReinitWALGRestoreExecutor restores the selected WAL-G base backup into the
+// archived target data directory.
+type ReinitWALGRestoreExecutor interface {
+	RestoreFromWALG(context.Context, ReinitWALGRestoreRequest) (ReinitWALGRestoreResult, error)
+}
+
+// ReinitWALGRestoreRequest describes the local target whose data directory
+// should receive the WAL-G base backup.
+type ReinitWALGRestoreRequest struct {
+	Operation          cluster.Operation
+	Validation         ReinitValidation
+	TargetNode         agentmodel.NodeStatus
+	CurrentPrimaryNode agentmodel.NodeStatus
+	CurrentEpoch       cluster.Epoch
+}
+
+// ReinitWALGRestoreResult reports the restored WAL-G backup source selected by
+// the local executor.
+type ReinitWALGRestoreResult struct {
+	DataDir    string
+	BackupName string
+}
+
 // ReinitExecution captures the outcome of executing a reinit phase.
 type ReinitExecution struct {
 	Operation       cluster.Operation
@@ -117,6 +141,8 @@ type ReinitExecution struct {
 	PostgresStopped bool
 	DataDirArchived bool
 	ArchivePath     string
+	WALGRestored    bool
+	WALGBackupName  string
 	ExecutedAt      time.Time
 }
 

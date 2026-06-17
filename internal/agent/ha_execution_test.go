@@ -824,6 +824,48 @@ func TestLocalReinitDataDirArchiverArchivesWithOperationID(t *testing.T) {
 	}
 }
 
+func TestLocalReinitWALGRestorerRunsBackupFetchWithConfiguredEnvironment(t *testing.T) {
+	t.Parallel()
+
+	binDir, tracePath := writeTracingBinary(t, "wal-g", `#!/bin/sh
+trace=%q
+printf 'args=%%s\n' "$*" >> "$trace"
+printf 'prefix=%%s\n' "$WALG_FILE_PREFIX" >> "$trace"
+mkdir -p "$2"
+printf '17\n' > "$2/PG_VERSION"
+exit 0
+`)
+
+	dataDir := filepath.Join(t.TempDir(), "restore")
+	restorer := &localReinitWALGRestorer{
+		dataDir: dataDir,
+		walg: config.WALGConfig{
+			Binary: filepath.Join(binDir, "wal-g"),
+			Repository: config.WALGRepositoryConfig{
+				Provider: config.WALGRepositoryProviderFilesystem,
+				Prefix:   "/backups/alpha",
+			},
+			Restore: config.WALGRestoreConfig{BackupName: "base_000000010000000000000005"},
+		},
+	}
+
+	result, err := restorer.RestoreFromWALG(context.Background(), controlplane.ReinitWALGRestoreRequest{})
+	if err != nil {
+		t.Fatalf("restore from WAL-G: %v", err)
+	}
+
+	if result.DataDir != dataDir || result.BackupName != "base_000000010000000000000005" {
+		t.Fatalf("unexpected WAL-G restore result: %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "PG_VERSION")); err != nil {
+		t.Fatalf("expected restored data dir marker: %v", err)
+	}
+	assertTraceLines(t, tracePath, []string{
+		"args=backup-fetch " + dataDir + " base_000000010000000000000005",
+		"prefix=/backups/alpha",
+	})
+}
+
 func TestDaemonReconcileReinit(t *testing.T) {
 	t.Parallel()
 
@@ -858,6 +900,29 @@ func TestDaemonReconcileReinit(t *testing.T) {
 		if engine.stopCalls != 1 || engine.archiveCalls != 1 || engine.archiveMember != "alpha-2" {
 			t.Fatalf("unexpected reinit calls: stop=%d archive=%d member=%q", engine.stopCalls, engine.archiveCalls, engine.archiveMember)
 		}
+	})
+
+	t.Run("restores from WAL-G when archive phase is already complete", func(t *testing.T) {
+		t.Parallel()
+
+		engine := &recordingReinitPublisher{
+			stopErr:    controlplane.ErrReinitExecutionChanged,
+			archiveErr: controlplane.ErrReinitExecutionChanged,
+			restoreResult: controlplane.ReinitExecution{
+				WALGBackupName: "LATEST",
+			},
+		}
+		daemon, logs := newReinitTestDaemon(t, engine)
+
+		daemon.reconcileReinit(context.Background(), agentmodel.PostgresStatus{
+			Managed: true,
+			Up:      false,
+		})
+
+		if engine.stopCalls != 1 || engine.archiveCalls != 1 || engine.restoreCalls != 1 || engine.restoreMember != "alpha-2" {
+			t.Fatalf("unexpected reinit calls: stop=%d archive=%d restore=%d member=%q", engine.stopCalls, engine.archiveCalls, engine.restoreCalls, engine.restoreMember)
+		}
+		assertContains(t, logs.String(), `"msg":"reinit WAL-G restore completed"`)
 	})
 
 	t.Run("publishes stopped phase when PostgreSQL is already down", func(t *testing.T) {
@@ -1503,6 +1568,15 @@ func newReinitTestDaemon(t *testing.T, publisher controlplane.NodeStatePublisher
 			Postgres: &config.PostgresLocalConfig{
 				DataDir: t.TempDir(),
 			},
+			Reinit: &config.ReinitConfig{
+				WALG: &config.WALGConfig{
+					Binary: "/usr/local/bin/wal-g",
+					Repository: config.WALGRepositoryConfig{
+						Provider: config.WALGRepositoryProviderFilesystem,
+						Prefix:   "/backups/alpha",
+					},
+				},
+			},
 		},
 		logger:         logging.New("pacmand", &logs),
 		pgCtl:          &postgres.PGCtl{DataDir: t.TempDir()},
@@ -1739,6 +1813,10 @@ type recordingReinitPublisher struct {
 	archiveCalls  int
 	archiveMember string
 	archiveErr    error
+	restoreCalls  int
+	restoreMember string
+	restoreResult controlplane.ReinitExecution
+	restoreErr    error
 }
 
 func (*recordingReinitPublisher) PublishNodeStatus(context.Context, agentmodel.NodeStatus) (agentmodel.ControlPlaneStatus, error) {
@@ -1763,6 +1841,12 @@ func (publisher *recordingReinitPublisher) ExecuteReinitArchiveDataDir(_ context
 	publisher.archiveCalls++
 	publisher.archiveMember = member
 	return controlplane.ReinitExecution{ArchivePath: "/archive/data"}, publisher.archiveErr
+}
+
+func (publisher *recordingReinitPublisher) ExecuteReinitWALGRestore(_ context.Context, member string, _ controlplane.ReinitWALGRestoreExecutor) (controlplane.ReinitExecution, error) {
+	publisher.restoreCalls++
+	publisher.restoreMember = member
+	return publisher.restoreResult.Clone(), publisher.restoreErr
 }
 
 type stubNodeStatusReader struct {
