@@ -8,6 +8,10 @@ description: Repository layout for the pacman Go PostgreSQL HA cluster manager.
 Use this first when locating code. Prefer opening the narrow directory for the
 subsystem instead of loading broad docs.
 
+Commit policy: do not create git commits unless the user explicitly asks for a
+commit in the current turn. Leave completed changes unstaged or staged as found
+so the user can review first.
+
 - `cmd/pacmand`, `cmd/pacmanctl`: binary entrypoints.
 - `internal/app/pacmand`, `internal/app/pacmanctl`: CLI/application wiring.
 - `internal/controlplane`: HA decisions, leader/source-of-truth, failover,
