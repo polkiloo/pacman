@@ -695,6 +695,66 @@ exit 0
 	})
 }
 
+func TestPGCtlReinitStopperStopsRunningPostgres(t *testing.T) {
+	t.Parallel()
+
+	binDir, tracePath := writeTracingBinary(t, "pg_ctl", `#!/bin/sh
+trace=%q
+printf '%%s\n' "$*" >> "$trace"
+if [ "$1" = "status" ]; then
+  exit 0
+fi
+if [ "$1" = "stop" ]; then
+  exit 0
+fi
+exit 1
+`)
+
+	stopper := &pgCtlReinitStopper{
+		pgCtl: &postgres.PGCtl{
+			BinDir:  binDir,
+			DataDir: "/var/lib/postgresql/data",
+		},
+	}
+
+	if err := stopper.StopPostgres(context.Background(), controlplane.ReinitPostgresStopRequest{}); err != nil {
+		t.Fatalf("stop postgres for reinit: %v", err)
+	}
+
+	assertTraceLines(t, tracePath, []string{
+		"status -D /var/lib/postgresql/data",
+		"stop -D /var/lib/postgresql/data -w -m fast",
+	})
+}
+
+func TestPGCtlReinitStopperSkipsStoppedPostgres(t *testing.T) {
+	t.Parallel()
+
+	binDir, tracePath := writeTracingBinary(t, "pg_ctl", `#!/bin/sh
+trace=%q
+printf '%%s\n' "$*" >> "$trace"
+if [ "$1" = "status" ]; then
+  exit 3
+fi
+exit 1
+`)
+
+	stopper := &pgCtlReinitStopper{
+		pgCtl: &postgres.PGCtl{
+			BinDir:  binDir,
+			DataDir: "/var/lib/postgresql/data",
+		},
+	}
+
+	if err := stopper.StopPostgres(context.Background(), controlplane.ReinitPostgresStopRequest{}); err != nil {
+		t.Fatalf("stop postgres for reinit: %v", err)
+	}
+
+	assertTraceLines(t, tracePath, []string{
+		"status -D /var/lib/postgresql/data",
+	})
+}
+
 func TestDaemonAdvanceRejoinFinalPhases(t *testing.T) {
 	t.Parallel()
 
@@ -734,6 +794,62 @@ func TestDaemonAdvanceRejoinFinalPhases(t *testing.T) {
 
 		assertContains(t, logs.String(), `"msg":"rejoin replication verification failed"`)
 		assertContains(t, logs.String(), `"error":"replication probe failed"`)
+	})
+}
+
+func TestDaemonReconcileReinit(t *testing.T) {
+	t.Parallel()
+
+	t.Run("executes PostgreSQL stop for running managed target", func(t *testing.T) {
+		t.Parallel()
+
+		engine := &recordingReinitPublisher{}
+		daemon, logs := newReinitTestDaemon(t, engine)
+
+		daemon.reconcileReinit(context.Background(), agentmodel.PostgresStatus{
+			Managed: true,
+			Up:      true,
+		})
+
+		if engine.stopCalls != 1 || engine.stopMember != "alpha-2" {
+			t.Fatalf("unexpected reinit stop calls: calls=%d member=%q", engine.stopCalls, engine.stopMember)
+		}
+		assertContains(t, logs.String(), `"msg":"reinit PostgreSQL stopped"`)
+	})
+
+	t.Run("skips when PostgreSQL is already down", func(t *testing.T) {
+		t.Parallel()
+
+		engine := &recordingReinitPublisher{}
+		daemon, _ := newReinitTestDaemon(t, engine)
+
+		daemon.reconcileReinit(context.Background(), agentmodel.PostgresStatus{
+			Managed: true,
+			Up:      false,
+		})
+
+		if engine.stopCalls != 0 {
+			t.Fatalf("expected no reinit stop call, got %d", engine.stopCalls)
+		}
+	})
+
+	t.Run("suppresses missing active reinit operation", func(t *testing.T) {
+		t.Parallel()
+
+		engine := &recordingReinitPublisher{stopErr: controlplane.ErrReinitExecutionRequired}
+		daemon, logs := newReinitTestDaemon(t, engine)
+
+		daemon.reconcileReinit(context.Background(), agentmodel.PostgresStatus{
+			Managed: true,
+			Up:      true,
+		})
+
+		if engine.stopCalls != 1 {
+			t.Fatalf("expected one reinit stop attempt, got %d", engine.stopCalls)
+		}
+		if strings.Contains(logs.String(), "reinit PostgreSQL stop failed") {
+			t.Fatalf("expected missing active operation to be quiet, logs=%s", logs.String())
+		}
 	})
 }
 
@@ -1330,6 +1446,28 @@ func newRejoinTestDaemon(t *testing.T, publisher controlplane.NodeStatePublisher
 	return daemon, &logs
 }
 
+func newReinitTestDaemon(t *testing.T, publisher controlplane.NodeStatePublisher) (*Daemon, *bytes.Buffer) {
+	t.Helper()
+
+	var logs bytes.Buffer
+	daemon := &Daemon{
+		config: config.Config{
+			Node: config.NodeConfig{
+				Name: "alpha-2",
+				Role: cluster.NodeRoleData,
+			},
+			Postgres: &config.PostgresLocalConfig{
+				DataDir: t.TempDir(),
+			},
+		},
+		logger:         logging.New("pacmand", &logs),
+		pgCtl:          &postgres.PGCtl{DataDir: t.TempDir()},
+		statePublisher: publisher,
+	}
+
+	return daemon, &logs
+}
+
 func writeTracingBinary(t *testing.T, binaryName, scriptTemplate string) (string, string) {
 	t.Helper()
 
@@ -1548,6 +1686,30 @@ func (publisher *recordingRejoinPublisher) VerifyRejoinReplication(context.Conte
 func (publisher *recordingRejoinPublisher) CompleteRejoin(context.Context) (controlplane.RejoinExecution, error) {
 	publisher.completeCalls++
 	return controlplane.RejoinExecution{}, publisher.completeErr
+}
+
+type recordingReinitPublisher struct {
+	stopCalls  int
+	stopMember string
+	stopErr    error
+}
+
+func (*recordingReinitPublisher) PublishNodeStatus(context.Context, agentmodel.NodeStatus) (agentmodel.ControlPlaneStatus, error) {
+	return agentmodel.ControlPlaneStatus{ClusterReachable: true}, nil
+}
+
+func (*recordingReinitPublisher) ValidateReinit(context.Context, controlplane.ReinitRequest) (controlplane.ReinitValidation, error) {
+	return controlplane.ReinitValidation{}, nil
+}
+
+func (*recordingReinitPublisher) CreateReinitIntent(context.Context, controlplane.ReinitRequest) (controlplane.ReinitIntent, error) {
+	return controlplane.ReinitIntent{}, nil
+}
+
+func (publisher *recordingReinitPublisher) ExecuteReinitStopPostgres(_ context.Context, member string, _ controlplane.ReinitPostgresStopExecutor) (controlplane.ReinitExecution, error) {
+	publisher.stopCalls++
+	publisher.stopMember = member
+	return controlplane.ReinitExecution{}, publisher.stopErr
 }
 
 type stubNodeStatusReader struct {
