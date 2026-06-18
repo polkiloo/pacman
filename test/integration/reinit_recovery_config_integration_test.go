@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/polkiloo/pacman/internal/cluster"
 	"github.com/polkiloo/pacman/internal/config"
 	"github.com/polkiloo/pacman/internal/postgres"
 	"github.com/polkiloo/pacman/test/testenv"
@@ -112,6 +113,104 @@ chown postgres:postgres "$PGDATA/postgresql.auto.conf" "$PGDATA/standby.signal"
 	if signalExit != 0 {
 		t.Fatalf("standby.signal missing: exit=%d output=%s", signalExit, signalOutput)
 	}
+}
+
+func TestReinitRecoveryConfigStartsRestoredStandbyStreamingInDocker(t *testing.T) {
+	if testing.Short() {
+		t.Skip(skipShortMode)
+	}
+
+	walg := config.WALGConfig{
+		Binary: "/usr/local/bin/wal-g",
+		Repository: config.WALGRepositoryConfig{
+			Provider: config.WALGRepositoryProviderFilesystem,
+			Prefix:   "/var/lib/pacman/walg",
+		},
+	}
+	restoreCommand, err := walg.WALFetchRestoreCommand(nil, nil)
+	if err != nil {
+		t.Fatalf("build WAL-G wal-fetch restore command: %v", err)
+	}
+
+	env := testenv.New(t)
+	primary := env.StartReplicationPrimary(t, "reinit-recovery-primary", "reinit-recovery-primary-postgres")
+	standby := env.StartRenderedStreamingStandbyWithRestoreCommandAndFiles(
+		t,
+		"reinit-restored-standby",
+		"reinit-restored-standby-postgres",
+		primary,
+		"reinit_restored_standby",
+		restoreCommand,
+		testcontainers.ContainerFile{
+			Reader:            strings.NewReader(fakeWALGBinary()),
+			ContainerFilePath: "/usr/local/bin/wal-g",
+			FileMode:          0o755,
+		},
+	)
+	setPostgresObservationEnv(t, primary)
+
+	waitForPostgresRole(t, primary, cluster.MemberRolePrimary)
+	waitForContainerQueryValue(t, standby, `SELECT pg_is_in_recovery()::text`, "true")
+	waitForContainerQueryValue(t, standby, `SELECT status FROM pg_stat_wal_receiver`, "streaming")
+	waitForContainerQueryValue(t, standby, `SHOW primary_slot_name`, "reinit_restored_standby")
+	waitForContainerQueryValue(t, standby, `SHOW restore_command`, restoreCommand)
+	waitForContainerQueryValue(t, standby, `SHOW transaction_read_only`, "on")
+
+	autoConf := standby.RequireExec(t, "sh", "-lc", "cat \"$PGDATA/postgresql.auto.conf\"")
+	for _, expected := range []string{
+		"primary_conninfo = 'host=reinit-recovery-primary-postgres port=5432 user=replicator password=replicator application_name=reinit_restored_standby'",
+		"primary_slot_name = 'reinit_restored_standby'",
+		"restore_command = 'env ''WALG_FILE_PREFIX=/var/lib/pacman/walg'' ''/usr/local/bin/wal-g'' wal-fetch ''%f'' ''%p'''",
+		"recovery_target_timeline = 'latest'",
+	} {
+		if !strings.Contains(autoConf, expected) {
+			t.Fatalf("expected reinit restored standby config to contain %q, got:\n%s", expected, autoConf)
+		}
+	}
+
+	if got := strings.TrimSpace(standby.RequireExec(t, "sh", "-lc", "test -f \"$PGDATA/standby.signal\" && echo present")); got != "present" {
+		t.Fatalf("expected standby.signal from reinit recovery config, got %q", got)
+	}
+
+	execSQL(t, primary, `
+CREATE TABLE IF NOT EXISTS reinit_restored_standby_marker (
+	id integer PRIMARY KEY,
+	payload text NOT NULL
+)`)
+	execSQL(t, primary, `
+INSERT INTO reinit_restored_standby_marker (id, payload)
+VALUES (1, 'streaming-after-reinit')
+ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload`)
+	waitForContainerQueryValue(t, standby, `SELECT payload FROM reinit_restored_standby_marker WHERE id = 1`, "streaming-after-reinit")
+}
+
+func fakeWALGBinary() string {
+	return `#!/bin/sh
+set -eu
+if [ "${1:-}" = "wal-fetch" ]; then
+	echo "fake wal-g wal-fetch miss: $2" >&2
+	exit 1
+fi
+echo "unexpected fake wal-g command: $*" >&2
+exit 2
+`
+}
+
+func waitForContainerQueryValue(t *testing.T, fixture *testenv.Postgres, query, want string) {
+	t.Helper()
+
+	deadline := time.Now().Add(30 * time.Second)
+	var lastOutput string
+	for time.Now().Before(deadline) {
+		result := fixture.Exec(t, "sh", "-lc", `PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc `+shellQuote(query))
+		lastOutput = strings.TrimSpace(result.Output)
+		if result.ExitCode == 0 && lastOutput == want {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	t.Fatalf("query %q in %q did not return %q before deadline; last output=%q", query, fixture.Name(), want, lastOutput)
 }
 
 func testenvPostgresImage() string {
