@@ -99,6 +99,20 @@ func (e *Environment) StartRenderedStreamingStandbyWithRestoreCommand(
 	slotName string,
 	restoreCommand string,
 ) *Postgres {
+	return e.StartRenderedStreamingStandbyWithRestoreCommandAndFiles(t, name, alias, primary, slotName, restoreCommand)
+}
+
+// StartRenderedStreamingStandbyWithRestoreCommandAndFiles starts a rendered
+// standby and copies extra files before the entrypoint runs.
+func (e *Environment) StartRenderedStreamingStandbyWithRestoreCommandAndFiles(
+	t *testing.T,
+	name string,
+	alias string,
+	primary *Postgres,
+	slotName string,
+	restoreCommand string,
+	extraFiles ...testcontainers.ContainerFile,
+) *Postgres {
 	t.Helper()
 
 	if primary == nil {
@@ -124,6 +138,25 @@ func (e *Environment) StartRenderedStreamingStandbyWithRestoreCommand(
 		t.Fatalf("render standby files for %q: %v", name, err)
 	}
 
+	files := []testcontainers.ContainerFile{
+		{
+			Reader:            strings.NewReader(renderedStandbyEntrypoint()),
+			ContainerFilePath: "/usr/local/bin/pacman-rendered-standby-entrypoint.sh",
+			FileMode:          0o755,
+		},
+		{
+			Reader:            strings.NewReader(rendered.PostgresAutoConf),
+			ContainerFilePath: "/tmp/pacman-rendered-standby/postgresql.auto.conf",
+			FileMode:          0o644,
+		},
+		{
+			Reader:            strings.NewReader(""),
+			ContainerFilePath: "/tmp/pacman-rendered-standby/standby.signal",
+			FileMode:          0o644,
+		},
+	}
+	files = append(files, extraFiles...)
+
 	return e.startCustomPostgres(t, postgresContainerConfig{
 		Name:     name,
 		Alias:    alias,
@@ -138,23 +171,7 @@ func (e *Environment) StartRenderedStreamingStandbyWithRestoreCommand(
 			"REPLICATION_SLOT_NAME": slotName,
 			"PGDATA":                defaultPostgresData,
 		},
-		Files: []testcontainers.ContainerFile{
-			{
-				Reader:            strings.NewReader(renderedStandbyEntrypoint()),
-				ContainerFilePath: "/usr/local/bin/pacman-rendered-standby-entrypoint.sh",
-				FileMode:          0o755,
-			},
-			{
-				Reader:            strings.NewReader(rendered.PostgresAutoConf),
-				ContainerFilePath: "/tmp/pacman-rendered-standby/postgresql.auto.conf",
-				FileMode:          0o644,
-			},
-			{
-				Reader:            strings.NewReader(""),
-				ContainerFilePath: "/tmp/pacman-rendered-standby/standby.signal",
-				FileMode:          0o644,
-			},
-		},
+		Files:        files,
 		Entrypoint:   []string{"/usr/local/bin/pacman-rendered-standby-entrypoint.sh"},
 		WaitStrategy: wait.ForListeningPort("5432/tcp").WithStartupTimeout(90 * time.Second),
 	})

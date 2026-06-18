@@ -31,4 +31,7 @@ const (
 	reasonSystemIdentifierMismatch              = "member system identifier does not match current primary"
 	reasonRejoinRestartPending                  = "member restart as standby is still pending"
 	reasonRejoinReplicationNotStreaming         = "member is not yet streaming from current primary"
+	reasonReinitBackupMetadataUnknown           = "restored backup metadata is unknown"
+	reasonReinitPrimarySlotMismatch             = "member primary slot does not match expected reinit slot"
+	reasonReinitWALReceiverNotStreaming         = "member WAL receiver is not streaming from current primary"
 )

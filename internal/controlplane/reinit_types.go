@@ -6,6 +6,7 @@ import (
 
 	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
 	"github.com/polkiloo/pacman/internal/cluster"
+	"github.com/polkiloo/pacman/internal/postgres"
 )
 
 // ReinitEngine exposes operator-triggered replica reinitialization planning
@@ -18,6 +19,9 @@ type ReinitEngine interface {
 	ExecuteReinitStopPostgres(context.Context, string, ReinitPostgresStopExecutor) (ReinitExecution, error)
 	ExecuteReinitArchiveDataDir(context.Context, string, ReinitDataDirArchiveExecutor) (ReinitExecution, error)
 	ExecuteReinitWALGRestore(context.Context, string, ReinitWALGRestoreExecutor) (ReinitExecution, error)
+	ExecuteReinitRecoveryConfig(context.Context, string, ReinitRecoveryConfigExecutor) (ReinitExecution, error)
+	ExecuteReinitRestartAsStandby(context.Context, string, ReinitStandbyRestartExecutor) (ReinitExecution, error)
+	ExecuteReinitVerifyReplication(context.Context, string, ReinitReplicationVerifier) (ReinitExecution, error)
 }
 
 // ReinitRequest captures operator metadata attached to a destructive replica
@@ -133,17 +137,93 @@ type ReinitWALGRestoreResult struct {
 	BackupName string
 }
 
+// ReinitRecoveryConfigExecutor renders local PostgreSQL recovery settings into
+// the restored data directory before PostgreSQL starts.
+type ReinitRecoveryConfigExecutor interface {
+	ConfigureReinitRecovery(context.Context, ReinitRecoveryConfigRequest) (ReinitRecoveryConfigResult, error)
+}
+
+// ReinitRecoveryConfigRequest describes the local target whose restored data
+// directory should receive PostgreSQL recovery configuration.
+type ReinitRecoveryConfigRequest struct {
+	Operation          cluster.Operation
+	Validation         ReinitValidation
+	TargetNode         agentmodel.NodeStatus
+	CurrentPrimaryNode agentmodel.NodeStatus
+	CurrentEpoch       cluster.Epoch
+	Standby            postgres.StandbyConfig
+}
+
+// ReinitRecoveryConfigResult reports the recovery settings rendered by the
+// local executor.
+type ReinitRecoveryConfigResult struct {
+	DataDir        string
+	RestoreCommand string
+}
+
+// ReinitStandbyRestartExecutor starts the restored target with the rendered
+// recovery configuration so it can rejoin the current primary as a standby.
+type ReinitStandbyRestartExecutor interface {
+	RestartReinitStandby(context.Context, ReinitStandbyRestartRequest) error
+}
+
+// ReinitStandbyRestartRequest describes the local reinit target that should be
+// started in standby mode after recovery configuration has been rendered.
+type ReinitStandbyRestartRequest struct {
+	Operation          cluster.Operation
+	Validation         ReinitValidation
+	TargetNode         agentmodel.NodeStatus
+	CurrentPrimaryNode agentmodel.NodeStatus
+	CurrentEpoch       cluster.Epoch
+}
+
+// ReinitReplicationVerifier verifies that the restarted reinit target is a
+// streaming standby attached to the expected current primary.
+type ReinitReplicationVerifier interface {
+	VerifyReinitReplication(context.Context, ReinitReplicationVerificationRequest) (ReinitReplicationVerificationResult, error)
+}
+
+// ReinitReplicationVerificationRequest describes the local reinit target whose
+// post-restore PostgreSQL replication state should be verified.
+type ReinitReplicationVerificationRequest struct {
+	Operation               cluster.Operation
+	Validation              ReinitValidation
+	TargetNode              agentmodel.NodeStatus
+	CurrentPrimaryNode      agentmodel.NodeStatus
+	CurrentEpoch            cluster.Epoch
+	ExpectedPrimarySlotName string
+}
+
+// ReinitReplicationVerificationResult reports the PostgreSQL state observed
+// from the restarted reinit target.
+type ReinitReplicationVerificationResult struct {
+	SystemIdentifier  string
+	Timeline          int64
+	BackupName        string
+	PrimarySlotName   string
+	WALReceiverStatus string
+	InRecovery        bool
+}
+
 // ReinitExecution captures the outcome of executing a reinit phase.
 type ReinitExecution struct {
-	Operation       cluster.Operation
-	Validation      ReinitValidation
-	CurrentEpoch    cluster.Epoch
-	PostgresStopped bool
-	DataDirArchived bool
-	ArchivePath     string
-	WALGRestored    bool
-	WALGBackupName  string
-	ExecutedAt      time.Time
+	Operation           cluster.Operation
+	Validation          ReinitValidation
+	CurrentEpoch        cluster.Epoch
+	PostgresStopped     bool
+	DataDirArchived     bool
+	ArchivePath         string
+	WALGRestored        bool
+	WALGBackupName      string
+	RecoveryConfig      bool
+	RestoreCommand      string
+	RestartedAsStandby  bool
+	ReplicationVerified bool
+	SystemIdentifier    string
+	Timeline            int64
+	PrimarySlotName     string
+	WALReceiverStatus   string
+	ExecutedAt          time.Time
 }
 
 // Clone returns a detached copy of the reinit execution result.

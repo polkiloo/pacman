@@ -58,3 +58,9 @@ cross join pg_control_system() as system
 cross join pg_control_checkpoint() as checkpoint
 cross join pg_control_recovery() as recovery
 `
+
+const queryReinitReplicationVerificationSQL = `
+select
+	coalesce(current_setting('primary_slot_name', true), '') as primary_slot_name,
+	coalesce((select status from pg_stat_wal_receiver order by pid limit 1), '') as wal_receiver_status
+`

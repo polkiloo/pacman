@@ -1,0 +1,199 @@
+package controlplane
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
+	"github.com/polkiloo/pacman/internal/cluster"
+)
+
+func (store *MemoryStateStore) ExecuteReinitStopPostgres(ctx context.Context, member string, stopper ReinitPostgresStopExecutor) (ReinitExecution, error) {
+	if err := ctx.Err(); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	if err := store.ensureCacheFresh(ctx); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	prepared, err := store.prepareReinitPostgresStop(member, stopper)
+	if err != nil {
+		return ReinitExecution{}, err
+	}
+
+	if err := store.persistActiveOperation(ctx, prepared.operation); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	if err := store.refreshCache(ctx); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	if err := stopper.StopPostgres(ctx, buildReinitPostgresStopRequest(prepared)); err != nil {
+		store.failReinitExecution(prepared, reinitPostgresStopFailedMessage(prepared.validation.Target.Name))
+		return ReinitExecution{}, err
+	}
+
+	return store.publishReinitPostgresStopped(prepared)
+}
+
+func (store *MemoryStateStore) prepareReinitPostgresStop(member string, stopper ReinitPostgresStopExecutor) (preparedReinitExecution, error) {
+	if stopper == nil {
+		return preparedReinitExecution{}, ErrReinitPostgresStopExecutorRequired
+	}
+
+	targetName := strings.TrimSpace(member)
+	if targetName == "" {
+		return preparedReinitExecution{}, ErrReinitTargetRequired
+	}
+
+	executedAt := store.now().UTC()
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	operation, err := store.activeReinitOperationLocked()
+	if err != nil {
+		return preparedReinitExecution{}, err
+	}
+
+	if operation.ToMember != targetName {
+		return preparedReinitExecution{}, ErrReinitExecutionChanged
+	}
+	if !canBeginReinitPostgresStop(operation) {
+		return preparedReinitExecution{}, ErrReinitExecutionChanged
+	}
+
+	_, status, err := store.reinitInputsLocked()
+	if err != nil {
+		return preparedReinitExecution{}, err
+	}
+
+	request := ReinitRequest{
+		Member:      operation.ToMember,
+		RequestedBy: operation.RequestedBy,
+		Reason:      operation.Reason,
+	}
+	validation, err := evaluateReinitRequest(status, request, nil, executedAt)
+	if err != nil {
+		return preparedReinitExecution{}, err
+	}
+	if validation.CurrentPrimary.Name != operation.FromMember || validation.Target.Name != operation.ToMember {
+		return preparedReinitExecution{}, ErrReinitExecutionChanged
+	}
+
+	targetNode, hasTargetNode := store.nodeStatuses[operation.ToMember]
+	currentPrimaryNode, hasCurrentPrimaryNode := store.nodeStatuses[operation.FromMember]
+	if !hasTargetNode || !hasCurrentPrimaryNode {
+		return preparedReinitExecution{}, ErrReinitExecutionChanged
+	}
+
+	updated := beginReinitPostgresStop(operation, executedAt)
+	store.journalOperationLocked(updated, executedAt)
+	store.refreshSourceOfTruthLocked(executedAt)
+
+	return preparedReinitExecution{
+		validation:         validation.Clone(),
+		targetNode:         targetNode.Clone(),
+		currentPrimaryNode: currentPrimaryNode.Clone(),
+		operation:          updated.Clone(),
+		currentEpoch:       status.CurrentEpoch,
+		executedAt:         executedAt,
+	}, nil
+}
+
+// ExecuteReinitArchiveDataDir archives the stopped target's data directory and
+// leaves the active operation running for the later WAL-G restore phase.
+
+func beginReinitPostgresStop(operation cluster.Operation, startedAt time.Time) cluster.Operation {
+	updated := operation.Clone()
+	updated.State = cluster.OperationStateRunning
+	if updated.StartedAt.IsZero() {
+		updated.StartedAt = startedAt
+	}
+	updated.Result = cluster.OperationResultPending
+	updated.Message = reinitPostgresStopRunningMessage(updated.ToMember)
+
+	return updated
+}
+
+func canBeginReinitPostgresStop(operation cluster.Operation) bool {
+	return operation.State == cluster.OperationStateAccepted ||
+		operation.Message == reinitPostgresStopRunningMessage(operation.ToMember)
+}
+
+func buildReinitPostgresStopRequest(prepared preparedReinitExecution) ReinitPostgresStopRequest {
+	return ReinitPostgresStopRequest{
+		Operation:          prepared.operation.Clone(),
+		Validation:         prepared.validation.Clone(),
+		TargetNode:         prepared.targetNode.Clone(),
+		CurrentPrimaryNode: prepared.currentPrimaryNode.Clone(),
+		CurrentEpoch:       prepared.currentEpoch,
+	}
+}
+
+func (store *MemoryStateStore) publishReinitPostgresStopped(prepared preparedReinitExecution) (ReinitExecution, error) {
+	store.mu.Lock()
+	running, err := store.reinitOperationForPublicationLocked(prepared.operation)
+	if err != nil {
+		store.mu.Unlock()
+		return ReinitExecution{}, err
+	}
+
+	updatedOperation := running.Clone()
+	updatedOperation.Message = reinitPostgresStopCompletedMessage(prepared.validation.Target.Name)
+	store.activeOperation = &updatedOperation
+	store.nodeStatuses[prepared.validation.Target.Name] = reinitPostgresStoppedStatus(prepared.targetNode, prepared.executedAt)
+	store.refreshSourceOfTruthLocked(prepared.executedAt)
+	target := store.nodeStatuses[prepared.validation.Target.Name].Clone()
+	store.mu.Unlock()
+
+	if err := store.persistActiveOperation(context.Background(), updatedOperation); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	if err := store.persistNodeStatus(context.Background(), target); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	if err := store.refreshCache(context.Background()); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	return ReinitExecution{
+		Operation:       updatedOperation.Clone(),
+		Validation:      prepared.validation.Clone(),
+		CurrentEpoch:    prepared.currentEpoch,
+		PostgresStopped: true,
+		ExecutedAt:      prepared.executedAt,
+	}.Clone(), nil
+}
+
+func reinitPostgresStoppedStatus(status agentmodel.NodeStatus, observedAt time.Time) agentmodel.NodeStatus {
+	updated := status.Clone()
+	updated.State = cluster.MemberStateStopping
+	updated.ObservedAt = observedAt
+
+	if updated.Postgres.Managed {
+		updated.Postgres.Up = false
+		updated.Postgres.CheckedAt = observedAt
+		updated.Postgres.RecoveryKnown = false
+		updated.Postgres.InRecovery = false
+	}
+
+	return updated
+}
+
+func reinitPostgresStopRunningMessage(member string) string {
+	return "stopping PostgreSQL on reinit target " + member
+}
+
+func reinitPostgresStopCompletedMessage(member string) string {
+	return "PostgreSQL stopped on reinit target " + member + "; destructive restore is pending"
+}
+
+func reinitPostgresStopFailedMessage(member string) string {
+	return "failed to stop PostgreSQL on reinit target " + member
+}

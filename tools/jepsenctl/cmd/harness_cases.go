@@ -117,6 +117,7 @@ func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, c
 	lab.settleAfterNemesis(caseDir, nemesis)
 	observationFile := filepath.Join(caseDir, primaryObservationFile)
 	_ = lab.waitForTimelineConvergence(ctx, observationFile)
+	_ = lab.waitForOldPrimaryRejoin(ctx, observationFile, caseDir, nemesis)
 	sampler.stop()
 	_ = lab.captureClusterSnapshot(ctx, caseDir, "after-settle", nemesis, "", "")
 	_ = lab.samplePrimaryState(ctx, 1000000000, observationFile)
@@ -462,6 +463,77 @@ func (lab *harnessLab) waitForTimelineConvergence(ctx context.Context, observati
 		case <-time.After(lab.cfg.timelineConvergenceInterval):
 		}
 	}
+}
+
+func (lab *harnessLab) waitForOldPrimaryRejoin(ctx context.Context, observationFile, caseDir, nemesis string) bool {
+	if _, skipped := oldPrimaryRejoinDedicatedCheckerReason(nemesis); skipped || failureNemesisAllowsUnavailableOldPrimary(nemesis) {
+		return true
+	}
+	if lab.cfg.oldPrimaryRejoinTimeout <= 0 {
+		return false
+	}
+
+	logPath := filepath.Join(caseDir, "nemesis.log")
+	appendFile(logPath, fmt.Sprintf("waiting up to %s for old primary rejoin after %s\n", lab.cfg.oldPrimaryRejoinTimeout, nemesis))
+	deadline := time.Now().Add(lab.cfg.oldPrimaryRejoinTimeout)
+	interval := lab.cfg.oldPrimaryRejoinInterval
+	if interval <= 0 {
+		interval = time.Second
+	}
+	sampleID := 950000000
+	for {
+		_ = lab.samplePrimaryState(ctx, sampleID, observationFile)
+		sampleID++
+
+		state, err := oldPrimaryRejoinWaitState(observationFile, nemesis)
+		if err == nil {
+			switch {
+			case !state.applicable:
+				appendFile(logPath, "old primary rejoin wait skipped: no promotion observed\n")
+				return true
+			case state.valid:
+				appendFile(logPath, fmt.Sprintf("old primary rejoin observed after %s\n", nemesis))
+				return true
+			case state.unsafeAfterPromotion:
+				appendFile(logPath, "old primary rejoin wait stopped: unsafe old primary observation recorded\n")
+				return false
+			}
+		}
+
+		if time.Now().After(deadline) {
+			if err != nil {
+				appendFile(logPath, fmt.Sprintf("old primary rejoin wait timed out after %s: %v\n", lab.cfg.oldPrimaryRejoinTimeout, err))
+			} else {
+				appendFile(logPath, fmt.Sprintf("old primary rejoin wait timed out after %s\n", lab.cfg.oldPrimaryRejoinTimeout))
+			}
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			appendFile(logPath, fmt.Sprintf("old primary rejoin wait canceled: %v\n", ctx.Err()))
+			return false
+		case <-time.After(interval):
+		}
+	}
+}
+
+type oldPrimaryRejoinWaitStatus struct {
+	valid                bool
+	applicable           bool
+	unsafeAfterPromotion bool
+}
+
+func oldPrimaryRejoinWaitState(observationFile, nemesis string) (oldPrimaryRejoinWaitStatus, error) {
+	observations, err := readPrimaryObservations(observationFile)
+	if err != nil {
+		return oldPrimaryRejoinWaitStatus{}, err
+	}
+	result := checkOldPrimaryRejoinAfterFailover(observations, nemesis)
+	return oldPrimaryRejoinWaitStatus{
+		valid:                result.Valid,
+		applicable:           result.Applicable,
+		unsafeAfterPromotion: result.OldPrimaryUnsafeAfterPromotion,
+	}, nil
 }
 
 func fileSize(path string) int64 {

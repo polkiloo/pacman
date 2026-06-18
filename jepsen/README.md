@@ -169,6 +169,12 @@ seconds after the nemesis heals before final checker sampling. The default is
 `10`, which gives promoted timelines and restarted nodes time to settle while
 the primary sampler continues recording the transition.
 
+After a non-kill failover, cases also wait up to
+`PACMAN_JEPSEN_OLD_PRIMARY_REJOIN_TIMEOUT_SECONDS` seconds for the former
+primary to be observed as a safe standby before final checker sampling. The
+default is `60`; `PACMAN_JEPSEN_OLD_PRIMARY_REJOIN_INTERVAL_SECONDS` controls
+the polling interval and defaults to `2`.
+
 DCS quorum cases poll for a fully healthy post-heal sample for up to
 `PACMAN_JEPSEN_DCS_RECOVERY_TIMEOUT_SECONDS` seconds at
 `PACMAN_JEPSEN_DCS_RECOVERY_INTERVAL_SECONDS` intervals. The defaults are `10`
