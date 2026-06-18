@@ -151,6 +151,24 @@ func (c *localReinitRecoveryConfigurator) ConfigureReinitRecovery(_ context.Cont
 	}, nil
 }
 
+// pgCtlReinitStandbyRestarter starts the restored reinit target as a standby.
+type pgCtlReinitStandbyRestarter struct {
+	pgCtl *postgres.PGCtl
+}
+
+func (r *pgCtlReinitStandbyRestarter) RestartReinitStandby(ctx context.Context, _ controlplane.ReinitStandbyRestartRequest) error {
+	running, err := r.pgCtl.Status(ctx)
+	if err != nil {
+		return err
+	}
+	if running {
+		if err := r.pgCtl.Stop(ctx, postgres.ShutdownModeFast); err != nil {
+			return err
+		}
+	}
+	return r.pgCtl.StartNoWait(ctx)
+}
+
 func (daemon *Daemon) reconcileReinit(ctx context.Context, currentPostgres agentmodel.PostgresStatus) {
 	if daemon.pgCtl == nil || !currentPostgres.Managed {
 		return
@@ -181,6 +199,25 @@ func (daemon *Daemon) reconcileReinit(ctx context.Context, currentPostgres agent
 
 	if daemon.config.Postgres == nil {
 		return
+	}
+
+	if daemon.stateReader != nil {
+		storedStatus, _ := daemon.stateReader.NodeStatus(daemon.config.Node.Name)
+		if storedStatus.PendingRestart || storedStatus.Postgres.Details.PendingRestart {
+			restarter := &pgCtlReinitStandbyRestarter{pgCtl: daemon.pgCtl}
+			if _, err := engine.ExecuteReinitRestartAsStandby(ctx, daemon.config.Node.Name, restarter); err != nil {
+				if !errors.Is(err, controlplane.ErrReinitExecutionRequired) &&
+					!errors.Is(err, controlplane.ErrReinitExecutionChanged) {
+					daemon.logger.WarnContext(ctx, "reinit standby restart failed",
+						daemon.logArgs("agent", slog.String("error", err.Error()))...)
+				}
+				return
+			}
+
+			daemon.logger.InfoContext(ctx, "reinit standby restart started",
+				daemon.logArgs("agent")...)
+			return
+		}
 	}
 
 	archiver := &localReinitDataDirArchiver{dataDir: daemon.config.Postgres.DataDir}

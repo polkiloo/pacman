@@ -999,6 +999,37 @@ func TestDaemonReconcileReinit(t *testing.T) {
 		assertContains(t, logs.String(), `"msg":"reinit recovery configured"`)
 	})
 
+	t.Run("restarts standby when recovery config marked pending restart", func(t *testing.T) {
+		t.Parallel()
+
+		engine := &recordingReinitPublisher{
+			stopErr: controlplane.ErrReinitExecutionChanged,
+		}
+		daemon, logs := newReinitTestDaemon(t, engine)
+		daemon.stateReader = stubNodeStatusReader{
+			status: agentmodel.NodeStatus{
+				PendingRestart: true,
+				Postgres: agentmodel.PostgresStatus{
+					Details: agentmodel.PostgresDetails{PendingRestart: true},
+				},
+			},
+			ok: true,
+		}
+
+		daemon.reconcileReinit(context.Background(), agentmodel.PostgresStatus{
+			Managed: true,
+			Up:      false,
+		})
+
+		if engine.restartCalls != 1 || engine.restartMember != "alpha-2" {
+			t.Fatalf("unexpected reinit restart calls: calls=%d member=%q", engine.restartCalls, engine.restartMember)
+		}
+		if engine.archiveCalls != 0 || engine.restoreCalls != 0 || engine.recoveryConfigCalls != 0 {
+			t.Fatalf("expected restart to short-circuit destructive phases, archive=%d restore=%d recovery=%d", engine.archiveCalls, engine.restoreCalls, engine.recoveryConfigCalls)
+		}
+		assertContains(t, logs.String(), `"msg":"reinit standby restart started"`)
+	})
+
 	t.Run("publishes stopped phase when PostgreSQL is already down", func(t *testing.T) {
 		t.Parallel()
 
@@ -1894,6 +1925,9 @@ type recordingReinitPublisher struct {
 	recoveryConfigCalls  int
 	recoveryConfigMember string
 	recoveryConfigErr    error
+	restartCalls         int
+	restartMember        string
+	restartErr           error
 }
 
 func (*recordingReinitPublisher) PublishNodeStatus(context.Context, agentmodel.NodeStatus) (agentmodel.ControlPlaneStatus, error) {
@@ -1930,6 +1964,12 @@ func (publisher *recordingReinitPublisher) ExecuteReinitRecoveryConfig(_ context
 	publisher.recoveryConfigCalls++
 	publisher.recoveryConfigMember = member
 	return controlplane.ReinitExecution{RecoveryConfig: true}, publisher.recoveryConfigErr
+}
+
+func (publisher *recordingReinitPublisher) ExecuteReinitRestartAsStandby(_ context.Context, member string, _ controlplane.ReinitStandbyRestartExecutor) (controlplane.ReinitExecution, error) {
+	publisher.restartCalls++
+	publisher.restartMember = member
+	return controlplane.ReinitExecution{RestartedAsStandby: true}, publisher.restartErr
 }
 
 type stubNodeStatusReader struct {
