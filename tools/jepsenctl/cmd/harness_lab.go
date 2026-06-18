@@ -37,6 +37,8 @@ type harnessConfig struct {
 	clusterVerifyInterval        time.Duration
 	nemesisHold                  time.Duration
 	postNemesisSettle            time.Duration
+	oldPrimaryRejoinTimeout      time.Duration
+	oldPrimaryRejoinInterval     time.Duration
 	timelineConvergenceTimeout   time.Duration
 	timelineConvergenceInterval  time.Duration
 	workloadVisibilityTimeout    time.Duration
@@ -98,6 +100,8 @@ func newHarnessLab(options harnessOptions) *harnessLab {
 		clusterVerifyInterval:        time.Duration(envInt("PACMAN_JEPSEN_CLUSTER_VERIFY_INTERVAL_SECONDS", 2)) * time.Second,
 		nemesisHold:                  time.Duration(envInt("PACMAN_JEPSEN_NEMESIS_HOLD_SECONDS", 8)) * time.Second,
 		postNemesisSettle:            time.Duration(envInt("PACMAN_JEPSEN_POST_NEMESIS_SETTLE_SECONDS", 10)) * time.Second,
+		oldPrimaryRejoinTimeout:      time.Duration(envInt("PACMAN_JEPSEN_OLD_PRIMARY_REJOIN_TIMEOUT_SECONDS", 60)) * time.Second,
+		oldPrimaryRejoinInterval:     time.Duration(envInt("PACMAN_JEPSEN_OLD_PRIMARY_REJOIN_INTERVAL_SECONDS", 2)) * time.Second,
 		timelineConvergenceTimeout:   time.Duration(envInt("PACMAN_JEPSEN_TIMELINE_CONVERGENCE_TIMEOUT_SECONDS", 90)) * time.Second,
 		timelineConvergenceInterval:  time.Duration(envInt("PACMAN_JEPSEN_TIMELINE_CONVERGENCE_INTERVAL_SECONDS", 2)) * time.Second,
 		workloadVisibilityTimeout:    time.Duration(envInt("PACMAN_JEPSEN_WORKLOAD_VISIBILITY_TIMEOUT_SECONDS", 60)) * time.Second,
