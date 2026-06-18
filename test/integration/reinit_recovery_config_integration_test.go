@@ -181,6 +181,9 @@ func TestReinitRecoveryConfigStartsRestoredStandbyStreamingInDocker(t *testing.T
 		t.Fatalf("unexpected reinit replication verification: %+v", verification)
 	}
 
+	runReinitVerificationPositiveCasesInDocker(t, primary, standby, restoreCommand, primarySystemIdentifier, primaryTimeline, verification)
+	runReinitVerificationNegativeCasesInDocker(t, primary, standby)
+
 	autoConf := standby.RequireExec(t, "sh", "-lc", "cat \"$PGDATA/postgresql.auto.conf\"")
 	for _, expected := range []string{
 		"primary_conninfo = 'host=reinit-recovery-primary-postgres port=5432 user=replicator password=replicator application_name=reinit_restored_standby'",
@@ -207,6 +210,147 @@ INSERT INTO reinit_restored_standby_marker (id, payload)
 VALUES (1, 'streaming-after-reinit')
 ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload`)
 	waitForContainerQueryValue(t, standby, `SELECT payload FROM reinit_restored_standby_marker WHERE id = 1`, "streaming-after-reinit")
+}
+
+func runReinitVerificationPositiveCasesInDocker(
+	t *testing.T,
+	primary *testenv.Postgres,
+	standby *testenv.Postgres,
+	restoreCommand string,
+	primarySystemIdentifier string,
+	primaryTimeline string,
+	verification postgres.ReinitReplicationVerification,
+) {
+	t.Helper()
+
+	positiveCases := []struct {
+		name string
+		run  func(t *testing.T)
+	}{
+		{
+			name: "restored target is in recovery",
+			run: func(t *testing.T) {
+				t.Helper()
+				if got := requireContainerQueryValue(t, standby, `SELECT pg_is_in_recovery()::text`); got != "true" {
+					t.Fatalf("pg_is_in_recovery: got %q want true", got)
+				}
+			},
+		},
+		{
+			name: "wal receiver is streaming",
+			run: func(t *testing.T) {
+				t.Helper()
+				if verification.WALReceiverStatus != "streaming" {
+					t.Fatalf("WAL receiver status: got %q want streaming", verification.WALReceiverStatus)
+				}
+			},
+		},
+		{
+			name: "replication slot is attached",
+			run: func(t *testing.T) {
+				t.Helper()
+				if verification.PrimarySlotName != "reinit_restored_standby" {
+					t.Fatalf("primary slot name: got %q want reinit_restored_standby", verification.PrimarySlotName)
+				}
+				if got := requireContainerQueryValue(t, primary, `SELECT active::text FROM pg_replication_slots WHERE slot_name = 'reinit_restored_standby'`); got != "true" {
+					t.Fatalf("primary slot active: got %q want true", got)
+				}
+			},
+		},
+		{
+			name: "system identifier and timeline match primary",
+			run: func(t *testing.T) {
+				t.Helper()
+				if verification.SystemIdentifier != primarySystemIdentifier {
+					t.Fatalf("system identifier: got %q want %q", verification.SystemIdentifier, primarySystemIdentifier)
+				}
+				if got := requireContainerQueryValue(t, standby, postgresTimelineSQL()); got != primaryTimeline {
+					t.Fatalf("timeline: got %q want %q", got, primaryTimeline)
+				}
+			},
+		},
+		{
+			name: "restore command and backup metadata are present",
+			run: func(t *testing.T) {
+				t.Helper()
+				if verification.BackupName != config.DefaultWALGRestoreBackupName {
+					t.Fatalf("backup name: got %q want %q", verification.BackupName, config.DefaultWALGRestoreBackupName)
+				}
+				if got := requireContainerQueryValue(t, standby, `SHOW restore_command`); got != restoreCommand {
+					t.Fatalf("restore_command: got %q want %q", got, restoreCommand)
+				}
+			},
+		},
+	}
+
+	for _, testCase := range positiveCases {
+		t.Run("positive/"+testCase.name, testCase.run)
+	}
+}
+
+func runReinitVerificationNegativeCasesInDocker(t *testing.T, primary *testenv.Postgres, standby *testenv.Postgres) {
+	t.Helper()
+
+	negativeCases := []struct {
+		name string
+		run  func(t *testing.T)
+	}{
+		{
+			name: "primary is not a valid restored standby",
+			run: func(t *testing.T) {
+				t.Helper()
+				if got := requireContainerQueryValue(t, primary, `SELECT pg_is_in_recovery()::text`); got != "false" {
+					t.Fatalf("primary recovery state: got %q want false", got)
+				}
+			},
+		},
+		{
+			name: "primary has no WAL receiver",
+			run: func(t *testing.T) {
+				t.Helper()
+				if got := requireContainerQueryValue(t, primary, `SELECT count(*)::text FROM pg_stat_wal_receiver`); got != "0" {
+					t.Fatalf("primary WAL receiver count: got %q want 0", got)
+				}
+			},
+		},
+		{
+			name: "wrong primary slot is rejected",
+			run: func(t *testing.T) {
+				t.Helper()
+				if got := requireContainerQueryValue(t, standby, `SHOW primary_slot_name`); got == "wrong_reinit_slot" {
+					t.Fatalf("negative slot unexpectedly matched %q", got)
+				}
+			},
+		},
+		{
+			name: "missing primary slot is inactive",
+			run: func(t *testing.T) {
+				t.Helper()
+				if got := requireContainerQueryValue(t, primary, `SELECT count(*)::text FROM pg_replication_slots WHERE slot_name = 'missing_reinit_slot' AND active`); got != "0" {
+					t.Fatalf("missing slot active count: got %q want 0", got)
+				}
+			},
+		},
+		{
+			name: "missing backup metadata is detectable",
+			run: func(t *testing.T) {
+				t.Helper()
+				probeCtx, probeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer probeCancel()
+				verification, err := postgres.QueryReinitReplicationVerification(probeCtx, standby.Address(t), "")
+				if err != nil {
+					t.Fatalf("query verification with missing backup metadata: %v", err)
+				}
+				if verification.BackupName != "" {
+					t.Fatalf("backup name: got %q want empty", verification.BackupName)
+				}
+			},
+		},
+	}
+
+	for _, testCase := range negativeCases {
+		t.Run("negative/"+testCase.name, testCase.run)
+	}
 }
 
 func fakeWALGBinary() string {
