@@ -20,6 +20,7 @@ type ReinitEngine interface {
 	ExecuteReinitArchiveDataDir(context.Context, string, ReinitDataDirArchiveExecutor) (ReinitExecution, error)
 	ExecuteReinitWALGRestore(context.Context, string, ReinitWALGRestoreExecutor) (ReinitExecution, error)
 	ExecuteReinitRecoveryConfig(context.Context, string, ReinitRecoveryConfigExecutor) (ReinitExecution, error)
+	ExecuteReinitRestartAsStandby(context.Context, string, ReinitStandbyRestartExecutor) (ReinitExecution, error)
 }
 
 // ReinitRequest captures operator metadata attached to a destructive replica
@@ -159,19 +160,36 @@ type ReinitRecoveryConfigResult struct {
 	RestoreCommand string
 }
 
+// ReinitStandbyRestartExecutor starts the restored target with the rendered
+// recovery configuration so it can rejoin the current primary as a standby.
+type ReinitStandbyRestartExecutor interface {
+	RestartReinitStandby(context.Context, ReinitStandbyRestartRequest) error
+}
+
+// ReinitStandbyRestartRequest describes the local reinit target that should be
+// started in standby mode after recovery configuration has been rendered.
+type ReinitStandbyRestartRequest struct {
+	Operation          cluster.Operation
+	Validation         ReinitValidation
+	TargetNode         agentmodel.NodeStatus
+	CurrentPrimaryNode agentmodel.NodeStatus
+	CurrentEpoch       cluster.Epoch
+}
+
 // ReinitExecution captures the outcome of executing a reinit phase.
 type ReinitExecution struct {
-	Operation       cluster.Operation
-	Validation      ReinitValidation
-	CurrentEpoch    cluster.Epoch
-	PostgresStopped bool
-	DataDirArchived bool
-	ArchivePath     string
-	WALGRestored    bool
-	WALGBackupName  string
-	RecoveryConfig  bool
-	RestoreCommand  string
-	ExecutedAt      time.Time
+	Operation          cluster.Operation
+	Validation         ReinitValidation
+	CurrentEpoch       cluster.Epoch
+	PostgresStopped    bool
+	DataDirArchived    bool
+	ArchivePath        string
+	WALGRestored       bool
+	WALGBackupName     string
+	RecoveryConfig     bool
+	RestoreCommand     string
+	RestartedAsStandby bool
+	ExecutedAt         time.Time
 }
 
 // Clone returns a detached copy of the reinit execution result.
