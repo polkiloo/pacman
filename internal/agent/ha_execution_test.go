@@ -866,6 +866,58 @@ exit 0
 	})
 }
 
+func TestLocalReinitRecoveryConfiguratorWritesWALGRestoreCommand(t *testing.T) {
+	t.Parallel()
+
+	dataDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dataDir, postgres.PostgresAutoConfFileName), []byte(strings.Join([]string{
+		"listen_addresses = '*'",
+		"restore_command = 'old restore'",
+		"primary_conninfo = 'old primary'",
+		"",
+	}, "\n")), 0o640); err != nil {
+		t.Fatalf("write existing auto conf: %v", err)
+	}
+
+	configurator := &localReinitRecoveryConfigurator{
+		dataDir:             dataDir,
+		replicationUser:     "replicator",
+		replicationPassword: "replicator secret",
+		walg: config.WALGConfig{
+			Binary: "/usr/local/bin/wal-g",
+			Repository: config.WALGRepositoryConfig{
+				Provider: config.WALGRepositoryProviderFilesystem,
+				Prefix:   "/backups/alpha",
+			},
+		},
+	}
+
+	result, err := configurator.ConfigureReinitRecovery(context.Background(), controlplane.ReinitRecoveryConfigRequest{
+		Standby: postgres.StandbyConfig{
+			PrimaryConnInfo: "host=alpha-1 port=5432 application_name=alpha-2",
+		},
+	})
+	if err != nil {
+		t.Fatalf("configure reinit recovery: %v", err)
+	}
+
+	if result.DataDir != dataDir || result.RestoreCommand == "" {
+		t.Fatalf("unexpected recovery config result: %+v", result)
+	}
+
+	rendered := readTestFile(t, filepath.Join(dataDir, postgres.PostgresAutoConfFileName))
+	assertContains(t, rendered, "listen_addresses = '*'")
+	assertContains(t, rendered, "primary_conninfo = 'host=alpha-1 port=5432 application_name=alpha-2 user=replicator password=''replicator secret'''")
+	assertContains(t, rendered, "restore_command = 'env ''WALG_FILE_PREFIX=/backups/alpha'' ''/usr/local/bin/wal-g'' wal-fetch ''%f'' ''%p'''")
+	assertContains(t, rendered, "recovery_target_timeline = 'latest'")
+	if strings.Contains(rendered, "old restore") || strings.Contains(rendered, "old primary") {
+		t.Fatalf("expected old recovery settings to be replaced, got %q", rendered)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, postgres.StandbySignalFileName)); err != nil {
+		t.Fatalf("standby.signal not written: %v", err)
+	}
+}
+
 func TestDaemonReconcileReinit(t *testing.T) {
 	t.Parallel()
 
@@ -923,6 +975,28 @@ func TestDaemonReconcileReinit(t *testing.T) {
 			t.Fatalf("unexpected reinit calls: stop=%d archive=%d restore=%d member=%q", engine.stopCalls, engine.archiveCalls, engine.restoreCalls, engine.restoreMember)
 		}
 		assertContains(t, logs.String(), `"msg":"reinit WAL-G restore completed"`)
+	})
+
+	t.Run("renders recovery config when WAL-G restore phase is complete", func(t *testing.T) {
+		t.Parallel()
+
+		engine := &recordingReinitPublisher{
+			stopErr:    controlplane.ErrReinitExecutionChanged,
+			archiveErr: controlplane.ErrReinitExecutionChanged,
+			restoreErr: controlplane.ErrReinitExecutionChanged,
+		}
+		daemon, logs := newReinitTestDaemon(t, engine)
+
+		daemon.reconcileReinit(context.Background(), agentmodel.PostgresStatus{
+			Managed: true,
+			Up:      false,
+		})
+
+		if engine.stopCalls != 1 || engine.archiveCalls != 1 || engine.restoreCalls != 1 || engine.recoveryConfigCalls != 1 || engine.recoveryConfigMember != "alpha-2" {
+			t.Fatalf("unexpected reinit calls: stop=%d archive=%d restore=%d recovery=%d member=%q",
+				engine.stopCalls, engine.archiveCalls, engine.restoreCalls, engine.recoveryConfigCalls, engine.recoveryConfigMember)
+		}
+		assertContains(t, logs.String(), `"msg":"reinit recovery configured"`)
 	})
 
 	t.Run("publishes stopped phase when PostgreSQL is already down", func(t *testing.T) {
@@ -1807,16 +1881,19 @@ func (publisher *recordingRejoinPublisher) CompleteRejoin(context.Context) (cont
 }
 
 type recordingReinitPublisher struct {
-	stopCalls     int
-	stopMember    string
-	stopErr       error
-	archiveCalls  int
-	archiveMember string
-	archiveErr    error
-	restoreCalls  int
-	restoreMember string
-	restoreResult controlplane.ReinitExecution
-	restoreErr    error
+	stopCalls            int
+	stopMember           string
+	stopErr              error
+	archiveCalls         int
+	archiveMember        string
+	archiveErr           error
+	restoreCalls         int
+	restoreMember        string
+	restoreResult        controlplane.ReinitExecution
+	restoreErr           error
+	recoveryConfigCalls  int
+	recoveryConfigMember string
+	recoveryConfigErr    error
 }
 
 func (*recordingReinitPublisher) PublishNodeStatus(context.Context, agentmodel.NodeStatus) (agentmodel.ControlPlaneStatus, error) {
@@ -1847,6 +1924,12 @@ func (publisher *recordingReinitPublisher) ExecuteReinitWALGRestore(_ context.Co
 	publisher.restoreCalls++
 	publisher.restoreMember = member
 	return publisher.restoreResult.Clone(), publisher.restoreErr
+}
+
+func (publisher *recordingReinitPublisher) ExecuteReinitRecoveryConfig(_ context.Context, member string, _ controlplane.ReinitRecoveryConfigExecutor) (controlplane.ReinitExecution, error) {
+	publisher.recoveryConfigCalls++
+	publisher.recoveryConfigMember = member
+	return controlplane.ReinitExecution{RecoveryConfig: true}, publisher.recoveryConfigErr
 }
 
 type stubNodeStatusReader struct {

@@ -168,7 +168,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] stop PostgreSQL cleanly on the target before destructive reinit steps
 - [x] implement safe data-directory wipe / archive handling before reclone
 - [x] implement WAL-G restore workflow for full replica reinit using `wal-g backup-fetch`
-- [ ] render WAL-G recovery settings, including `restore_command`, before PostgreSQL starts
+- [x] render WAL-G recovery settings, including `restore_command`, before PostgreSQL starts
 - [ ] recreate standby / replication configuration after WAL-G restore
 - [ ] start PostgreSQL as a standby after WAL-G restore completes and WAL replay can catch up
 - [ ] verify system identifier, timeline, restored backup metadata, slot attachment, and streaming health after reinit

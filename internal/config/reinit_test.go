@@ -267,6 +267,55 @@ func TestWALGRestoreEnvironmentIncludesRepositoryAndCredentials(t *testing.T) {
 	}
 }
 
+func TestWALFetchRestoreCommandEmbedsRepositoryAndCredentials(t *testing.T) {
+	t.Parallel()
+
+	walg := WALGConfig{
+		Binary: "/usr/local/bin/wal-g",
+		Repository: WALGRepositoryConfig{
+			Provider: WALGRepositoryProviderS3,
+			Prefix:   "s3://pacman-backups/alpha",
+			Endpoint: "https://s3.example.test",
+			Region:   "us-east-1",
+		},
+		Credentials: WALGCredentialsConfig{
+			InheritEnvironment: []string{"AWS_SESSION_TOKEN"},
+			EnvironmentFiles: map[string]string{
+				"AWS_ACCESS_KEY_ID": "/run/secrets/aws-access-key-id",
+			},
+		},
+	}
+
+	got, err := walg.WALFetchRestoreCommand(
+		func(name string) (string, bool) {
+			if name == "AWS_SESSION_TOKEN" {
+				return "session token", true
+			}
+			return "", false
+		},
+		func(path string) ([]byte, error) {
+			if path != "/run/secrets/aws-access-key-id" {
+				t.Fatalf("unexpected credential file path: %q", path)
+			}
+			return []byte("access'key\n"), nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("build WAL-G wal-fetch restore command: %v", err)
+	}
+
+	want := "env " +
+		"'AWS_ACCESS_KEY_ID=access'\"'\"'key' " +
+		"'AWS_ENDPOINT=https://s3.example.test' " +
+		"'AWS_REGION=us-east-1' " +
+		"'AWS_SESSION_TOKEN=session token' " +
+		"'WALG_S3_PREFIX=s3://pacman-backups/alpha' " +
+		"'/usr/local/bin/wal-g' wal-fetch '%f' '%p'"
+	if got != want {
+		t.Fatalf("restore command: got %q, want %q", got, want)
+	}
+}
+
 func TestWALGRepositoryEnvironmentProviders(t *testing.T) {
 	t.Parallel()
 

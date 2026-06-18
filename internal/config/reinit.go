@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -35,6 +36,36 @@ func (walg WALGConfig) BackupFetchCommand(dataDir string) (string, []string, err
 	}
 
 	return binary, []string{"backup-fetch", trimmedDataDir, walg.RestoreBackupName()}, nil
+}
+
+// WALFetchRestoreCommand returns a PostgreSQL restore_command that invokes
+// WAL-G for archive recovery. The command embeds the resolved repository
+// environment so PostgreSQL can run it before pacmand starts the server.
+func (walg WALGConfig) WALFetchRestoreCommand(
+	lookupEnv func(string) (string, bool),
+	readFile func(string) ([]byte, error),
+) (string, error) {
+	defaulted := walg.WithDefaults()
+	binary := strings.TrimSpace(defaulted.Binary)
+	if binary == "" {
+		return "", ErrReinitWALGBinaryRequired
+	}
+
+	env, err := defaulted.RestoreEnvironment(lookupEnv, readFile)
+	if err != nil {
+		return "", err
+	}
+
+	parts := []string{"env"}
+	parts = append(parts, shellEnvironmentAssignments(env)...)
+	parts = append(parts,
+		shellQuote(binary),
+		"wal-fetch",
+		shellQuote("%f"),
+		shellQuote("%p"),
+	)
+
+	return strings.Join(parts, " "), nil
 }
 
 // RestoreEnvironment returns the WAL-G environment selected by the repository
@@ -84,6 +115,33 @@ func (repository WALGRepositoryConfig) Environment() map[string]string {
 	}
 
 	return env
+}
+
+func shellEnvironmentAssignments(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(env))
+	for name := range env {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	assignments := make([]string, 0, len(names))
+	for _, name := range names {
+		assignments = append(assignments, shellQuote(name+"="+env[name]))
+	}
+
+	return assignments
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 // ResolveEnvironment returns the WAL-G environment variables described by the

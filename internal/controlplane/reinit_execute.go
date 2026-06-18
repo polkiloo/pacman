@@ -7,6 +7,7 @@ import (
 
 	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
 	"github.com/polkiloo/pacman/internal/cluster"
+	"github.com/polkiloo/pacman/internal/postgres"
 )
 
 type preparedReinitExecution struct {
@@ -17,6 +18,8 @@ type preparedReinitExecution struct {
 	currentEpoch       cluster.Epoch
 	archivePath        string
 	walgBackupName     string
+	restoreCommand     string
+	standby            postgres.StandbyConfig
 	executedAt         time.Time
 }
 
@@ -322,6 +325,115 @@ func (store *MemoryStateStore) prepareReinitWALGRestore(member string, restorer 
 	}, nil
 }
 
+// ExecuteReinitRecoveryConfig renders PostgreSQL recovery settings, including
+// WAL-G restore_command, into the restored data directory before PostgreSQL is
+// allowed to start.
+func (store *MemoryStateStore) ExecuteReinitRecoveryConfig(ctx context.Context, member string, configurator ReinitRecoveryConfigExecutor) (ReinitExecution, error) {
+	if err := ctx.Err(); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	if err := store.ensureCacheFresh(ctx); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	prepared, err := store.prepareReinitRecoveryConfig(member, configurator)
+	if err != nil {
+		return ReinitExecution{}, err
+	}
+
+	if err := store.persistActiveOperation(ctx, prepared.operation); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	if err := store.refreshCache(ctx); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	result, err := configurator.ConfigureReinitRecovery(ctx, buildReinitRecoveryConfigRequest(prepared))
+	if err != nil {
+		store.failReinitExecution(prepared, reinitRecoveryConfigFailedMessage(prepared.validation.Target.Name))
+		return ReinitExecution{}, err
+	}
+	prepared.restoreCommand = result.RestoreCommand
+
+	return store.publishReinitRecoveryConfigured(prepared)
+}
+
+func (store *MemoryStateStore) prepareReinitRecoveryConfig(member string, configurator ReinitRecoveryConfigExecutor) (preparedReinitExecution, error) {
+	if configurator == nil {
+		return preparedReinitExecution{}, ErrReinitRecoveryConfigExecutorRequired
+	}
+
+	targetName := strings.TrimSpace(member)
+	if targetName == "" {
+		return preparedReinitExecution{}, ErrReinitTargetRequired
+	}
+
+	executedAt := store.now().UTC()
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	operation, err := store.activeReinitOperationLocked()
+	if err != nil {
+		return preparedReinitExecution{}, err
+	}
+
+	if operation.ToMember != targetName {
+		return preparedReinitExecution{}, ErrReinitExecutionChanged
+	}
+	if !canBeginReinitRecoveryConfig(operation) {
+		return preparedReinitExecution{}, ErrReinitExecutionChanged
+	}
+
+	_, status, err := store.reinitInputsLocked()
+	if err != nil {
+		return preparedReinitExecution{}, err
+	}
+
+	request := ReinitRequest{
+		Member:      operation.ToMember,
+		RequestedBy: operation.RequestedBy,
+		Reason:      operation.Reason,
+	}
+	validation, err := evaluateReinitRequest(status, request, nil, executedAt)
+	if err != nil {
+		return preparedReinitExecution{}, err
+	}
+	if validation.CurrentPrimary.Name != operation.FromMember || validation.Target.Name != operation.ToMember {
+		return preparedReinitExecution{}, ErrReinitExecutionChanged
+	}
+
+	targetNode, hasTargetNode := store.nodeStatuses[operation.ToMember]
+	currentPrimaryNode, hasCurrentPrimaryNode := store.nodeStatuses[operation.FromMember]
+	if !hasTargetNode || !hasCurrentPrimaryNode {
+		return preparedReinitExecution{}, ErrReinitExecutionChanged
+	}
+	if targetNode.Postgres.Managed && targetNode.Postgres.Up {
+		return preparedReinitExecution{}, ErrReinitPostgresStopRequired
+	}
+
+	standby, err := buildReinitRecoveryStandbyConfig(currentPrimaryNode.Postgres.Address, operation.ToMember)
+	if err != nil {
+		return preparedReinitExecution{}, err
+	}
+
+	updated := beginReinitRecoveryConfig(operation, executedAt)
+	store.journalOperationLocked(updated, executedAt)
+	store.refreshSourceOfTruthLocked(executedAt)
+
+	return preparedReinitExecution{
+		validation:         validation.Clone(),
+		targetNode:         targetNode.Clone(),
+		currentPrimaryNode: currentPrimaryNode.Clone(),
+		operation:          updated.Clone(),
+		currentEpoch:       status.CurrentEpoch,
+		standby:            standby,
+		executedAt:         executedAt,
+	}, nil
+}
+
 func (store *MemoryStateStore) activeReinitOperationLocked() (cluster.Operation, error) {
 	if store.activeOperation == nil {
 		return cluster.Operation{}, ErrReinitExecutionRequired
@@ -383,6 +495,18 @@ func beginReinitWALGRestore(operation cluster.Operation, startedAt time.Time) cl
 	return updated
 }
 
+func beginReinitRecoveryConfig(operation cluster.Operation, startedAt time.Time) cluster.Operation {
+	updated := operation.Clone()
+	updated.State = cluster.OperationStateRunning
+	if updated.StartedAt.IsZero() {
+		updated.StartedAt = startedAt
+	}
+	updated.Result = cluster.OperationResultPending
+	updated.Message = reinitRecoveryConfigRunningMessage(updated.ToMember)
+
+	return updated
+}
+
 func canBeginReinitPostgresStop(operation cluster.Operation) bool {
 	return operation.State == cluster.OperationStateAccepted ||
 		operation.Message == reinitPostgresStopRunningMessage(operation.ToMember)
@@ -398,6 +522,12 @@ func canBeginReinitWALGRestore(operation cluster.Operation) bool {
 	return operation.State == cluster.OperationStateRunning &&
 		(operation.Message == reinitDataDirArchiveCompletedMessage(operation.ToMember) ||
 			operation.Message == reinitWALGRestoreRunningMessage(operation.ToMember))
+}
+
+func canBeginReinitRecoveryConfig(operation cluster.Operation) bool {
+	return operation.State == cluster.OperationStateRunning &&
+		(operation.Message == reinitWALGRestoreCompletedMessage(operation.ToMember) ||
+			operation.Message == reinitRecoveryConfigRunningMessage(operation.ToMember))
 }
 
 func buildReinitPostgresStopRequest(prepared preparedReinitExecution) ReinitPostgresStopRequest {
@@ -427,6 +557,17 @@ func buildReinitWALGRestoreRequest(prepared preparedReinitExecution) ReinitWALGR
 		TargetNode:         prepared.targetNode.Clone(),
 		CurrentPrimaryNode: prepared.currentPrimaryNode.Clone(),
 		CurrentEpoch:       prepared.currentEpoch,
+	}
+}
+
+func buildReinitRecoveryConfigRequest(prepared preparedReinitExecution) ReinitRecoveryConfigRequest {
+	return ReinitRecoveryConfigRequest{
+		Operation:          prepared.operation.Clone(),
+		Validation:         prepared.validation.Clone(),
+		TargetNode:         prepared.targetNode.Clone(),
+		CurrentPrimaryNode: prepared.currentPrimaryNode.Clone(),
+		CurrentEpoch:       prepared.currentEpoch,
+		Standby:            prepared.standby.WithDefaults(),
 	}
 }
 
@@ -534,6 +675,47 @@ func (store *MemoryStateStore) publishReinitWALGRestored(prepared preparedReinit
 	}.Clone(), nil
 }
 
+func (store *MemoryStateStore) publishReinitRecoveryConfigured(prepared preparedReinitExecution) (ReinitExecution, error) {
+	store.mu.Lock()
+	running, err := store.reinitOperationForPublicationLocked(prepared.operation)
+	if err != nil {
+		store.mu.Unlock()
+		return ReinitExecution{}, err
+	}
+
+	updatedOperation := running.Clone()
+	updatedOperation.Message = reinitRecoveryConfigCompletedMessage(prepared.validation.Target.Name)
+	store.activeOperation = &updatedOperation
+	store.nodeStatuses[prepared.validation.Target.Name] = reinitRecoveryConfiguredStatus(prepared.targetNode, prepared.executedAt)
+	store.refreshSourceOfTruthLocked(prepared.executedAt)
+	target := store.nodeStatuses[prepared.validation.Target.Name].Clone()
+	store.mu.Unlock()
+
+	if err := store.persistActiveOperation(context.Background(), updatedOperation); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	if err := store.persistNodeStatus(context.Background(), target); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	if err := store.refreshCache(context.Background()); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	return ReinitExecution{
+		Operation:       updatedOperation.Clone(),
+		Validation:      prepared.validation.Clone(),
+		CurrentEpoch:    prepared.currentEpoch,
+		PostgresStopped: true,
+		DataDirArchived: true,
+		WALGRestored:    true,
+		RecoveryConfig:  true,
+		RestoreCommand:  prepared.restoreCommand,
+		ExecutedAt:      prepared.executedAt,
+	}.Clone(), nil
+}
+
 func (store *MemoryStateStore) failReinitExecution(prepared preparedReinitExecution, message string) {
 	store.mu.Lock()
 	failed := prepared.operation.Clone()
@@ -564,6 +746,37 @@ func reinitPostgresStoppedStatus(status agentmodel.NodeStatus, observedAt time.T
 		updated.Postgres.CheckedAt = observedAt
 		updated.Postgres.RecoveryKnown = false
 		updated.Postgres.InRecovery = false
+	}
+
+	return updated
+}
+
+func buildReinitRecoveryStandbyConfig(currentPrimaryAddress, targetMember string) (postgres.StandbyConfig, error) {
+	if strings.TrimSpace(currentPrimaryAddress) == "" {
+		return postgres.StandbyConfig{}, ErrReinitCurrentPrimaryAddressRequired
+	}
+
+	connInfo, err := rejoinPrimaryConnInfo(currentPrimaryAddress, targetMember)
+	if err != nil {
+		return postgres.StandbyConfig{}, err
+	}
+
+	return (postgres.StandbyConfig{
+		PrimaryConnInfo:        connInfo,
+		RecoveryTargetTimeline: postgres.DefaultRecoveryTargetTimeline,
+	}).WithDefaults(), nil
+}
+
+func reinitRecoveryConfiguredStatus(status agentmodel.NodeStatus, observedAt time.Time) agentmodel.NodeStatus {
+	updated := status.Clone()
+	updated.State = cluster.MemberStateStopping
+	updated.PendingRestart = true
+	updated.ObservedAt = observedAt
+
+	if updated.Postgres.Managed {
+		updated.Postgres.Up = false
+		updated.Postgres.CheckedAt = observedAt
+		updated.Postgres.Details.PendingRestart = true
 	}
 
 	return updated
@@ -603,4 +816,16 @@ func reinitWALGRestoreCompletedMessage(member string) string {
 
 func reinitWALGRestoreFailedMessage(member string) string {
 	return "failed to restore PostgreSQL data directory from WAL-G on reinit target " + member
+}
+
+func reinitRecoveryConfigRunningMessage(member string) string {
+	return "rendering PostgreSQL recovery configuration on reinit target " + member
+}
+
+func reinitRecoveryConfigCompletedMessage(member string) string {
+	return "PostgreSQL recovery configuration rendered on reinit target " + member + "; standby start is pending"
+}
+
+func reinitRecoveryConfigFailedMessage(member string) string {
+	return "failed to render PostgreSQL recovery configuration on reinit target " + member
 }

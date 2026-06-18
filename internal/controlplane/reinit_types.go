@@ -6,6 +6,7 @@ import (
 
 	agentmodel "github.com/polkiloo/pacman/internal/agent/model"
 	"github.com/polkiloo/pacman/internal/cluster"
+	"github.com/polkiloo/pacman/internal/postgres"
 )
 
 // ReinitEngine exposes operator-triggered replica reinitialization planning
@@ -18,6 +19,7 @@ type ReinitEngine interface {
 	ExecuteReinitStopPostgres(context.Context, string, ReinitPostgresStopExecutor) (ReinitExecution, error)
 	ExecuteReinitArchiveDataDir(context.Context, string, ReinitDataDirArchiveExecutor) (ReinitExecution, error)
 	ExecuteReinitWALGRestore(context.Context, string, ReinitWALGRestoreExecutor) (ReinitExecution, error)
+	ExecuteReinitRecoveryConfig(context.Context, string, ReinitRecoveryConfigExecutor) (ReinitExecution, error)
 }
 
 // ReinitRequest captures operator metadata attached to a destructive replica
@@ -133,6 +135,30 @@ type ReinitWALGRestoreResult struct {
 	BackupName string
 }
 
+// ReinitRecoveryConfigExecutor renders local PostgreSQL recovery settings into
+// the restored data directory before PostgreSQL starts.
+type ReinitRecoveryConfigExecutor interface {
+	ConfigureReinitRecovery(context.Context, ReinitRecoveryConfigRequest) (ReinitRecoveryConfigResult, error)
+}
+
+// ReinitRecoveryConfigRequest describes the local target whose restored data
+// directory should receive PostgreSQL recovery configuration.
+type ReinitRecoveryConfigRequest struct {
+	Operation          cluster.Operation
+	Validation         ReinitValidation
+	TargetNode         agentmodel.NodeStatus
+	CurrentPrimaryNode agentmodel.NodeStatus
+	CurrentEpoch       cluster.Epoch
+	Standby            postgres.StandbyConfig
+}
+
+// ReinitRecoveryConfigResult reports the recovery settings rendered by the
+// local executor.
+type ReinitRecoveryConfigResult struct {
+	DataDir        string
+	RestoreCommand string
+}
+
 // ReinitExecution captures the outcome of executing a reinit phase.
 type ReinitExecution struct {
 	Operation       cluster.Operation
@@ -143,6 +169,8 @@ type ReinitExecution struct {
 	ArchivePath     string
 	WALGRestored    bool
 	WALGBackupName  string
+	RecoveryConfig  bool
+	RestoreCommand  string
 	ExecutedAt      time.Time
 }
 
