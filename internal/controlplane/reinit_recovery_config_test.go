@@ -43,6 +43,9 @@ func TestMemoryStateStoreExecuteReinitRecoveryConfigRendersAfterWALGRestore(t *t
 	if request.Standby.PrimaryConnInfo != "host=10.0.0.1 port=5432 application_name=alpha-2" {
 		t.Fatalf("unexpected recovery primary_conninfo: %+v", request.Standby)
 	}
+	if request.Standby.PrimarySlotName != "alpha_2" {
+		t.Fatalf("unexpected recovery primary_slot_name: %+v", request.Standby)
+	}
 	if request.Standby.RecoveryTargetTimeline != postgres.DefaultRecoveryTargetTimeline {
 		t.Fatalf("unexpected recovery target timeline: %+v", request.Standby)
 	}

@@ -12,9 +12,13 @@ import (
 func seededReinitIntentStore(t *testing.T, now time.Time) *MemoryStateStore {
 	t.Helper()
 
+	primary := reinitNodeStatus("alpha-1", cluster.MemberRolePrimary, cluster.MemberStateRunning, now, true, 21, 0, "10.0.0.1:5432")
+	primary.Postgres.Details.SystemIdentifier = "sys-alpha"
+	target := failoverNodeStatus("alpha-2", cluster.MemberRoleReplica, cluster.MemberStateStreaming, now.Add(time.Second), true, 21, 0)
+	target.Postgres.Details.SystemIdentifier = "sys-alpha"
 	store := seededReinitStore(t, now, []agentmodel.NodeStatus{
-		reinitNodeStatus("alpha-1", cluster.MemberRolePrimary, cluster.MemberStateRunning, now, true, 21, 0, "10.0.0.1:5432"),
-		failoverNodeStatus("alpha-2", cluster.MemberRoleReplica, cluster.MemberStateStreaming, now.Add(time.Second), true, 21, 0),
+		primary,
+		target,
 	})
 	setTestNow(store, func() time.Time { return now.Add(5 * time.Minute) })
 	if _, err := store.CreateReinitIntent(context.Background(), ReinitRequest{Member: "alpha-2"}); err != nil {
@@ -63,6 +67,17 @@ func seededRecoveryConfiguredReinitStore(t *testing.T, now time.Time) *MemorySta
 	store := seededWALGRestoredReinitStore(t, now)
 	if _, err := store.ExecuteReinitRecoveryConfig(context.Background(), "alpha-2", &recordingReinitRecoveryConfigurator{}); err != nil {
 		t.Fatalf("configure recovery for reinit: %v", err)
+	}
+
+	return store
+}
+
+func seededRestartedReinitStore(t *testing.T, now time.Time) *MemoryStateStore {
+	t.Helper()
+
+	store := seededRecoveryConfiguredReinitStore(t, now)
+	if _, err := store.ExecuteReinitRestartAsStandby(context.Background(), "alpha-2", &recordingReinitStandbyRestarter{}); err != nil {
+		t.Fatalf("restart reinit target as standby: %v", err)
 	}
 
 	return store
@@ -119,4 +134,31 @@ type recordingReinitStandbyRestarter struct {
 func (restarter *recordingReinitStandbyRestarter) RestartReinitStandby(_ context.Context, request ReinitStandbyRestartRequest) error {
 	restarter.requests = append(restarter.requests, request)
 	return restarter.err
+}
+
+type recordingReinitReplicationVerifier struct {
+	requests []ReinitReplicationVerificationRequest
+	result   ReinitReplicationVerificationResult
+	err      error
+}
+
+func (verifier *recordingReinitReplicationVerifier) VerifyReinitReplication(_ context.Context, request ReinitReplicationVerificationRequest) (ReinitReplicationVerificationResult, error) {
+	verifier.requests = append(verifier.requests, request)
+	return verifier.result, verifier.err
+}
+
+func publishVerifiedReinitReplica(t *testing.T, store *MemoryStateStore, observedAt time.Time) {
+	t.Helper()
+
+	status := reinitNodeStatus("alpha-2", cluster.MemberRoleReplica, cluster.MemberStateStreaming, observedAt, true, 21, 0, "10.0.0.2:5432")
+	status.Postgres.Role = cluster.MemberRoleReplica
+	status.Postgres.RecoveryKnown = true
+	status.Postgres.InRecovery = true
+	status.Postgres.Details.SystemIdentifier = "sys-alpha"
+	status.Postgres.Details.PendingRestart = false
+	status.PendingRestart = false
+
+	if _, err := store.PublishNodeStatus(context.Background(), status); err != nil {
+		t.Fatalf("publish verified reinit replica state: %v", err)
+	}
 }

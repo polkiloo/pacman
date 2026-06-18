@@ -20,6 +20,7 @@ type preparedReinitExecution struct {
 	walgBackupName     string
 	restoreCommand     string
 	standby            postgres.StandbyConfig
+	verification       ReinitReplicationVerificationResult
 	executedAt         time.Time
 }
 
@@ -392,6 +393,44 @@ func (store *MemoryStateStore) ExecuteReinitRestartAsStandby(ctx context.Context
 	return store.publishReinitStandbyRestart(prepared)
 }
 
+// ExecuteReinitVerifyReplication verifies that the restarted reinit target is
+// attached to the expected replication slot, streaming from the current
+// primary, and on the same PostgreSQL system identifier and timeline.
+func (store *MemoryStateStore) ExecuteReinitVerifyReplication(ctx context.Context, member string, verifier ReinitReplicationVerifier) (ReinitExecution, error) {
+	if err := ctx.Err(); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	if err := store.ensureCacheFresh(ctx); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	prepared, err := store.prepareReinitReplicationVerification(member, verifier)
+	if err != nil {
+		return ReinitExecution{}, err
+	}
+
+	if err := store.persistActiveOperation(ctx, prepared.operation); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	if err := store.refreshCache(ctx); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	result, err := verifier.VerifyReinitReplication(ctx, buildReinitReplicationVerificationRequest(prepared))
+	if err != nil {
+		return ReinitExecution{}, err
+	}
+	prepared.verification = result
+
+	if reasons := assessReinitReplicationVerificationReasons(prepared); len(reasons) > 0 {
+		return ReinitExecution{}, ErrReinitReplicationNotHealthy
+	}
+
+	return store.publishReinitReplicationVerified(prepared)
+}
+
 func (store *MemoryStateStore) prepareReinitRecoveryConfig(member string, configurator ReinitRecoveryConfigExecutor) (preparedReinitExecution, error) {
 	if configurator == nil {
 		return preparedReinitExecution{}, ErrReinitRecoveryConfigExecutorRequired
@@ -534,6 +573,71 @@ func (store *MemoryStateStore) prepareReinitStandbyRestart(member string, restar
 	}, nil
 }
 
+func (store *MemoryStateStore) prepareReinitReplicationVerification(member string, verifier ReinitReplicationVerifier) (preparedReinitExecution, error) {
+	if verifier == nil {
+		return preparedReinitExecution{}, ErrReinitReplicationVerifierRequired
+	}
+
+	targetName := strings.TrimSpace(member)
+	if targetName == "" {
+		return preparedReinitExecution{}, ErrReinitTargetRequired
+	}
+
+	executedAt := store.now().UTC()
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	operation, err := store.activeReinitOperationLocked()
+	if err != nil {
+		return preparedReinitExecution{}, err
+	}
+
+	if operation.ToMember != targetName {
+		return preparedReinitExecution{}, ErrReinitExecutionChanged
+	}
+	if !canBeginReinitReplicationVerification(operation) {
+		return preparedReinitExecution{}, ErrReinitExecutionChanged
+	}
+
+	_, status, err := store.reinitInputsLocked()
+	if err != nil {
+		return preparedReinitExecution{}, err
+	}
+
+	request := ReinitRequest{
+		Member:      operation.ToMember,
+		RequestedBy: operation.RequestedBy,
+		Reason:      operation.Reason,
+	}
+	validation, err := evaluateReinitRequest(status, request, nil, executedAt)
+	if err != nil {
+		return preparedReinitExecution{}, err
+	}
+	if validation.CurrentPrimary.Name != operation.FromMember || validation.Target.Name != operation.ToMember {
+		return preparedReinitExecution{}, ErrReinitExecutionChanged
+	}
+
+	targetNode, hasTargetNode := store.nodeStatuses[operation.ToMember]
+	currentPrimaryNode, hasCurrentPrimaryNode := store.nodeStatuses[operation.FromMember]
+	if !hasTargetNode || !hasCurrentPrimaryNode {
+		return preparedReinitExecution{}, ErrReinitExecutionChanged
+	}
+
+	updated := beginReinitReplicationVerification(operation, executedAt)
+	store.journalOperationLocked(updated, executedAt)
+	store.refreshSourceOfTruthLocked(executedAt)
+
+	return preparedReinitExecution{
+		validation:         validation.Clone(),
+		targetNode:         targetNode.Clone(),
+		currentPrimaryNode: currentPrimaryNode.Clone(),
+		operation:          updated.Clone(),
+		currentEpoch:       status.CurrentEpoch,
+		executedAt:         executedAt,
+	}, nil
+}
+
 func (store *MemoryStateStore) activeReinitOperationLocked() (cluster.Operation, error) {
 	if store.activeOperation == nil {
 		return cluster.Operation{}, ErrReinitExecutionRequired
@@ -619,6 +723,18 @@ func beginReinitStandbyRestart(operation cluster.Operation, startedAt time.Time)
 	return updated
 }
 
+func beginReinitReplicationVerification(operation cluster.Operation, startedAt time.Time) cluster.Operation {
+	updated := operation.Clone()
+	updated.State = cluster.OperationStateRunning
+	if updated.StartedAt.IsZero() {
+		updated.StartedAt = startedAt
+	}
+	updated.Result = cluster.OperationResultPending
+	updated.Message = reinitReplicationVerificationRunningMessage(updated.ToMember, updated.FromMember)
+
+	return updated
+}
+
 func canBeginReinitPostgresStop(operation cluster.Operation) bool {
 	return operation.State == cluster.OperationStateAccepted ||
 		operation.Message == reinitPostgresStopRunningMessage(operation.ToMember)
@@ -646,6 +762,12 @@ func canBeginReinitStandbyRestart(operation cluster.Operation) bool {
 	return operation.State == cluster.OperationStateRunning &&
 		(operation.Message == reinitRecoveryConfigCompletedMessage(operation.ToMember) ||
 			operation.Message == reinitStandbyRestartRunningMessage(operation.ToMember, operation.FromMember))
+}
+
+func canBeginReinitReplicationVerification(operation cluster.Operation) bool {
+	return operation.State == cluster.OperationStateRunning &&
+		(operation.Message == reinitStandbyRestartCompletedMessage(operation.ToMember, operation.FromMember) ||
+			operation.Message == reinitReplicationVerificationRunningMessage(operation.ToMember, operation.FromMember))
 }
 
 func buildReinitPostgresStopRequest(prepared preparedReinitExecution) ReinitPostgresStopRequest {
@@ -696,6 +818,17 @@ func buildReinitStandbyRestartRequest(prepared preparedReinitExecution) ReinitSt
 		TargetNode:         prepared.targetNode.Clone(),
 		CurrentPrimaryNode: prepared.currentPrimaryNode.Clone(),
 		CurrentEpoch:       prepared.currentEpoch,
+	}
+}
+
+func buildReinitReplicationVerificationRequest(prepared preparedReinitExecution) ReinitReplicationVerificationRequest {
+	return ReinitReplicationVerificationRequest{
+		Operation:               prepared.operation.Clone(),
+		Validation:              prepared.validation.Clone(),
+		TargetNode:              prepared.targetNode.Clone(),
+		CurrentPrimaryNode:      prepared.currentPrimaryNode.Clone(),
+		CurrentEpoch:            prepared.currentEpoch,
+		ExpectedPrimarySlotName: rejoinPrimarySlotName(prepared.validation.Target.Name),
 	}
 }
 
@@ -885,6 +1018,47 @@ func (store *MemoryStateStore) publishReinitStandbyRestart(prepared preparedRein
 	}.Clone(), nil
 }
 
+func (store *MemoryStateStore) publishReinitReplicationVerified(prepared preparedReinitExecution) (ReinitExecution, error) {
+	store.mu.Lock()
+	running, err := store.reinitOperationForPublicationLocked(prepared.operation)
+	if err != nil {
+		store.mu.Unlock()
+		return ReinitExecution{}, err
+	}
+
+	updatedOperation := running.Clone()
+	updatedOperation.Message = reinitReplicationVerificationCompletedMessage(prepared.validation.Target.Name, prepared.validation.CurrentPrimary.Name)
+	store.activeOperation = &updatedOperation
+	store.refreshSourceOfTruthLocked(prepared.executedAt)
+	store.mu.Unlock()
+
+	if err := store.persistActiveOperation(context.Background(), updatedOperation); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	if err := store.refreshCache(context.Background()); err != nil {
+		return ReinitExecution{}, err
+	}
+
+	return ReinitExecution{
+		Operation:           updatedOperation.Clone(),
+		Validation:          prepared.validation.Clone(),
+		CurrentEpoch:        prepared.currentEpoch,
+		PostgresStopped:     true,
+		DataDirArchived:     true,
+		WALGRestored:        true,
+		WALGBackupName:      prepared.verification.BackupName,
+		RecoveryConfig:      true,
+		RestartedAsStandby:  true,
+		ReplicationVerified: true,
+		SystemIdentifier:    prepared.verification.SystemIdentifier,
+		Timeline:            prepared.verification.Timeline,
+		PrimarySlotName:     prepared.verification.PrimarySlotName,
+		WALReceiverStatus:   prepared.verification.WALReceiverStatus,
+		ExecutedAt:          prepared.executedAt,
+	}.Clone(), nil
+}
+
 func (store *MemoryStateStore) failReinitExecution(prepared preparedReinitExecution, message string) {
 	store.mu.Lock()
 	failed := prepared.operation.Clone()
@@ -932,8 +1106,69 @@ func buildReinitRecoveryStandbyConfig(currentPrimaryAddress, targetMember string
 
 	return (postgres.StandbyConfig{
 		PrimaryConnInfo:        connInfo,
+		PrimarySlotName:        rejoinPrimarySlotName(targetMember),
 		RecoveryTargetTimeline: postgres.DefaultRecoveryTargetTimeline,
 	}).WithDefaults(), nil
+}
+
+func assessReinitReplicationVerificationReasons(prepared preparedReinitExecution) []string {
+	var reasons []string
+
+	if prepared.targetNode.PendingRestart || prepared.targetNode.Postgres.Details.PendingRestart {
+		reasons = append(reasons, reasonRejoinRestartPending)
+	}
+	if prepared.targetNode.Role != cluster.MemberRoleReplica {
+		reasons = append(reasons, reasonRoleNotStandby)
+	}
+	if prepared.targetNode.State != cluster.MemberStateStreaming {
+		reasons = append(reasons, reasonReinitWALReceiverNotStreaming)
+	}
+	if !prepared.targetNode.Postgres.Up {
+		reasons = append(reasons, reasonPostgresNotUp)
+	}
+	if !prepared.targetNode.Postgres.RecoveryKnown {
+		reasons = append(reasons, reasonRecoveryStateUnknown)
+	}
+	if !prepared.targetNode.Postgres.InRecovery || !prepared.verification.InRecovery {
+		reasons = append(reasons, reasonNotInRecovery)
+	}
+	if prepared.targetNode.Postgres.Role != cluster.MemberRoleReplica {
+		reasons = append(reasons, reasonPostgresRoleNotStandby)
+	}
+
+	targetSystemIdentifier := strings.TrimSpace(prepared.targetNode.Postgres.Details.SystemIdentifier)
+	currentPrimarySystemIdentifier := strings.TrimSpace(prepared.currentPrimaryNode.Postgres.Details.SystemIdentifier)
+	verifiedSystemIdentifier := strings.TrimSpace(prepared.verification.SystemIdentifier)
+	switch {
+	case targetSystemIdentifier == "" || verifiedSystemIdentifier == "":
+		reasons = append(reasons, reasonMemberSystemIdentifierUnknown)
+	case currentPrimarySystemIdentifier == "":
+		reasons = append(reasons, reasonCurrentPrimarySystemIdentifierUnknown)
+	case targetSystemIdentifier != currentPrimarySystemIdentifier || verifiedSystemIdentifier != currentPrimarySystemIdentifier:
+		reasons = append(reasons, reasonSystemIdentifierMismatch)
+	}
+
+	switch {
+	case prepared.targetNode.Postgres.Details.Timeline == 0 || prepared.verification.Timeline == 0:
+		reasons = append(reasons, reasonMemberTimelineUnknown)
+	case prepared.currentPrimaryNode.Postgres.Details.Timeline == 0:
+		reasons = append(reasons, reasonCurrentPrimaryTimelineUnknown)
+	case prepared.targetNode.Postgres.Details.Timeline != prepared.currentPrimaryNode.Postgres.Details.Timeline ||
+		prepared.verification.Timeline != prepared.currentPrimaryNode.Postgres.Details.Timeline:
+		reasons = append(reasons, reasonTimelineMismatch)
+	}
+
+	if strings.TrimSpace(prepared.verification.BackupName) == "" {
+		reasons = append(reasons, reasonReinitBackupMetadataUnknown)
+	}
+	if prepared.verification.PrimarySlotName != rejoinPrimarySlotName(prepared.validation.Target.Name) {
+		reasons = append(reasons, reasonReinitPrimarySlotMismatch)
+	}
+	if prepared.verification.WALReceiverStatus != "streaming" {
+		reasons = append(reasons, reasonReinitWALReceiverNotStreaming)
+	}
+
+	return reasons
 }
 
 func reinitRecoveryConfiguredStatus(status agentmodel.NodeStatus, observedAt time.Time) agentmodel.NodeStatus {
@@ -1028,4 +1263,12 @@ func reinitStandbyRestartCompletedMessage(member, currentPrimary string) string 
 
 func reinitStandbyRestartFailedMessage(member, currentPrimary string) string {
 	return "failed to restart reinit target " + member + " as a standby following " + currentPrimary
+}
+
+func reinitReplicationVerificationRunningMessage(member, currentPrimary string) string {
+	return "verifying reinit target " + member + " is streaming from " + currentPrimary
+}
+
+func reinitReplicationVerificationCompletedMessage(member, currentPrimary string) string {
+	return "reinit target " + member + " verified as a streaming standby following " + currentPrimary
 }

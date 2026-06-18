@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -25,6 +26,53 @@ type DataDirArchiveResult struct {
 	DataDir     string
 	ArchivePath string
 	Archived    bool
+}
+
+// ReinitReplicationVerification reports the local PostgreSQL state that must
+// hold before a WAL-G reinit target is accepted as a streaming standby.
+type ReinitReplicationVerification struct {
+	SystemIdentifier  string
+	Timeline          int64
+	BackupName        string
+	PrimarySlotName   string
+	WALReceiverStatus string
+	InRecovery        bool
+}
+
+// QueryReinitReplicationVerification verifies the local streaming state of a
+// restarted reinit standby.
+func QueryReinitReplicationVerification(ctx context.Context, address, backupName string) (ReinitReplicationVerification, error) {
+	client, err := Connect(address)
+	if err != nil {
+		return ReinitReplicationVerification{}, err
+	}
+	defer client.Close()
+
+	return client.QueryReinitReplicationVerification(ctx, backupName)
+}
+
+// QueryReinitReplicationVerification verifies the local streaming state of a
+// restarted reinit standby through the connected PostgreSQL client.
+func (client *Client) QueryReinitReplicationVerification(ctx context.Context, backupName string) (ReinitReplicationVerification, error) {
+	observation, err := client.QueryObservation(ctx)
+	if err != nil {
+		return ReinitReplicationVerification{}, err
+	}
+
+	var primarySlotName string
+	var walReceiverStatus string
+	if err := client.db.QueryRowContext(ctx, queryReinitReplicationVerificationSQL).Scan(&primarySlotName, &walReceiverStatus); err != nil {
+		return ReinitReplicationVerification{}, err
+	}
+
+	return ReinitReplicationVerification{
+		SystemIdentifier:  strings.TrimSpace(observation.Details.SystemIdentifier),
+		Timeline:          observation.Details.Timeline,
+		BackupName:        strings.TrimSpace(backupName),
+		PrimarySlotName:   strings.TrimSpace(primarySlotName),
+		WALReceiverStatus: strings.TrimSpace(walReceiverStatus),
+		InRecovery:        observation.InRecovery,
+	}, nil
 }
 
 // ArchiveForReinit moves an existing PostgreSQL data directory to a sibling

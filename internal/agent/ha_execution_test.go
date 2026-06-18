@@ -1030,6 +1030,36 @@ func TestDaemonReconcileReinit(t *testing.T) {
 		assertContains(t, logs.String(), `"msg":"reinit standby restart started"`)
 	})
 
+	t.Run("verifies restored standby replication when PostgreSQL is up", func(t *testing.T) {
+		t.Parallel()
+
+		engine := &recordingReinitPublisher{
+			stopErr: controlplane.ErrReinitExecutionChanged,
+			verifyResult: controlplane.ReinitExecution{
+				WALGBackupName:      "LATEST",
+				PrimarySlotName:     "alpha_2",
+				WALReceiverStatus:   "streaming",
+				ReplicationVerified: true,
+			},
+		}
+		daemon, logs := newReinitTestDaemon(t, engine)
+
+		daemon.reconcileReinit(context.Background(), agentmodel.PostgresStatus{
+			Managed: true,
+			Up:      true,
+			Address: "127.0.0.1:5432",
+		})
+
+		if engine.verifyCalls != 1 || engine.verifyMember != "alpha-2" {
+			t.Fatalf("unexpected reinit verification calls: calls=%d member=%q", engine.verifyCalls, engine.verifyMember)
+		}
+		if engine.archiveCalls != 0 || engine.restoreCalls != 0 || engine.recoveryConfigCalls != 0 || engine.restartCalls != 0 {
+			t.Fatalf("expected verification to short-circuit other phases, archive=%d restore=%d recovery=%d restart=%d",
+				engine.archiveCalls, engine.restoreCalls, engine.recoveryConfigCalls, engine.restartCalls)
+		}
+		assertContains(t, logs.String(), `"msg":"reinit replication verified"`)
+	})
+
 	t.Run("publishes stopped phase when PostgreSQL is already down", func(t *testing.T) {
 		t.Parallel()
 
@@ -1928,6 +1958,10 @@ type recordingReinitPublisher struct {
 	restartCalls         int
 	restartMember        string
 	restartErr           error
+	verifyCalls          int
+	verifyMember         string
+	verifyResult         controlplane.ReinitExecution
+	verifyErr            error
 }
 
 func (*recordingReinitPublisher) PublishNodeStatus(context.Context, agentmodel.NodeStatus) (agentmodel.ControlPlaneStatus, error) {
@@ -1970,6 +2004,12 @@ func (publisher *recordingReinitPublisher) ExecuteReinitRestartAsStandby(_ conte
 	publisher.restartCalls++
 	publisher.restartMember = member
 	return controlplane.ReinitExecution{RestartedAsStandby: true}, publisher.restartErr
+}
+
+func (publisher *recordingReinitPublisher) ExecuteReinitVerifyReplication(_ context.Context, member string, _ controlplane.ReinitReplicationVerifier) (controlplane.ReinitExecution, error) {
+	publisher.verifyCalls++
+	publisher.verifyMember = member
+	return publisher.verifyResult.Clone(), publisher.verifyErr
 }
 
 type stubNodeStatusReader struct {

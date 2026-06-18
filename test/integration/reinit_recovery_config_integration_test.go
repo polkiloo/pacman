@@ -155,6 +155,31 @@ func TestReinitRecoveryConfigStartsRestoredStandbyStreamingInDocker(t *testing.T
 	waitForContainerQueryValue(t, standby, `SHOW primary_slot_name`, "reinit_restored_standby")
 	waitForContainerQueryValue(t, standby, `SHOW restore_command`, restoreCommand)
 	waitForContainerQueryValue(t, standby, `SHOW transaction_read_only`, "on")
+	waitForContainerQueryValue(t, primary, `SELECT active::text FROM pg_replication_slots WHERE slot_name = 'reinit_restored_standby'`, "true")
+
+	primarySystemIdentifier := requireContainerQueryValue(t, primary, `SELECT system_identifier::text FROM pg_control_system()`)
+	standbySystemIdentifier := requireContainerQueryValue(t, standby, `SELECT system_identifier::text FROM pg_control_system()`)
+	if standbySystemIdentifier != primarySystemIdentifier {
+		t.Fatalf("restored standby system identifier: got %q want %q", standbySystemIdentifier, primarySystemIdentifier)
+	}
+
+	primaryTimeline := requireContainerQueryValue(t, primary, postgresTimelineSQL())
+	waitForContainerQueryValue(t, standby, postgresTimelineSQL(), primaryTimeline)
+
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer probeCancel()
+	verification, err := postgres.QueryReinitReplicationVerification(probeCtx, standby.Address(t), config.DefaultWALGRestoreBackupName)
+	if err != nil {
+		t.Fatalf("query reinit replication verification from restored standby: %v", err)
+	}
+	if verification.SystemIdentifier != primarySystemIdentifier ||
+		verification.Timeline == 0 ||
+		verification.BackupName != config.DefaultWALGRestoreBackupName ||
+		verification.PrimarySlotName != "reinit_restored_standby" ||
+		verification.WALReceiverStatus != "streaming" ||
+		!verification.InRecovery {
+		t.Fatalf("unexpected reinit replication verification: %+v", verification)
+	}
 
 	autoConf := standby.RequireExec(t, "sh", "-lc", "cat \"$PGDATA/postgresql.auto.conf\"")
 	for _, expected := range []string{
@@ -211,6 +236,25 @@ func waitForContainerQueryValue(t *testing.T, fixture *testenv.Postgres, query, 
 	}
 
 	t.Fatalf("query %q in %q did not return %q before deadline; last output=%q", query, fixture.Name(), want, lastOutput)
+}
+
+func requireContainerQueryValue(t *testing.T, fixture *testenv.Postgres, query string) string {
+	t.Helper()
+
+	result := fixture.Exec(t, "sh", "-lc", `PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc `+shellQuote(query))
+	output := strings.TrimSpace(result.Output)
+	if result.ExitCode != 0 {
+		t.Fatalf("query %q in %q failed with exit %d: %s", query, fixture.Name(), result.ExitCode, output)
+	}
+
+	return output
+}
+
+func postgresTimelineSQL() string {
+	return `SELECT CASE
+	WHEN pg_is_in_recovery() THEN coalesce((SELECT max(received_tli)::text FROM pg_stat_wal_receiver), '0')
+	ELSE (('x' || substr(pg_walfile_name(pg_current_wal_lsn()), 1, 8))::bit(32)::bigint)::text
+END`
 }
 
 func testenvPostgresImage() string {

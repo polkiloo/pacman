@@ -169,6 +169,30 @@ func (r *pgCtlReinitStandbyRestarter) RestartReinitStandby(ctx context.Context, 
 	return r.pgCtl.StartNoWait(ctx)
 }
 
+// localReinitReplicationVerifier verifies the restored PostgreSQL instance is
+// attached to the expected primary as a streaming standby.
+type localReinitReplicationVerifier struct {
+	address string
+	walg    config.WALGConfig
+}
+
+func (v *localReinitReplicationVerifier) VerifyReinitReplication(ctx context.Context, _ controlplane.ReinitReplicationVerificationRequest) (controlplane.ReinitReplicationVerificationResult, error) {
+	backupName := v.walg.WithDefaults().RestoreBackupName()
+	verification, err := postgres.QueryReinitReplicationVerification(ctx, v.address, backupName)
+	if err != nil {
+		return controlplane.ReinitReplicationVerificationResult{}, err
+	}
+
+	return controlplane.ReinitReplicationVerificationResult{
+		SystemIdentifier:  verification.SystemIdentifier,
+		Timeline:          verification.Timeline,
+		BackupName:        verification.BackupName,
+		PrimarySlotName:   verification.PrimarySlotName,
+		WALReceiverStatus: verification.WALReceiverStatus,
+		InRecovery:        verification.InRecovery,
+	}, nil
+}
+
 func (daemon *Daemon) reconcileReinit(ctx context.Context, currentPostgres agentmodel.PostgresStatus) {
 	if daemon.pgCtl == nil || !currentPostgres.Managed {
 		return
@@ -194,6 +218,30 @@ func (daemon *Daemon) reconcileReinit(ctx context.Context, currentPostgres agent
 	}
 
 	if currentPostgres.Up {
+		if daemon.config.Reinit == nil || daemon.config.Reinit.WALG == nil {
+			return
+		}
+
+		verifier := &localReinitReplicationVerifier{
+			address: currentPostgres.Address,
+			walg:    *daemon.config.Reinit.WALG,
+		}
+		execution, err := engine.ExecuteReinitVerifyReplication(ctx, daemon.config.Node.Name, verifier)
+		if err != nil {
+			if !errors.Is(err, controlplane.ErrReinitExecutionRequired) &&
+				!errors.Is(err, controlplane.ErrReinitExecutionChanged) &&
+				!errors.Is(err, controlplane.ErrReinitReplicationNotHealthy) {
+				daemon.logger.WarnContext(ctx, "reinit replication verification failed",
+					daemon.logArgs("agent", slog.String("error", err.Error()))...)
+			}
+			return
+		}
+
+		daemon.logger.InfoContext(ctx, "reinit replication verified",
+			daemon.logArgs("agent",
+				slog.String("backup_name", execution.WALGBackupName),
+				slog.String("primary_slot_name", execution.PrimarySlotName),
+				slog.String("wal_receiver_status", execution.WALReceiverStatus))...)
 		return
 	}
 
