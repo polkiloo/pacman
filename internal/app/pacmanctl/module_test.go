@@ -18,9 +18,10 @@ func TestModuleBuildsCommandGraph(t *testing.T) {
 	type resolved struct {
 		fx.In
 
-		App    *App
-		Logger *slog.Logger
-		Args   []string `name:"args"`
+		App       *App
+		Logger    *slog.Logger
+		CommandIO *commandIO
+		Args      []string `name:"args"`
 	}
 
 	var deps resolved
@@ -40,6 +41,10 @@ func TestModuleBuildsCommandGraph(t *testing.T) {
 
 	if deps.Logger == nil {
 		t.Fatal("expected logger to be populated")
+	}
+
+	if deps.CommandIO == nil {
+		t.Fatal("expected command I/O to be populated")
 	}
 
 	if len(deps.Args) != 1 || deps.Args[0] != "-version" {
