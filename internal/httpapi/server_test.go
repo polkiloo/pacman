@@ -1834,6 +1834,14 @@ func TestGetClusterStatusMemberFullFields(t *testing.T) {
 		Phase:        cluster.ClusterPhaseHealthy,
 		CurrentEpoch: 1,
 		ObservedAt:   now,
+		Reinit: &cluster.ReinitStatus{
+			OperationID: "reinit-1",
+			State:       cluster.ReinitStateCompleted,
+			LastResult:  cluster.OperationResultSucceeded,
+			FromMember:  "alpha-1",
+			ToMember:    "alpha-2",
+			UpdatedAt:   now,
+		},
 		Members: []cluster.MemberStatus{
 			{
 				Name:        "alpha-2",
@@ -1848,8 +1856,17 @@ func TestGetClusterStatusMemberFullFields(t *testing.T) {
 				Priority:    50,
 				NoFailover:  true,
 				NeedsRejoin: false,
-				Tags:        map[string]any{"zone": "us-east-1a"},
-				LastSeenAt:  now,
+				Reinit: &cluster.ReinitStatus{
+					OperationID: "reinit-1",
+					State:       cluster.ReinitStateCompleted,
+					LastResult:  cluster.OperationResultSucceeded,
+					FromMember:  "alpha-1",
+					ToMember:    "alpha-2",
+					Message:     "reinit of alpha-2 from alpha-1 completed",
+					UpdatedAt:   now,
+				},
+				Tags:       map[string]any{"zone": "us-east-1a"},
+				LastSeenAt: now,
 			},
 		},
 	}
@@ -1867,6 +1884,10 @@ func TestGetClusterStatusMemberFullFields(t *testing.T) {
 
 	if len(body.Members) != 1 {
 		t.Fatalf("members: got %d, want 1", len(body.Members))
+	}
+
+	if body.Reinit == nil || body.Reinit.OperationID != "reinit-1" || body.Reinit.State != "completed" || body.Reinit.LastResult != "succeeded" {
+		t.Fatalf("unexpected cluster reinit status: %+v", body.Reinit)
 	}
 
 	m := body.Members[0]
@@ -1889,6 +1910,10 @@ func TestGetClusterStatusMemberFullFields(t *testing.T) {
 
 	if !m.NoFailover {
 		t.Error("noFailover: got false, want true")
+	}
+
+	if m.Reinit == nil || m.Reinit.OperationID != "reinit-1" || m.Reinit.State != "completed" || m.Reinit.LastResult != "succeeded" || m.Reinit.Message == "" {
+		t.Fatalf("unexpected member reinit status: %+v", m.Reinit)
 	}
 }
 

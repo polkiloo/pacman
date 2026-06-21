@@ -33,6 +33,8 @@ components:
           $ref: '#/components/schemas/Operation'
         scheduledSwitchover:
           $ref: '#/components/schemas/ScheduledSwitchover'
+        reinit:
+          $ref: '#/components/schemas/ReinitStatus'
         members:
           type: array
           items:
@@ -158,10 +160,51 @@ components:
           type: boolean
         needsRejoin:
           type: boolean
+        reinit:
+          $ref: '#/components/schemas/ReinitStatus'
         tags:
           type: object
           additionalProperties: true
         lastSeenAt:
+          type: string
+          format: date-time
+    ReinitStatus:
+      type: object
+      required:
+        - operationId
+        - state
+        - lastResult
+        - updatedAt
+      properties:
+        operationId:
+          type: string
+        state:
+          type: string
+          enum:
+            - accepted
+            - stopping_postgres
+            - archiving_data_dir
+            - restoring_backup
+            - rendering_recovery_config
+            - restarting_standby
+            - verifying_replication
+            - completed
+            - failed
+            - cancelled
+        lastResult:
+          type: string
+          enum:
+            - pending
+            - succeeded
+            - failed
+            - cancelled
+        fromMember:
+          type: string
+        toMember:
+          type: string
+        message:
+          type: string
+        updatedAt:
           type: string
           format: date-time
     NodeStatus:

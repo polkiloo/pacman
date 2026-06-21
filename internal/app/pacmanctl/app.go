@@ -810,6 +810,7 @@ func renderClusterStatusText(writer io.Writer, status clusterStatusResponse) err
 	fmt.Fprintf(tab, "Maintenance:\t%s\n", formatMaintenance(status.Maintenance))
 	fmt.Fprintf(tab, "Active Operation:\t%s\n", formatOperation(status.ActiveOperation))
 	fmt.Fprintf(tab, "Scheduled Switchover:\t%s\n", formatScheduledSwitchover(status.ScheduledSwitchover))
+	fmt.Fprintf(tab, "Reinit:\t%s\n", formatReinitStatus(status.Reinit))
 	fmt.Fprintf(tab, "Members:\t%d\n", len(status.Members))
 
 	if err := tab.Flush(); err != nil {
@@ -1081,14 +1082,14 @@ func renderDiagnosticsText(writer io.Writer, summary diagnosticsSummaryJSON) err
 
 func writeMembersTable(writer io.Writer, members []memberStatusJSON) error {
 	tab := tabwriter.NewWriter(writer, 0, 0, 2, ' ', 0)
-	if _, err := fmt.Fprintln(tab, "NAME\tROLE\tSTATE\tHEALTHY\tLEADER\tTIMELINE\tLAG BYTES\tLAST SEEN"); err != nil {
+	if _, err := fmt.Fprintln(tab, "NAME\tROLE\tSTATE\tHEALTHY\tLEADER\tTIMELINE\tLAG BYTES\tREINIT STATE\tREINIT RESULT\tLAST SEEN"); err != nil {
 		return err
 	}
 
 	for _, member := range members {
 		if _, err := fmt.Fprintf(
 			tab,
-			"%s\t%s\t%s\t%t\t%t\t%s\t%s\t%s\n",
+			"%s\t%s\t%s\t%t\t%t\t%s\t%s\t%s\t%s\t%s\n",
 			orDash(member.Name),
 			orDash(member.Role),
 			orDash(member.State),
@@ -1096,6 +1097,8 @@ func writeMembersTable(writer io.Writer, members []memberStatusJSON) error {
 			member.Leader,
 			formatOptionalInt64(member.Timeline),
 			formatOptionalInt64(member.LagBytes),
+			reinitState(member.Reinit),
+			reinitResult(member.Reinit),
 			formatTime(member.LastSeenAt),
 		); err != nil {
 			return err
@@ -1165,6 +1168,40 @@ func formatScheduledSwitchover(sw *scheduledSwitchoverJSON) string {
 		parts = append(parts, "to="+sw.To)
 	}
 	return strings.Join(parts, " ")
+}
+
+func formatReinitStatus(status *reinitStatusJSON) string {
+	if status == nil {
+		return "-"
+	}
+
+	parts := []string{orDash(status.State), "result=" + orDash(status.LastResult)}
+	if status.ToMember != "" {
+		parts = append(parts, "to="+status.ToMember)
+	}
+	if status.FromMember != "" {
+		parts = append(parts, "from="+status.FromMember)
+	}
+	if status.OperationID != "" {
+		parts = append(parts, "operation="+status.OperationID)
+	}
+	return strings.Join(parts, " ")
+}
+
+func reinitState(status *reinitStatusJSON) string {
+	if status == nil {
+		return "-"
+	}
+
+	return orDash(status.State)
+}
+
+func reinitResult(status *reinitStatusJSON) string {
+	if status == nil {
+		return "-"
+	}
+
+	return orDash(status.LastResult)
 }
 
 func formatTime(value time.Time) string {

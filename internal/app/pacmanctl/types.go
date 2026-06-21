@@ -8,6 +8,7 @@ type membersResponse = nativeapi.MembersResponse
 type historyResponse = nativeapi.HistoryResponse
 type maintenanceModeUpdateRequestJSON = nativeapi.MaintenanceModeUpdateRequest
 type memberStatusJSON = nativeapi.MemberStatus
+type reinitStatusJSON = nativeapi.ReinitStatus
 type historyEntryJSON = nativeapi.HistoryEntry
 type maintenanceModeStatusJSON = nativeapi.MaintenanceModeStatus
 type operationJSON = nativeapi.Operation
