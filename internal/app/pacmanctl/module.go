@@ -18,7 +18,10 @@ func Module(processName string, args []string, stdout, stderr io.Writer) fx.Opti
 		"pacmanctl",
 		di.ProvideBase(args, stdout, stderr),
 		logging.Module(processName),
-		fx.Provide(New),
+		fx.Provide(
+			newCommandIO,
+			New,
+		),
 		fx.Invoke(registerRunner),
 	)
 }
