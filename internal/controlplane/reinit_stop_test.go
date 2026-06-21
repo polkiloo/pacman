@@ -70,6 +70,14 @@ func TestMemoryStateStoreExecuteReinitStopPostgresStopsTargetBeforeRestore(t *te
 	if history := store.History(); len(history) != 0 {
 		t.Fatalf("expected stopped reinit to keep operation active without history, got %+v", history)
 	}
+
+	status, ok := store.ClusterStatus()
+	if !ok {
+		t.Fatal("expected cluster status after stopped reinit target")
+	}
+	assertReinitStatus(t, status.Reinit, intent.Operation.ID, cluster.ReinitStateStoppingPostgres, cluster.OperationResultPending, "alpha-1", "alpha-2")
+	member := memberStatusByName(t, status.Members, "alpha-2")
+	assertReinitStatus(t, member.Reinit, intent.Operation.ID, cluster.ReinitStateStoppingPostgres, cluster.OperationResultPending, "alpha-1", "alpha-2")
 }
 
 func TestMemoryStateStoreExecuteReinitStopPostgresRejectsBlockedExecution(t *testing.T) {

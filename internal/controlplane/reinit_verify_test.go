@@ -9,7 +9,7 @@ import (
 	"github.com/polkiloo/pacman/internal/cluster"
 )
 
-func TestMemoryStateStoreExecuteReinitVerifyReplicationKeepsOperationRunning(t *testing.T) {
+func TestMemoryStateStoreExecuteReinitVerifyReplicationRecordsHistory(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, time.June, 18, 10, 0, 0, 0, time.UTC)
@@ -38,6 +38,9 @@ func TestMemoryStateStoreExecuteReinitVerifyReplicationKeepsOperationRunning(t *
 	if execution.WALGBackupName != "LATEST" || execution.PrimarySlotName != "alpha_2" || execution.WALReceiverStatus != "streaming" || execution.SystemIdentifier != "sys-alpha" || execution.Timeline != 21 {
 		t.Fatalf("unexpected verification metadata: %+v", execution)
 	}
+	if execution.Operation.State != cluster.OperationStateCompleted || execution.Operation.Result != cluster.OperationResultSucceeded || execution.Operation.CompletedAt.IsZero() {
+		t.Fatalf("expected completed reinit operation, got %+v", execution.Operation)
+	}
 	if len(verifier.requests) != 1 {
 		t.Fatalf("expected one reinit verification request, got %+v", verifier.requests)
 	}
@@ -46,19 +49,28 @@ func TestMemoryStateStoreExecuteReinitVerifyReplicationKeepsOperationRunning(t *
 		t.Fatalf("unexpected reinit verification request: %+v", request)
 	}
 
-	active, ok := store.ActiveOperation()
+	if _, ok := store.ActiveOperation(); ok {
+		t.Fatal("expected completed reinit to clear active operation")
+	}
+
+	history := store.History()
+	if len(history) != 1 {
+		t.Fatalf("expected one completed reinit history entry, got %+v", history)
+	}
+	if history[0].Kind != cluster.OperationKindReinit || history[0].FromMember != "alpha-1" || history[0].ToMember != "alpha-2" || history[0].Result != cluster.OperationResultSucceeded {
+		t.Fatalf("unexpected completed reinit history entry: %+v", history[0])
+	}
+	if history[0].Timeline != 21 {
+		t.Fatalf("unexpected completed reinit history timeline: %+v", history[0])
+	}
+
+	status, ok := store.ClusterStatus()
 	if !ok {
-		t.Fatal("expected active reinit operation after verification")
+		t.Fatal("expected cluster status after completed reinit")
 	}
-	if active.Kind != cluster.OperationKindReinit || active.State != cluster.OperationStateRunning || active.Result != cluster.OperationResultPending {
-		t.Fatalf("unexpected active reinit operation after verification: %+v", active)
-	}
-	if active.Message != reinitReplicationVerificationCompletedMessage("alpha-2", "alpha-1") {
-		t.Fatalf("unexpected reinit verification message: %+v", active)
-	}
-	if history := store.History(); len(history) != 0 {
-		t.Fatalf("expected verified reinit to keep operation active without history, got %+v", history)
-	}
+	assertReinitStatus(t, status.Reinit, execution.Operation.ID, cluster.ReinitStateCompleted, cluster.OperationResultSucceeded, "alpha-1", "alpha-2")
+	target := memberStatusByName(t, status.Members, "alpha-2")
+	assertReinitStatus(t, target.Reinit, execution.Operation.ID, cluster.ReinitStateCompleted, cluster.OperationResultSucceeded, "alpha-1", "alpha-2")
 }
 
 func TestMemoryStateStoreExecuteReinitVerifyReplicationRejectsBlockedExecution(t *testing.T) {
@@ -153,4 +165,27 @@ func TestMemoryStateStoreExecuteReinitVerifyReplicationRejectsBlockedExecution(t
 			}
 		})
 	}
+}
+
+func assertReinitStatus(t *testing.T, status *cluster.ReinitStatus, operationID string, state cluster.ReinitState, result cluster.OperationResult, fromMember, toMember string) {
+	t.Helper()
+
+	if status == nil {
+		t.Fatal("expected reinit status")
+	}
+	if status.OperationID != operationID || status.State != state || status.LastResult != result || status.FromMember != fromMember || status.ToMember != toMember || status.UpdatedAt.IsZero() {
+		t.Fatalf("unexpected reinit status: %+v", status)
+	}
+}
+
+func memberStatusByName(t *testing.T, members []cluster.MemberStatus, name string) cluster.MemberStatus {
+	t.Helper()
+
+	for _, member := range members {
+		if member.Name == name {
+			return member
+		}
+	}
+	t.Fatalf("member %q not found in %+v", name, members)
+	return cluster.MemberStatus{}
 }
