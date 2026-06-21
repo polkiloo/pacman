@@ -121,7 +121,8 @@ func beginReinitPostgresStop(operation cluster.Operation, startedAt time.Time) c
 
 func canBeginReinitPostgresStop(operation cluster.Operation) bool {
 	return operation.State == cluster.OperationStateAccepted ||
-		operation.Message == reinitPostgresStopRunningMessage(operation.ToMember)
+		(operation.State == cluster.OperationStateRunning &&
+			operation.Message == reinitPostgresStopRunningMessage(operation.ToMember))
 }
 
 func buildReinitPostgresStopRequest(prepared preparedReinitExecution) ReinitPostgresStopRequest {

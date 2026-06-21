@@ -174,7 +174,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] verify system identifier, timeline, restored backup metadata, slot attachment, and streaming health after reinit
 - [x] record reinit progress and result in operation journal / history
 - [x] expose reinit state and last result in member / cluster status
-- [ ] add unit tests for reinit validation, planning, and operation-state transitions
+- [x] add unit tests for reinit validation, planning, and operation-state transitions
 - [x] add integration tests for WAL-G-driven reinit and post-restore replication recovery
 - [ ] create Jepsen tests for full replica reinit procedure coverage
 
