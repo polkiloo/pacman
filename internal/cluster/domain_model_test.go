@@ -25,6 +25,7 @@ func TestDomainModelRegistriesContainOnlyUniqueValidValues(t *testing.T) {
 	assertDomainRegistry(t, "operation kinds", OperationKinds())
 	assertDomainRegistry(t, "operation states", OperationStates())
 	assertDomainRegistry(t, "operation results", OperationResults())
+	assertDomainRegistry(t, "reinit states", ReinitStates())
 	assertDomainRegistry(t, "failover states", FailoverStates())
 	assertDomainRegistry(t, "switchover states", SwitchoverStates())
 	assertDomainRegistry(t, "rejoin strategies", RejoinStrategies())
@@ -99,6 +100,9 @@ func TestDomainModelClonePreservesNilMutableFields(t *testing.T) {
 	}
 	if statusClone.ScheduledSwitchover != nil {
 		t.Fatalf("expected nil scheduled switchover to stay nil, got %+v", statusClone.ScheduledSwitchover)
+	}
+	if statusClone.Reinit != nil {
+		t.Fatalf("expected nil reinit status to stay nil, got %+v", statusClone.Reinit)
 	}
 	if statusClone.Members != nil {
 		t.Fatalf("expected nil member statuses to stay nil, got %+v", statusClone.Members)
