@@ -16,6 +16,7 @@ type ClusterStatusResponse struct {
 	Maintenance         MaintenanceModeStatus `json:"maintenance"`
 	ActiveOperation     *Operation            `json:"activeOperation,omitempty"`
 	ScheduledSwitchover *ScheduledSwitchover  `json:"scheduledSwitchover,omitempty"`
+	Reinit              *ReinitStatus         `json:"reinit,omitempty"`
 	Members             []MemberStatus        `json:"members"`
 }
 
@@ -33,8 +34,19 @@ type MemberStatus struct {
 	Priority    int            `json:"priority,omitempty"`
 	NoFailover  bool           `json:"noFailover,omitempty"`
 	NeedsRejoin bool           `json:"needsRejoin,omitempty"`
+	Reinit      *ReinitStatus  `json:"reinit,omitempty"`
 	Tags        map[string]any `json:"tags,omitempty"`
 	LastSeenAt  time.Time      `json:"lastSeenAt"`
+}
+
+type ReinitStatus struct {
+	OperationID string    `json:"operationId"`
+	State       string    `json:"state"`
+	LastResult  string    `json:"lastResult"`
+	FromMember  string    `json:"fromMember,omitempty"`
+	ToMember    string    `json:"toMember,omitempty"`
+	Message     string    `json:"message,omitempty"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 type MaintenanceModeStatus struct {

@@ -103,6 +103,7 @@ type MemberStatus struct {
 	Priority    int
 	NoFailover  bool
 	NeedsRejoin bool
+	Reinit      *ReinitStatus
 	Tags        map[string]any
 	LastSeenAt  time.Time
 }
@@ -153,6 +154,12 @@ func (status MemberStatus) Validate() error {
 		return ErrMemberPriorityNegative
 	}
 
+	if status.Reinit != nil {
+		if err := status.Reinit.Validate(); err != nil {
+			return err
+		}
+	}
+
 	if status.LastSeenAt.IsZero() {
 		return ErrMemberLastSeenAtRequired
 	}
@@ -163,6 +170,7 @@ func (status MemberStatus) Validate() error {
 // Clone returns a copy of the status with detached mutable fields.
 func (status MemberStatus) Clone() MemberStatus {
 	clone := status
+	clone.Reinit = cloneReinitStatus(status.Reinit)
 	clone.Tags = cloneMemberTags(status.Tags)
 
 	return clone

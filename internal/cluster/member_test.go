@@ -323,6 +323,13 @@ func TestMemberStatusCloneCopiesMutableFields(t *testing.T) {
 		Tags: map[string]any{
 			"zone": "a",
 		},
+		Reinit: &ReinitStatus{
+			OperationID: "reinit-1",
+			State:       ReinitStateCompleted,
+			LastResult:  OperationResultSucceeded,
+			ToMember:    "alpha-1",
+			UpdatedAt:   time.Now().UTC(),
+		},
 	}
 
 	clone := original.Clone()
@@ -340,5 +347,10 @@ func TestMemberStatusCloneCopiesMutableFields(t *testing.T) {
 
 	if _, ok := original.Tags["rack"]; ok {
 		t.Fatal("expected clone tag mutation to stay isolated from original")
+	}
+
+	clone.Reinit.State = ReinitStateFailed
+	if got, want := original.Reinit.State, ReinitStateCompleted; got != want {
+		t.Fatalf("original reinit state was mutated: got %q, want %q", got, want)
 	}
 }

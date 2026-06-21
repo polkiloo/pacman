@@ -354,6 +354,7 @@ func (store *MemoryStateStore) aggregateClusterStatusLocked(now time.Time) clust
 		Maintenance:         store.maintenance,
 		ActiveOperation:     cloneOperationValue(store.activeOperation),
 		ScheduledSwitchover: scheduledSwitchoverOperation(store.activeOperation),
+		Reinit:              store.latestReinitStatusLocked(),
 		Members:             members,
 		ObservedAt:          now,
 	}

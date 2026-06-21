@@ -172,10 +172,11 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] recreate standby / replication configuration after WAL-G restore
 - [x] start PostgreSQL as a standby after WAL-G restore completes and WAL replay can catch up
 - [x] verify system identifier, timeline, restored backup metadata, slot attachment, and streaming health after reinit
-- [ ] record reinit progress and result in operation journal / history
-- [ ] expose reinit state and last result in member / cluster status
+- [x] record reinit progress and result in operation journal / history
+- [x] expose reinit state and last result in member / cluster status
 - [ ] add unit tests for reinit validation, planning, and operation-state transitions
 - [x] add integration tests for WAL-G-driven reinit and post-restore replication recovery
+- [ ] create Jepsen tests for full replica reinit procedure coverage
 
 ---
 

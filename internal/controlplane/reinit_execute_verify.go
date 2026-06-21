@@ -145,13 +145,12 @@ func (store *MemoryStateStore) publishReinitReplicationVerified(prepared prepare
 		return ReinitExecution{}, err
 	}
 
-	updatedOperation := running.Clone()
-	updatedOperation.Message = reinitReplicationVerificationCompletedMessage(prepared.validation.Target.Name, prepared.validation.CurrentPrimary.Name)
-	store.activeOperation = &updatedOperation
+	updatedOperation := completeReinitExecution(running, prepared.executedAt, prepared.validation.Target.Name, prepared.validation.CurrentPrimary.Name)
+	store.journalOperationLocked(updatedOperation, prepared.executedAt)
 	store.refreshSourceOfTruthLocked(prepared.executedAt)
 	store.mu.Unlock()
 
-	if err := store.persistActiveOperation(context.Background(), updatedOperation); err != nil {
+	if err := store.persistJournaledOperation(context.Background(), updatedOperation); err != nil {
 		return ReinitExecution{}, err
 	}
 
@@ -176,6 +175,16 @@ func (store *MemoryStateStore) publishReinitReplicationVerified(prepared prepare
 		WALReceiverStatus:   prepared.verification.WALReceiverStatus,
 		ExecutedAt:          prepared.executedAt,
 	}.Clone(), nil
+}
+
+func completeReinitExecution(operation cluster.Operation, completedAt time.Time, member, currentPrimary string) cluster.Operation {
+	updated := operation.Clone()
+	updated.State = cluster.OperationStateCompleted
+	updated.CompletedAt = completedAt
+	updated.Result = cluster.OperationResultSucceeded
+	updated.Message = reinitCompletedMessage(member, currentPrimary)
+
+	return updated
 }
 
 func assessReinitReplicationVerificationReasons(prepared preparedReinitExecution) []string {
@@ -242,6 +251,6 @@ func reinitReplicationVerificationRunningMessage(member, currentPrimary string) 
 	return "verifying reinit target " + member + " is streaming from " + currentPrimary
 }
 
-func reinitReplicationVerificationCompletedMessage(member, currentPrimary string) string {
-	return "reinit target " + member + " verified as a streaming standby following " + currentPrimary
+func reinitCompletedMessage(member, currentPrimary string) string {
+	return "reinit completed for " + member + " following " + currentPrimary
 }

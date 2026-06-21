@@ -73,6 +73,11 @@ func buildClusterStatusResponse(status cluster.ClusterStatus) clusterStatusRespo
 		resp.ScheduledSwitchover = &sw
 	}
 
+	if status.Reinit != nil {
+		reinit := buildReinitStatusJSON(*status.Reinit)
+		resp.Reinit = &reinit
+	}
+
 	return resp
 }
 
@@ -100,8 +105,31 @@ func buildMemberStatusJSON(m cluster.MemberStatus) memberStatusJSON {
 		Priority:    m.Priority,
 		NoFailover:  m.NoFailover,
 		NeedsRejoin: m.NeedsRejoin,
+		Reinit:      buildOptionalReinitStatusJSON(m.Reinit),
 		Tags:        m.Tags,
 		LastSeenAt:  m.LastSeenAt,
+	}
+}
+
+func buildOptionalReinitStatusJSON(status *cluster.ReinitStatus) *reinitStatusJSON {
+	if status == nil {
+		return nil
+	}
+
+	reinit := buildReinitStatusJSON(*status)
+
+	return &reinit
+}
+
+func buildReinitStatusJSON(status cluster.ReinitStatus) reinitStatusJSON {
+	return reinitStatusJSON{
+		OperationID: status.OperationID,
+		State:       string(status.State),
+		LastResult:  string(status.LastResult),
+		FromMember:  status.FromMember,
+		ToMember:    status.ToMember,
+		Message:     status.Message,
+		UpdatedAt:   status.UpdatedAt,
 	}
 }
 

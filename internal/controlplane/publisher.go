@@ -502,6 +502,8 @@ func (store *MemoryStateStore) memberLocked(nodeName string) (cluster.MemberStat
 		member = mergeDesiredMemberPolicy(member, spec)
 	}
 
+	member.Reinit = store.reinitStatusForMemberLocked(member.Name)
+
 	if member.Role == "" {
 		member.Role = cluster.MemberRoleUnknown
 	}

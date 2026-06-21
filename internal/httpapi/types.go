@@ -5,6 +5,7 @@ import nativeapi "github.com/polkiloo/pacman/internal/api/native"
 type clusterStatusResponse = nativeapi.ClusterStatusResponse
 type memberStatusJSON = nativeapi.MemberStatus
 type maintenanceModeStatusJSON = nativeapi.MaintenanceModeStatus
+type reinitStatusJSON = nativeapi.ReinitStatus
 type operationJSON = nativeapi.Operation
 type scheduledSwitchoverJSON = nativeapi.ScheduledSwitchover
 type membersResponse = nativeapi.MembersResponse

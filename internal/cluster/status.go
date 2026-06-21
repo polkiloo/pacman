@@ -17,6 +17,7 @@ type ClusterStatus struct {
 	Maintenance         MaintenanceModeStatus
 	ActiveOperation     *Operation
 	ScheduledSwitchover *ScheduledSwitchover
+	Reinit              *ReinitStatus
 	Members             []MemberStatus
 	ObservedAt          time.Time
 }
@@ -56,6 +57,12 @@ func (status ClusterStatus) Validate() error {
 		}
 	}
 
+	if status.Reinit != nil {
+		if err := status.Reinit.Validate(); err != nil {
+			return fmt.Errorf("reinit status is invalid: %w", err)
+		}
+	}
+
 	if status.ObservedAt.IsZero() {
 		return ErrClusterObservedAtRequired
 	}
@@ -74,6 +81,7 @@ func (status ClusterStatus) Clone() ClusterStatus {
 	clone := status
 	clone.ActiveOperation = cloneOperation(status.ActiveOperation)
 	clone.ScheduledSwitchover = cloneScheduledSwitchover(status.ScheduledSwitchover)
+	clone.Reinit = cloneReinitStatus(status.Reinit)
 	clone.Members = cloneMemberStatuses(status.Members)
 
 	return clone
@@ -167,6 +175,16 @@ func cloneScheduledSwitchover(scheduled *ScheduledSwitchover) *ScheduledSwitchov
 	}
 
 	cloned := scheduled.Clone()
+
+	return &cloned
+}
+
+func cloneReinitStatus(status *ReinitStatus) *ReinitStatus {
+	if status == nil {
+		return nil
+	}
+
+	cloned := status.Clone()
 
 	return &cloned
 }
