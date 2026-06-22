@@ -149,6 +149,16 @@ func TestValidateNemesisSchedule(t *testing.T) {
 `,
 		},
 		{
+			name:     "accepts replica reinit DCS partition primary result",
+			workload: "append-reinit",
+			nemesis:  "reinit-replica-dcs-partition-primary",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :reinit-replica-dcs-partition-primary :action :start :source "alpha-1" :target "alpha-2"}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-dcs-partition-primary :action :heal :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-dcs-partition-primary :action :stop :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+`,
+		},
+		{
 			name:     "accepts replica reinit concurrent request result",
 			workload: "append-reinit",
 			nemesis:  "reinit-replica-concurrent-request",

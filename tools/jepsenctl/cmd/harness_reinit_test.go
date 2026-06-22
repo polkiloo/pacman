@@ -206,6 +206,73 @@ func TestReinitTargetMisleadingHealthyRequiresMissingOperationMetadata(t *testin
 	}
 }
 
+func TestReinitPrimaryDCSPressureRejectsTargetPromotionAndAcceptsSafeFailover(t *testing.T) {
+	t.Parallel()
+
+	status := clusterStatusJSONWithPrimary("alpha-3")
+	var safe clusterStatus
+	if err := json.Unmarshal([]byte(status), &safe); err != nil {
+		t.Fatalf("decode cluster: %v", err)
+	}
+	if reinitTargetPromoted(safe, "alpha-2") {
+		t.Fatalf("target should not be promoted in safe failover status")
+	}
+	if !reinitSafeFailoverUnderPrimaryDCSPressure(safe, "alpha-1", "alpha-2") {
+		t.Fatalf("expected healthy non-target promotion to be safe")
+	}
+
+	targetPrimary := safe
+	targetPrimary.CurrentPrimary = "alpha-2"
+	for index := range targetPrimary.Members {
+		if targetPrimary.Members[index].Name == "alpha-2" {
+			targetPrimary.Members[index].Role = "primary"
+			targetPrimary.Members[index].State = "running"
+		}
+	}
+	if !reinitTargetPromoted(targetPrimary, "alpha-2") {
+		t.Fatalf("expected target primary status to be unsafe")
+	}
+	if reinitSafeFailoverUnderPrimaryDCSPressure(targetPrimary, "alpha-1", "alpha-2") {
+		t.Fatalf("target promotion must not count as safe failover")
+	}
+
+	sourcePrimary := safe
+	sourcePrimary.CurrentPrimary = "alpha-1"
+	if reinitSafeFailoverUnderPrimaryDCSPressure(sourcePrimary, "alpha-1", "alpha-2") {
+		t.Fatalf("source remaining primary should not count as failover")
+	}
+}
+
+func TestReinitQuorumSideObserverServicesPreferNonSource(t *testing.T) {
+	t.Parallel()
+
+	target, err := resolveJepsenTarget(defaultJepsenTarget)
+	if err != nil {
+		t.Fatalf("resolve target: %v", err)
+	}
+	lab := newHarnessLab(harnessOptions{
+		repoRoot: t.TempDir(),
+		runOptions: runOptions{
+			target: target,
+		},
+	})
+	services := lab.reinitQuorumSideObserverServices(reinitRunContext{
+		SourceService: "pacman-primary",
+		TargetService: "pacman-replica",
+	})
+	if len(services) == 0 {
+		t.Fatalf("expected observer services")
+	}
+	if services[0] == "pacman-primary" {
+		t.Fatalf("source service should not be preferred as first observer: %v", services)
+	}
+	for _, service := range services {
+		if service == "pacman-primary" {
+			t.Fatalf("source service should be excluded from quorum-side observers: %v", services)
+		}
+	}
+}
+
 func TestCheckReinitProcedureWritesNotApplicableAndRejectsInvalidArtifact(t *testing.T) {
 	t.Parallel()
 
@@ -222,7 +289,7 @@ func TestCheckReinitProcedureWritesNotApplicableAndRejectsInvalidArtifact(t *tes
 	}
 
 	writeTestFile(t, filepath.Join(caseDir, reinitCheckerFile), `{"checker":"full-replica-reinit","valid":false}`+"\n")
-	for _, nemesis := range []string{"reinit-replica", "reinit-replica-kill-target", "reinit-replica-kill-source", "reinit-replica-dcs-partition-target", "reinit-replica-concurrent-request", "reinit-replica-after-failover"} {
+	for _, nemesis := range []string{"reinit-replica", "reinit-replica-kill-target", "reinit-replica-kill-source", "reinit-replica-dcs-partition-target", "reinit-replica-dcs-partition-primary", "reinit-replica-concurrent-request", "reinit-replica-after-failover"} {
 		if err := lab.checkReinitProcedure(nemesis, caseDir); err == nil || !strings.Contains(err.Error(), "reinit checker failed") {
 			t.Fatalf("invalid reinit checker error for %s: %v", nemesis, err)
 		}

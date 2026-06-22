@@ -70,6 +70,18 @@ type reinitDCSPartitionTargetProbe struct {
 	Error                         string              `json:"error,omitempty"`
 }
 
+type reinitDCSPartitionPrimaryProbe struct {
+	Valid                             bool                `json:"valid"`
+	SourceService                     string              `json:"sourceService"`
+	DcsServices                       []string            `json:"dcsServices"`
+	ObserverServices                  []string            `json:"observerServices"`
+	Observations                      []reinitObservation `json:"observations"`
+	SafeFailoverObserved              bool                `json:"safeFailoverObserved"`
+	UnsafeTargetPrimaryObservations   []reinitObservation `json:"unsafeTargetPrimaryObservations,omitempty"`
+	UnavailableQuorumSideObservations int                 `json:"unavailableQuorumSideObservations,omitempty"`
+	Error                             string              `json:"error,omitempty"`
+}
+
 func (lab *harnessLab) runReinitReplica(ctx context.Context, caseDir, scheduleFile string, options reinitRunOptions) error {
 	if options.WaitForResult == nil {
 		options.WaitForResult = lab.waitForReinitCompletion

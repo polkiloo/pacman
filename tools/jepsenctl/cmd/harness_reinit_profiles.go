@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -145,6 +146,52 @@ func (lab *harnessLab) reinitReplicaDCSPartitionTarget(ctx context.Context, case
 	})
 }
 
+func (lab *harnessLab) reinitReplicaDCSPartitionPrimary(ctx context.Context, caseDir, scheduleFile string) error {
+	return lab.runReinitReplica(ctx, caseDir, scheduleFile, reinitRunOptions{
+		Nemesis:       "reinit-replica-dcs-partition-primary",
+		Reason:        "jepsen-reinit-dcs-partition-primary",
+		WaitForResult: lab.waitForReinitCompletionOrTerminalFailure,
+		AfterAccepted: func(ctx context.Context, run reinitRunContext) reinitVariantResult {
+			dcsServices := append([]string(nil), lab.cfg.dcsMajorityPartitionServices...)
+			result := reinitVariantResult{Valid: true, Details: map[string]any{
+				"sourceService": run.SourceService,
+				"dcsServices":   dcsServices,
+			}}
+			if run.SourceService == "" {
+				result.Valid = false
+				result.Error = fmt.Sprintf("source service is unknown for %s", run.Source)
+				return result
+			}
+			if len(dcsServices) == 0 {
+				result.Valid = false
+				result.Error = "no DCS services configured for primary partition"
+				return result
+			}
+
+			partitioned := false
+			defer func() {
+				if partitioned {
+					lab.iptablesHeal(ctx, run.SourceService, dcsServices)
+				}
+			}()
+			if err := lab.iptablesPartition(ctx, run.SourceService, dcsServices); err != nil {
+				result.Valid = false
+				result.Error = err.Error()
+				return result
+			}
+			partitioned = true
+
+			probe := lab.observeReinitDCSPartitionPrimary(ctx, run, dcsServices, lab.cfg.nemesisHold)
+			result.Details["dcsPartitionProbe"] = probe
+			if !probe.Valid {
+				result.Valid = false
+				result.Error = probe.Error
+			}
+			return result
+		},
+	})
+}
+
 func (lab *harnessLab) reinitReplicaConcurrentRequest(ctx context.Context, caseDir, scheduleFile string) error {
 	return lab.runReinitReplica(ctx, caseDir, scheduleFile, reinitRunOptions{
 		Nemesis: "reinit-replica-concurrent-request",
@@ -244,6 +291,134 @@ func reinitTargetMisleadingHealthy(status clusterStatus, target, operationID str
 
 func reinitStatusMatchesOperation(status *reinitStatus, operationID string) bool {
 	return status != nil && operationID != "" && status.OperationID == operationID
+}
+
+func (lab *harnessLab) observeReinitDCSPartitionPrimary(ctx context.Context, run reinitRunContext, dcsServices []string, duration time.Duration) reinitDCSPartitionPrimaryProbe {
+	observers := lab.reinitQuorumSideObserverServices(run)
+	probe := reinitDCSPartitionPrimaryProbe{
+		Valid:            true,
+		SourceService:    run.SourceService,
+		DcsServices:      append([]string(nil), dcsServices...),
+		ObserverServices: append([]string(nil), observers...),
+	}
+	deadline := time.Now().Add(maxDuration(duration, lab.cfg.clusterVerifyInterval))
+	successfulObservations := 0
+
+	for {
+		status, service, err := lab.pacmanClusterStatusFromServices(ctx, observers)
+		observation := reinitObservation{
+			ObservedAt: time.Now().UTC().Format(time.RFC3339),
+			Service:    service,
+		}
+		if err != nil {
+			observation.Error = err.Error()
+			probe.UnavailableQuorumSideObservations++
+		} else {
+			successfulObservations++
+			observation.ClusterPhase = status.Phase
+			observation.CurrentPrimary = status.CurrentPrimary
+			observation.ClusterReinit = status.Reinit
+			for _, member := range status.Members {
+				if member.Name == run.Target {
+					observation.TargetMember = member
+					observation.TargetHealthy = member.Healthy
+					observation.TargetStreaming = member.Role == "replica" && member.State == "streaming"
+					break
+				}
+			}
+			if reinitTargetPromoted(status, run.Target) {
+				probe.UnsafeTargetPrimaryObservations = append(probe.UnsafeTargetPrimaryObservations, observation)
+			}
+			if reinitSafeFailoverUnderPrimaryDCSPressure(status, run.Source, run.Target) {
+				probe.SafeFailoverObserved = true
+			}
+		}
+		probe.Observations = append(probe.Observations, observation)
+
+		if !time.Now().Before(deadline) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			probe.Valid = false
+			probe.Error = ctx.Err().Error()
+			return probe
+		case <-time.After(lab.cfg.clusterVerifyInterval):
+		}
+	}
+
+	if successfulObservations == 0 {
+		probe.Valid = false
+		probe.Error = "no successful quorum-side cluster status observations while primary was DCS-isolated"
+		return probe
+	}
+	if len(probe.UnsafeTargetPrimaryObservations) > 0 {
+		probe.Valid = false
+		probe.Error = "reinit target became primary while source primary was DCS-isolated"
+	}
+	return probe
+}
+
+func (lab *harnessLab) reinitQuorumSideObserverServices(run reinitRunContext) []string {
+	seen := make(map[string]struct{})
+	var services []string
+	add := func(service string) {
+		if service == "" || service == run.SourceService {
+			return
+		}
+		if _, ok := seen[service]; ok {
+			return
+		}
+		seen[service] = struct{}{}
+		services = append(services, service)
+	}
+	for _, node := range lab.options.target.DataNodes {
+		add(node.Service)
+	}
+	return services
+}
+
+func (lab *harnessLab) pacmanClusterStatusFromServices(ctx context.Context, services []string) (clusterStatus, string, error) {
+	var lastErr error
+	for _, service := range services {
+		text, err := lab.clusterStatusJSON(ctx, service)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var status clusterStatus
+		if err := json.Unmarshal([]byte(text), &status); err != nil {
+			lastErr = err
+			continue
+		}
+		return status, service, nil
+	}
+	return clusterStatus{}, "", lastErr
+}
+
+func reinitTargetPromoted(status clusterStatus, target string) bool {
+	if status.CurrentPrimary == target {
+		return true
+	}
+	for _, member := range status.Members {
+		if member.Name == target {
+			return member.Role == "primary"
+		}
+	}
+	return false
+}
+
+func reinitSafeFailoverUnderPrimaryDCSPressure(status clusterStatus, source, target string) bool {
+	if status.CurrentPrimary == "" || status.CurrentPrimary == source || status.CurrentPrimary == target {
+		return false
+	}
+	for _, member := range status.Members {
+		if member.Name != status.CurrentPrimary {
+			continue
+		}
+		return member.Healthy && member.Role == "primary" && member.State == "running"
+	}
+	return false
 }
 
 func (lab *harnessLab) reinitReplicaAfterFailover(ctx context.Context, caseDir, scheduleFile string) error {
