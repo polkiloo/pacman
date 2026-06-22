@@ -136,6 +136,9 @@ func TestCampaignCasesExcludesOptInProfilesFromNightly(t *testing.T) {
 	if strings.Contains(cases, "append-failover:primary-dcs-partition") {
 		t.Fatalf("nightly cases included unsafe primary DCS partition profile: %s", cases)
 	}
+	if !strings.Contains(cases, "append-reinit:reinit-replica") {
+		t.Fatalf("nightly cases did not include full replica reinit profile: %s", cases)
+	}
 
 	spec, err := resolveCaseSpec("append-failover-primary-dcs-partition")
 	if err != nil {

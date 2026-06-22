@@ -109,6 +109,108 @@ func TestValidateNemesisSchedule(t *testing.T) {
 `,
 		},
 		{
+			name:     "accepts replica reinit result",
+			workload: "append-reinit",
+			nemesis:  "reinit-replica",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :reinit-replica :action :start :source "alpha-1" :target "alpha-2"}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica :action :heal :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica :action :stop :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+`,
+		},
+		{
+			name:     "accepts replica reinit kill target result",
+			workload: "append-reinit",
+			nemesis:  "reinit-replica-kill-target",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :reinit-replica-kill-target :action :start :source "alpha-1" :target "alpha-2"}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-kill-target :action :heal :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-kill-target :action :stop :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+`,
+		},
+		{
+			name:     "accepts replica reinit kill source result",
+			workload: "append-reinit",
+			nemesis:  "reinit-replica-kill-source",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :reinit-replica-kill-source :action :start :source "alpha-1" :target "alpha-2"}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-kill-source :action :heal :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-kill-source :action :stop :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+`,
+		},
+		{
+			name:     "accepts replica reinit DCS partition target result",
+			workload: "append-reinit",
+			nemesis:  "reinit-replica-dcs-partition-target",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :reinit-replica-dcs-partition-target :action :start :source "alpha-1" :target "alpha-2"}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-dcs-partition-target :action :heal :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-dcs-partition-target :action :stop :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+`,
+		},
+		{
+			name:     "accepts replica reinit DCS partition primary result",
+			workload: "append-reinit",
+			nemesis:  "reinit-replica-dcs-partition-primary",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :reinit-replica-dcs-partition-primary :action :start :source "alpha-1" :target "alpha-2"}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-dcs-partition-primary :action :heal :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-dcs-partition-primary :action :stop :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+`,
+		},
+		{
+			name:     "accepts repeated replica reinit steps",
+			workload: "append-reinit",
+			nemesis:  "reinit-replica-repeated",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :reinit-replica-repeated :action :start :source "alpha-1" :target "alpha-2"}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-repeated :action :step :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:03Z" :nemesis :reinit-replica-repeated :action :step :source "alpha-1" :target "alpha-3" :operation-id "reinit-2" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:04Z" :nemesis :reinit-replica-repeated :action :heal :source "alpha-1" :target "alpha-3" :operation-id "reinit-2" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:04Z" :nemesis :reinit-replica-repeated :action :stop :source "alpha-1" :target "alpha-3" :operation-id "reinit-2" :exit-status 0 :result :ok}
+`,
+		},
+		{
+			name:     "accepts lagging replica reinit result",
+			workload: "append-reinit",
+			nemesis:  "reinit-replica-with-lag",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :reinit-replica-with-lag :action :start :source "alpha-1" :target "alpha-2"}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-with-lag :action :heal :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-with-lag :action :stop :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+`,
+		},
+		{
+			name:     "accepts WAL-G fetch failure reinit result",
+			workload: "append-reinit",
+			nemesis:  "reinit-replica-walg-fetch-failure",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :reinit-replica-walg-fetch-failure :action :start :source "alpha-1" :target "alpha-2"}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-walg-fetch-failure :action :heal :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-walg-fetch-failure :action :stop :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+`,
+		},
+		{
+			name:     "accepts replica reinit concurrent request result",
+			workload: "append-reinit",
+			nemesis:  "reinit-replica-concurrent-request",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :reinit-replica-concurrent-request :action :start :source "alpha-1" :target "alpha-2"}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-concurrent-request :action :heal :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-concurrent-request :action :stop :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+`,
+		},
+		{
+			name:     "accepts replica reinit after failover result",
+			workload: "append-reinit",
+			nemesis:  "reinit-replica-after-failover",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :reinit-replica-after-failover :action :start :source "alpha-2" :target "alpha-1"}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-after-failover :action :heal :source "alpha-2" :target "alpha-1" :operation-id "reinit-1" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-after-failover :action :stop :source "alpha-2" :target "alpha-1" :operation-id "reinit-1" :exit-status 0 :result :ok}
+`,
+		},
+		{
 			name:     "rejects missing stop result",
 			workload: "append-failover",
 			nemesis:  "packet",

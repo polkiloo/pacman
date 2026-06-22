@@ -118,6 +118,7 @@ Implemented workload profiles:
 - `append-smoke`
 - `append-switchover`
 - `append-failover`
+- `append-reinit`
 - `append-sync` (Patroni calibration only)
 - `append-sync-two` (Patroni calibration only)
 - `append-strict-sync` (Patroni calibration only)
@@ -145,6 +146,16 @@ Implemented nemesis profiles:
 - `dcs-full-restart`
 - `dcs-slow-network`
 - `failover-chain`
+- `reinit-replica`
+- `reinit-replica-kill-target`
+- `reinit-replica-kill-source`
+- `reinit-replica-dcs-partition-target`
+- `reinit-replica-dcs-partition-primary`
+- `reinit-replica-repeated`
+- `reinit-replica-with-lag`
+- `reinit-replica-walg-fetch-failure`
+- `reinit-replica-concurrent-request`
+- `reinit-replica-after-failover`
 - `slow-network`
 - `repeated-failure`
 - `sync-standby-kill` (Patroni sync calibration only)
@@ -259,6 +270,7 @@ Each run writes campaign-level `jepsen-history.edn`, `nemesis-schedule.edn`,
 `primary-observations.jsonl`, `single-primary-checker.json`,
 `acknowledged-write-checker.json`, `timeline-checker.json`,
 `old-primary-rejoin-checker.json`, `manual-switchover-checker.json`,
+`reinit-checker.json`, `reinit.json`,
 `client-traffic-during-nemesis-checker.json`,
 `replication-traffic-during-nemesis-checker.json`,
 `dcs-traffic-during-nemesis-checker.json`,

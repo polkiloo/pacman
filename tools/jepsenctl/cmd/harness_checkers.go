@@ -40,7 +40,7 @@ func (lab *harnessLab) checkAcknowledgedWrite(ctx context.Context, workload, run
 
 func workloadTable(workload string) string {
 	switch workload {
-	case "append-smoke", "append-failover", "append-sync", "append-sync-two", "append-strict-sync", "append-max-lag", "append-check-timeline", "append-switchover", "append-dcs-quorum", "open-transaction-failover", "vip-routing":
+	case "append-smoke", "append-failover", "append-reinit", "append-sync", "append-sync-two", "append-strict-sync", "append-max-lag", "append-check-timeline", "append-switchover", "append-dcs-quorum", "open-transaction-failover", "vip-routing":
 		return "jepsen.append_values"
 	case "single-key-register":
 		return "jepsen.register_values"

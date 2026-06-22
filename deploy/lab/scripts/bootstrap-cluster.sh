@@ -257,6 +257,55 @@ start_pacmand() {
   wait_for_pacmand_health "${service}" "http://${host}:8080/health"
 }
 
+install_lab_walg_shim() {
+  local service
+
+  for service in pacman-primary pacman-replica pacman-replica-2; do
+    docker compose -f "${compose_file}" exec -T "${service}" /bin/sh -c 'cat >/usr/local/bin/pacman-lab-wal-g && chmod 0755 /usr/local/bin/pacman-lab-wal-g' <<'PACMAN_LAB_WALG'
+#!/usr/bin/env bash
+set -euo pipefail
+
+command=${1:-}
+
+case "${command}" in
+  backup-fetch)
+    data_dir=${2:?backup-fetch requires a data directory}
+    backup_name=${3:-LATEST}
+
+    rm -rf "${data_dir}"
+    mkdir -p "${data_dir}"
+    export PGPASSWORD="${PGPASSWORD:-pacman-demo-password}"
+    /usr/pgsql-17/bin/pg_basebackup \
+      -h "${PACMAN_LAB_REINIT_PRIMARY_HOST:-172.28.0.100}" \
+      -p "${PACMAN_LAB_REINIT_PRIMARY_PORT:-5432}" \
+      -U "${PACMAN_LAB_REINIT_REPLICATION_USER:-replicator}" \
+      -D "${data_dir}" \
+      -Fp \
+      -Xs \
+      -R
+    printf 'pacman lab wal-g shim restored %s into %s\n' "${backup_name}" "${data_dir}" >&2
+    ;;
+  wal-fetch)
+    wal_name=${2:?wal-fetch requires a WAL file name}
+    wal_path=${3:?wal-fetch requires a destination path}
+    prefix=${WALG_FILE_PREFIX:-/var/lib/pacman/walg}
+
+    if [[ -f "${prefix}/wal/${wal_name}" ]]; then
+      cp "${prefix}/wal/${wal_name}" "${wal_path}"
+      exit 0
+    fi
+    printf 'pacman lab wal-g shim missing WAL %s in %s\n' "${wal_name}" "${prefix}/wal" >&2
+    exit 1
+    ;;
+  *)
+    printf 'unsupported pacman lab wal-g shim command: %s\n' "${command}" >&2
+    exit 2
+    ;;
+esac
+PACMAN_LAB_WALG
+  done
+}
+
 start_vip_manager() {
   local service=$1
   local vip_manager_pattern='/usr/local/bin/[v]ip-manager --config /etc/pacman/vip-manager.yml'
@@ -296,6 +345,7 @@ main() {
   apply_playbook pacman-replica alpha-2
   apply_playbook pacman-replica-2 alpha-3
 
+  install_lab_walg_shim
   start_etcd
   start_pacmand pacman-primary pacman-primary
   start_pacmand pacman-replica pacman-replica

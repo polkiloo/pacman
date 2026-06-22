@@ -174,9 +174,18 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] verify system identifier, timeline, restored backup metadata, slot attachment, and streaming health after reinit
 - [x] record reinit progress and result in operation journal / history
 - [x] expose reinit state and last result in member / cluster status
-- [ ] add unit tests for reinit validation, planning, and operation-state transitions
+- [x] add unit tests for reinit validation, planning, and operation-state transitions
 - [x] add integration tests for WAL-G-driven reinit and post-restore replication recovery
-- [ ] create Jepsen tests for full replica reinit procedure coverage
+- [x] create Jepsen tests for full replica reinit procedure coverage
+- [x] add Jepsen case `append-reinit:reinit-replica-kill-target` to kill target PostgreSQL or pacmand during restore and verify the operation fails or resumes without unsafe promotion
+- [x] add Jepsen case `append-reinit:reinit-replica-kill-source` to kill or partition the source primary during restore and verify cluster write safety plus reinit failure reporting
+- [x] add Jepsen case `append-reinit:reinit-replica-dcs-partition-target` to isolate the target from DCS during reinit and verify it cannot publish misleading healthy state
+- [x] add Jepsen case `append-reinit:reinit-replica-dcs-partition-primary` to combine reinit with primary DCS quorum pressure and validate failover safety
+- [x] add Jepsen case `append-reinit:reinit-replica-repeated` to run sequential replica reinit operations and validate operation history, cleanup, slots, and streaming health
+- [x] add Jepsen case `append-reinit:reinit-replica-concurrent-request` to reject a second reinit while one is active and preserve deterministic journal state
+- [x] add Jepsen case `append-reinit:reinit-replica-after-failover` to fail over first, then reinit from the new primary and validate topology-aware source selection
+- [x] add Jepsen case `append-reinit:reinit-replica-with-lag` to reinit a lagging replica and verify it rejoins the current system identifier, timeline, slot, and streaming source
+- [x] add Jepsen case `append-reinit:reinit-replica-walg-fetch-failure` to inject `wal-g backup-fetch` failure and verify safe operation failure without exposing target as healthy
 
 ---
 

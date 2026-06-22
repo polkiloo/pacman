@@ -33,3 +33,14 @@ pacmand_state_dir: /var/lib/pacman
 pacmand_token_dir: "{{ pacmand_config_dir }}/tokens"
 pacmand_environment: {}
 pacman_manage_service: true
+
+pacman_reinit_walg_enabled: false
+pacman_reinit_walg_binary: wal-g
+pacman_reinit_walg_repository_provider: filesystem
+pacman_reinit_walg_repository_prefix: /var/lib/pacman/walg
+pacman_reinit_walg_repository_endpoint: ""
+pacman_reinit_walg_repository_region: ""
+pacman_reinit_walg_restore_backup_name: LATEST
+pacman_reinit_walg_environment: {}
+pacman_reinit_walg_environment_files: {}
+pacman_reinit_walg_inherit_environment: []
