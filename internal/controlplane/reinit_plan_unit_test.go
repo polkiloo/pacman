@@ -165,7 +165,7 @@ func TestEvaluateReinitRequestRejectsMissingPrimaryAndRoleMismatches(t *testing.
 			t.Parallel()
 
 			var active *cluster.Operation
-			if testCase.wantErr == ErrReinitOperationInProgress {
+			if errors.Is(testCase.wantErr, ErrReinitOperationInProgress) {
 				active = &cluster.Operation{
 					ID:          "switchover-active",
 					Kind:        cluster.OperationKindSwitchover,
