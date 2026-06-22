@@ -119,6 +119,36 @@ func TestValidateNemesisSchedule(t *testing.T) {
 `,
 		},
 		{
+			name:     "accepts replica reinit kill target result",
+			workload: "append-reinit",
+			nemesis:  "reinit-replica-kill-target",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :reinit-replica-kill-target :action :start :source "alpha-1" :target "alpha-2"}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-kill-target :action :heal :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-kill-target :action :stop :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+`,
+		},
+		{
+			name:     "accepts replica reinit concurrent request result",
+			workload: "append-reinit",
+			nemesis:  "reinit-replica-concurrent-request",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :reinit-replica-concurrent-request :action :start :source "alpha-1" :target "alpha-2"}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-concurrent-request :action :heal :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-concurrent-request :action :stop :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+`,
+		},
+		{
+			name:     "accepts replica reinit after failover result",
+			workload: "append-reinit",
+			nemesis:  "reinit-replica-after-failover",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :reinit-replica-after-failover :action :start :source "alpha-2" :target "alpha-1"}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-after-failover :action :heal :source "alpha-2" :target "alpha-1" :operation-id "reinit-1" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-after-failover :action :stop :source "alpha-2" :target "alpha-1" :operation-id "reinit-1" :exit-status 0 :result :ok}
+`,
+		},
+		{
 			name:     "rejects missing stop result",
 			workload: "append-failover",
 			nemesis:  "packet",

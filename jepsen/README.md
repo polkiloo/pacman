@@ -147,6 +147,9 @@ Implemented nemesis profiles:
 - `dcs-slow-network`
 - `failover-chain`
 - `reinit-replica`
+- `reinit-replica-kill-target`
+- `reinit-replica-concurrent-request`
+- `reinit-replica-after-failover`
 - `slow-network`
 - `repeated-failure`
 - `sync-standby-kill` (Patroni sync calibration only)
