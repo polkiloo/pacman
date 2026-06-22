@@ -42,7 +42,9 @@ type reinitRunOptions struct {
 	Nemesis        string
 	Reason         string
 	InitialDetails map[string]any
+	BeforeRequest  func(context.Context, reinitRunContext) reinitVariantResult
 	AfterAccepted  func(context.Context, reinitRunContext) reinitVariantResult
+	AfterWait      func(context.Context, reinitRunContext, reinitWaitResult) reinitVariantResult
 	WaitForResult  func(context.Context, string, string, string) reinitWaitResult
 }
 
@@ -151,6 +153,35 @@ type reinitSlotStatus struct {
 	RestartLSN string `json:"restartLsn,omitempty"`
 }
 
+type reinitLagState struct {
+	Member       string `json:"member"`
+	Service      string `json:"service"`
+	ReplayPaused bool   `json:"replayPaused"`
+	LagBytes     int64  `json:"lagBytes"`
+	ReceiveLSN   string `json:"receiveLsn,omitempty"`
+	ReplayLSN    string `json:"replayLsn,omitempty"`
+}
+
+type reinitLagVerification struct {
+	Valid                   bool   `json:"valid"`
+	Target                  string `json:"target"`
+	Source                  string `json:"source"`
+	TargetService           string `json:"targetService"`
+	SourceService           string `json:"sourceService"`
+	PrimarySystemIdentifier string `json:"primarySystemIdentifier,omitempty"`
+	TargetSystemIdentifier  string `json:"targetSystemIdentifier,omitempty"`
+	PrimaryTimeline         int64  `json:"primaryTimeline,omitempty"`
+	TargetTimeline          int64  `json:"targetTimeline,omitempty"`
+	ExpectedSlot            string `json:"expectedSlot,omitempty"`
+	SlotActive              bool   `json:"slotActive"`
+	SlotRestartLSN          string `json:"slotRestartLsn,omitempty"`
+	TargetInRecovery        bool   `json:"targetInRecovery"`
+	WALReceiverStatus       string `json:"walReceiverStatus,omitempty"`
+	WALReceiverConninfo     string `json:"walReceiverConninfo,omitempty"`
+	StreamingSource         string `json:"streamingSource,omitempty"`
+	Error                   string `json:"error,omitempty"`
+}
+
 type reinitRepeatedFinalHealth struct {
 	Valid   bool     `json:"valid"`
 	Targets []string `json:"targets"`
@@ -169,8 +200,6 @@ func (lab *harnessLab) runReinitReplica(ctx context.Context, caseDir, scheduleFi
 
 	writeNemesisScheduleEvent(scheduleFile, options.Nemesis, "start", fmt.Sprintf(":source %q :target %q", source, target))
 	requestedAt := time.Now().UTC()
-	output, status := lab.requestReinit(ctx, target, controlService, options.Reason)
-	operationID := reinitOperationIDFromOutput(output)
 	result := map[string]any{
 		"requestedAt":    requestedAt.Format(time.RFC3339),
 		"nemesis":        options.Nemesis,
@@ -178,13 +207,43 @@ func (lab *harnessLab) runReinitReplica(ctx context.Context, caseDir, scheduleFi
 		"target":         target,
 		"targetService":  lab.serviceForMember(target),
 		"controlService": controlService,
-		"exitStatus":     status,
-		"output":         output,
-		"operationId":    operationID,
 	}
 	for key, value := range options.InitialDetails {
 		result[key] = value
 	}
+
+	run := reinitRunContext{
+		Target:         target,
+		Source:         source,
+		ControlService: controlService,
+		TargetService:  lab.serviceForMember(target),
+		SourceService:  lab.serviceForMember(source),
+		CaseDir:        caseDir,
+		ScheduleFile:   scheduleFile,
+	}
+	var setup reinitVariantResult
+	if options.BeforeRequest != nil {
+		setup = options.BeforeRequest(ctx, run)
+		result["setup"] = setup.Details
+		if setup.Error != "" {
+			result["setupError"] = setup.Error
+		}
+		if !setup.Valid {
+			result["valid"] = false
+			writeJSON(filepath.Join(caseDir, reinitArtifactFile), result)
+			lab.writeReinitChecker(caseDir, false, target, source, "", setup.Error, nil)
+			writeNemesisScheduleEvent(scheduleFile, options.Nemesis, "stop", fmt.Sprintf(":source %q :target %q :operation-id %q :exit-status %d :result :fail", source, target, "", 1))
+			return fmt.Errorf("reinit setup for %s failed: %s", target, setup.Error)
+		}
+	} else {
+		setup.Valid = true
+	}
+
+	output, status := lab.requestReinit(ctx, target, controlService, options.Reason)
+	operationID := reinitOperationIDFromOutput(output)
+	result["exitStatus"] = status
+	result["output"] = output
+	result["operationId"] = operationID
 
 	if status != 0 {
 		result["valid"] = false
@@ -196,16 +255,8 @@ func (lab *harnessLab) runReinitReplica(ctx context.Context, caseDir, scheduleFi
 
 	var variant reinitVariantResult
 	if options.AfterAccepted != nil {
-		variant = options.AfterAccepted(ctx, reinitRunContext{
-			Target:         target,
-			Source:         source,
-			ControlService: controlService,
-			TargetService:  lab.serviceForMember(target),
-			SourceService:  lab.serviceForMember(source),
-			OperationID:    operationID,
-			CaseDir:        caseDir,
-			ScheduleFile:   scheduleFile,
-		})
+		run.OperationID = operationID
+		variant = options.AfterAccepted(ctx, run)
 		result["variant"] = variant.Details
 		if variant.Error != "" {
 			result["variantError"] = variant.Error
@@ -215,7 +266,18 @@ func (lab *harnessLab) runReinitReplica(ctx context.Context, caseDir, scheduleFi
 	}
 
 	wait := options.WaitForResult(ctx, target, source, operationID)
-	result["valid"] = wait.Valid && variant.Valid
+	run.OperationID = operationID
+	var afterWait reinitVariantResult
+	if options.AfterWait != nil {
+		afterWait = options.AfterWait(ctx, run, wait)
+		result["postCheck"] = afterWait.Details
+		if afterWait.Error != "" {
+			result["postCheckError"] = afterWait.Error
+		}
+	} else {
+		afterWait.Valid = true
+	}
+	result["valid"] = setup.Valid && wait.Valid && variant.Valid && afterWait.Valid
 	result["completed"] = wait.Completed
 	result["wait"] = wait
 	writeJSON(filepath.Join(caseDir, reinitArtifactFile), result)
@@ -223,14 +285,17 @@ func (lab *harnessLab) runReinitReplica(ctx context.Context, caseDir, scheduleFi
 	if checkerError == "" {
 		checkerError = variant.Error
 	}
-	lab.writeReinitChecker(caseDir, wait.Valid && variant.Valid, target, source, operationID, checkerError, &wait)
+	if checkerError == "" {
+		checkerError = afterWait.Error
+	}
+	lab.writeReinitChecker(caseDir, setup.Valid && wait.Valid && variant.Valid && afterWait.Valid, target, source, operationID, checkerError, &wait)
 
 	statusLabel := "ok"
-	if !wait.Valid || !variant.Valid {
+	if !setup.Valid || !wait.Valid || !variant.Valid || !afterWait.Valid {
 		statusLabel = "fail"
 	}
 	writeNemesisScheduleEvent(scheduleFile, options.Nemesis, "stop", fmt.Sprintf(":source %q :target %q :operation-id %q :exit-status %d :result :%s", source, target, operationID, status, statusLabel))
-	if !wait.Valid || !variant.Valid {
+	if !setup.Valid || !wait.Valid || !variant.Valid || !afterWait.Valid {
 		return fmt.Errorf("reinit did not satisfy %s for %s: %s", options.Nemesis, target, checkerError)
 	}
 	return nil

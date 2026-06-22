@@ -40,6 +40,10 @@ func (lab *harnessLab) waitForReinitSourceFailure(ctx context.Context, target, s
 	return lab.waitForReinitOutcome(ctx, target, source, operationID, reinitSourceFailure)
 }
 
+func (lab *harnessLab) waitForReinitWALGFetchFailure(ctx context.Context, target, source, operationID string) reinitWaitResult {
+	return lab.waitForReinitOutcome(ctx, target, source, operationID, reinitWALGFetchFailure)
+}
+
 func (lab *harnessLab) waitForReinitOutcome(ctx context.Context, target, source, operationID string, accepted func(clusterStatus, string, string, string) bool) reinitWaitResult {
 	result := reinitWaitResult{
 		OperationID: operationID,
@@ -159,6 +163,19 @@ func reinitSourceFailure(status clusterStatus, target, source, operationID strin
 		}
 	}
 	return targetFailed && currentPrimaryHealthy
+}
+
+func reinitWALGFetchFailure(status clusterStatus, target, source, operationID string) bool {
+	if !reinitTerminalFailure(status, target, source, operationID) {
+		return false
+	}
+	for _, member := range status.Members {
+		if member.Name != target {
+			continue
+		}
+		return !member.Healthy && member.Role != "primary"
+	}
+	return false
 }
 
 func reinitStatusCompleted(status *reinitStatus, target, source, operationID string) bool {

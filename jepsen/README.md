@@ -152,6 +152,8 @@ Implemented nemesis profiles:
 - `reinit-replica-dcs-partition-target`
 - `reinit-replica-dcs-partition-primary`
 - `reinit-replica-repeated`
+- `reinit-replica-with-lag`
+- `reinit-replica-walg-fetch-failure`
 - `reinit-replica-concurrent-request`
 - `reinit-replica-after-failover`
 - `slow-network`

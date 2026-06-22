@@ -371,6 +371,121 @@ func TestRepeatedReinitHistorySlotsAndExpectedNames(t *testing.T) {
 	}
 }
 
+func TestReinitWALGFetchFailureRequiresUnhealthyTarget(t *testing.T) {
+	t.Parallel()
+
+	status := clusterStatusJSONWithPrimary("alpha-1")
+	var failed clusterStatus
+	if err := json.Unmarshal([]byte(status), &failed); err != nil {
+		t.Fatalf("decode cluster: %v", err)
+	}
+	failed.Reinit = &reinitStatus{
+		OperationID: "reinit-1",
+		State:       "failed",
+		LastResult:  "failed",
+		FromMember:  "alpha-1",
+		ToMember:    "alpha-2",
+	}
+	for index := range failed.Members {
+		if failed.Members[index].Name == "alpha-2" {
+			failed.Members[index].Healthy = false
+			failed.Members[index].State = "reinit_failed"
+			failed.Members[index].Reinit = failed.Reinit
+		}
+	}
+
+	if !reinitWALGFetchFailure(failed, "alpha-2", "alpha-1", "reinit-1") {
+		t.Fatalf("expected unhealthy target with failed reinit metadata to pass WAL-G failure outcome")
+	}
+
+	healthyTarget := failed
+	healthyTarget.Members = append([]clusterMember(nil), failed.Members...)
+	for index := range healthyTarget.Members {
+		if healthyTarget.Members[index].Name == "alpha-2" {
+			healthyTarget.Members[index].Healthy = true
+			healthyTarget.Members[index].State = "streaming"
+		}
+	}
+	if reinitWALGFetchFailure(healthyTarget, "alpha-2", "alpha-1", "reinit-1") {
+		t.Fatalf("expected healthy target to fail WAL-G failure outcome")
+	}
+
+	promotedTarget := failed
+	promotedTarget.CurrentPrimary = "alpha-2"
+	promotedTarget.Members = append([]clusterMember(nil), failed.Members...)
+	for index := range promotedTarget.Members {
+		if promotedTarget.Members[index].Name == "alpha-2" {
+			promotedTarget.Members[index].Role = "primary"
+			promotedTarget.Members[index].State = "running"
+		}
+	}
+	if reinitWALGFetchFailure(promotedTarget, "alpha-2", "alpha-1", "reinit-1") {
+		t.Fatalf("expected promoted target to fail WAL-G failure outcome")
+	}
+}
+
+func TestReinitLagParsingAndVerification(t *testing.T) {
+	t.Parallel()
+
+	lag, err := parseReinitLagState("alpha-2", "pacman-replica", "t\t8192\t0/3000000\t0/2000000\n")
+	if err != nil {
+		t.Fatalf("parse lag state: %v", err)
+	}
+	if !lag.ReplayPaused || lag.LagBytes != 8192 || lag.ReceiveLSN != "0/3000000" || lag.ReplayLSN != "0/2000000" {
+		t.Fatalf("lag state: %+v", lag)
+	}
+
+	postRestore, err := parseReinitPostRestoreState("7359090119379102998\t7\tt\tstreaming\thost=pacman-primary slotname=alpha_2\n")
+	if err != nil {
+		t.Fatalf("parse post restore state: %v", err)
+	}
+	if !postRestore.InRecovery || postRestore.Timeline != 7 || postRestore.WALReceiverStatus != "streaming" {
+		t.Fatalf("post restore state: %+v", postRestore)
+	}
+
+	status := clusterStatusJSONWithPrimary("alpha-1")
+	var healthy clusterStatus
+	if err := json.Unmarshal([]byte(status), &healthy); err != nil {
+		t.Fatalf("decode cluster: %v", err)
+	}
+	healthy.Reinit = &reinitStatus{
+		OperationID: "reinit-1",
+		State:       "completed",
+		LastResult:  "succeeded",
+		FromMember:  "alpha-1",
+		ToMember:    "alpha-2",
+	}
+	for index := range healthy.Members {
+		if healthy.Members[index].Name == "alpha-2" {
+			healthy.Members[index].Reinit = healthy.Reinit
+		}
+	}
+
+	check := checkReinitLagVerification(healthy, reinitLagVerification{
+		Target:                  "alpha-2",
+		Source:                  "alpha-1",
+		PrimarySystemIdentifier: "7359090119379102998",
+		TargetSystemIdentifier:  "7359090119379102998",
+		PrimaryTimeline:         7,
+		TargetTimeline:          7,
+		ExpectedSlot:            "alpha_2",
+		SlotActive:              true,
+		SlotRestartLSN:          "0/3000000",
+		TargetInRecovery:        true,
+		WALReceiverStatus:       "streaming",
+		StreamingSource:         "alpha-1",
+	}, "reinit-1")
+	if !check.Valid {
+		t.Fatalf("expected valid lag verification: %+v", check)
+	}
+
+	check.TargetTimeline = 6
+	check = checkReinitLagVerification(healthy, check, "reinit-1")
+	if check.Valid || !strings.Contains(check.Error, "timeline") {
+		t.Fatalf("expected timeline mismatch to fail: %+v", check)
+	}
+}
+
 func TestCheckReinitProcedureWritesNotApplicableAndRejectsInvalidArtifact(t *testing.T) {
 	t.Parallel()
 
@@ -387,7 +502,7 @@ func TestCheckReinitProcedureWritesNotApplicableAndRejectsInvalidArtifact(t *tes
 	}
 
 	writeTestFile(t, filepath.Join(caseDir, reinitCheckerFile), `{"checker":"full-replica-reinit","valid":false}`+"\n")
-	for _, nemesis := range []string{"reinit-replica", "reinit-replica-kill-target", "reinit-replica-kill-source", "reinit-replica-dcs-partition-target", "reinit-replica-dcs-partition-primary", "reinit-replica-repeated", "reinit-replica-concurrent-request", "reinit-replica-after-failover"} {
+	for _, nemesis := range []string{"reinit-replica", "reinit-replica-kill-target", "reinit-replica-kill-source", "reinit-replica-dcs-partition-target", "reinit-replica-dcs-partition-primary", "reinit-replica-repeated", "reinit-replica-with-lag", "reinit-replica-walg-fetch-failure", "reinit-replica-concurrent-request", "reinit-replica-after-failover"} {
 		if err := lab.checkReinitProcedure(nemesis, caseDir); err == nil || !strings.Contains(err.Error(), "reinit checker failed") {
 			t.Fatalf("invalid reinit checker error for %s: %v", nemesis, err)
 		}

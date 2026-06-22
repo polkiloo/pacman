@@ -184,8 +184,8 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] add Jepsen case `append-reinit:reinit-replica-repeated` to run sequential replica reinit operations and validate operation history, cleanup, slots, and streaming health
 - [x] add Jepsen case `append-reinit:reinit-replica-concurrent-request` to reject a second reinit while one is active and preserve deterministic journal state
 - [x] add Jepsen case `append-reinit:reinit-replica-after-failover` to fail over first, then reinit from the new primary and validate topology-aware source selection
-- [ ] add Jepsen case `append-reinit:reinit-replica-with-lag` to reinit a lagging replica and verify it rejoins the current system identifier, timeline, slot, and streaming source
-- [ ] add Jepsen case `append-reinit:reinit-replica-walg-fetch-failure` to inject `wal-g backup-fetch` failure and verify safe operation failure without exposing target as healthy
+- [x] add Jepsen case `append-reinit:reinit-replica-with-lag` to reinit a lagging replica and verify it rejoins the current system identifier, timeline, slot, and streaming source
+- [x] add Jepsen case `append-reinit:reinit-replica-walg-fetch-failure` to inject `wal-g backup-fetch` failure and verify safe operation failure without exposing target as healthy
 
 ---
 

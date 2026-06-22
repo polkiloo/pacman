@@ -171,6 +171,26 @@ func TestValidateNemesisSchedule(t *testing.T) {
 `,
 		},
 		{
+			name:     "accepts lagging replica reinit result",
+			workload: "append-reinit",
+			nemesis:  "reinit-replica-with-lag",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :reinit-replica-with-lag :action :start :source "alpha-1" :target "alpha-2"}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-with-lag :action :heal :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-with-lag :action :stop :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+`,
+		},
+		{
+			name:     "accepts WAL-G fetch failure reinit result",
+			workload: "append-reinit",
+			nemesis:  "reinit-replica-walg-fetch-failure",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :reinit-replica-walg-fetch-failure :action :start :source "alpha-1" :target "alpha-2"}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-walg-fetch-failure :action :heal :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-walg-fetch-failure :action :stop :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+`,
+		},
+		{
 			name:     "accepts replica reinit concurrent request result",
 			workload: "append-reinit",
 			nemesis:  "reinit-replica-concurrent-request",

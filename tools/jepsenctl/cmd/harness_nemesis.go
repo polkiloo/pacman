@@ -209,6 +209,10 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 		return lab.reinitReplicaDCSPartitionPrimary(ctx, caseDir, scheduleFile)
 	case "reinit-replica-repeated":
 		return lab.reinitReplicaRepeated(ctx, caseDir, scheduleFile)
+	case "reinit-replica-with-lag":
+		return lab.reinitReplicaWithLag(ctx, caseDir, scheduleFile)
+	case "reinit-replica-walg-fetch-failure":
+		return lab.reinitReplicaWALGFetchFailure(ctx, caseDir, scheduleFile)
 	case "reinit-replica-concurrent-request":
 		return lab.reinitReplicaConcurrentRequest(ctx, caseDir, scheduleFile)
 	case "reinit-replica-after-failover":
