@@ -207,6 +207,8 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 		return lab.reinitReplicaDCSPartitionTarget(ctx, caseDir, scheduleFile)
 	case "reinit-replica-dcs-partition-primary":
 		return lab.reinitReplicaDCSPartitionPrimary(ctx, caseDir, scheduleFile)
+	case "reinit-replica-repeated":
+		return lab.reinitReplicaRepeated(ctx, caseDir, scheduleFile)
 	case "reinit-replica-concurrent-request":
 		return lab.reinitReplicaConcurrentRequest(ctx, caseDir, scheduleFile)
 	case "reinit-replica-after-failover":

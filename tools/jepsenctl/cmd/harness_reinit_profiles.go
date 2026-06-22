@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -190,6 +191,371 @@ func (lab *harnessLab) reinitReplicaDCSPartitionPrimary(ctx context.Context, cas
 			return result
 		},
 	})
+}
+
+func (lab *harnessLab) reinitReplicaRepeated(ctx context.Context, caseDir, scheduleFile string) error {
+	const nemesis = "reinit-replica-repeated"
+	result := reinitRepeatedResult{
+		Valid:   true,
+		Nemesis: nemesis,
+	}
+
+	first, err := lab.runRepeatedReinitStep(ctx, 1, nil, "jepsen-reinit-repeated-first")
+	result.Steps = append(result.Steps, first)
+	if err != nil {
+		result.Valid = false
+		result.Error = err.Error()
+		lab.writeRepeatedReinitArtifacts(caseDir, result, err)
+		writeNemesisScheduleEvent(scheduleFile, nemesis, "start", fmt.Sprintf(":source %q :target %q", first.Source, first.Target))
+		writeNemesisScheduleEvent(scheduleFile, nemesis, "stop", fmt.Sprintf(":source %q :target %q :operation-id %q :exit-status %d :result :fail", first.Source, first.Target, first.OperationID, first.ExitStatus))
+		return err
+	}
+
+	writeNemesisScheduleEvent(scheduleFile, nemesis, "start", fmt.Sprintf(":source %q :target %q", first.Source, first.Target))
+	writeNemesisScheduleEvent(scheduleFile, nemesis, "step", fmt.Sprintf(":source %q :target %q :operation-id %q :exit-status %d :result :ok", first.Source, first.Target, first.OperationID, first.ExitStatus))
+
+	excluded := map[string]struct{}{first.Target: {}}
+	second, err := lab.runRepeatedReinitStep(ctx, 2, excluded, "jepsen-reinit-repeated-second")
+	result.Steps = append(result.Steps, second)
+	if err != nil {
+		result.Valid = false
+		result.Error = err.Error()
+		lab.writeRepeatedReinitArtifacts(caseDir, result, err)
+		writeNemesisScheduleEvent(scheduleFile, nemesis, "step", fmt.Sprintf(":source %q :target %q :operation-id %q :exit-status %d :result :fail", second.Source, second.Target, second.OperationID, second.ExitStatus))
+		writeNemesisScheduleEvent(scheduleFile, nemesis, "stop", fmt.Sprintf(":source %q :target %q :operation-id %q :exit-status %d :result :fail", second.Source, second.Target, second.OperationID, second.ExitStatus))
+		return err
+	}
+	writeNemesisScheduleEvent(scheduleFile, nemesis, "step", fmt.Sprintf(":source %q :target %q :operation-id %q :exit-status %d :result :ok", second.Source, second.Target, second.OperationID, second.ExitStatus))
+
+	result.History = lab.checkRepeatedReinitHistory(ctx, result.Steps)
+	result.Slots = lab.checkRepeatedReinitSlots(ctx, result.Steps)
+	finalStatus, _, finalStatusErr := lab.pacmanClusterStatusAny(ctx)
+	if finalStatusErr != nil {
+		result.FinalHealth = reinitRepeatedFinalHealth{Valid: false, Targets: repeatedReinitTargets(result.Steps), Error: finalStatusErr.Error()}
+	} else {
+		result.FinalStatus = &finalStatus
+		result.FinalHealth = checkRepeatedReinitFinalHealth(finalStatus, result.Steps)
+	}
+
+	result.Valid = result.History.Valid && result.Slots.Valid && result.FinalHealth.Valid
+	if !result.Valid {
+		result.Error = firstNonEmpty(result.History.Error, result.Slots.Error, result.FinalHealth.Error)
+	}
+	lab.writeRepeatedReinitArtifacts(caseDir, result, nil)
+
+	statusLabel := "ok"
+	if !result.Valid {
+		statusLabel = "fail"
+	}
+	writeNemesisScheduleEvent(scheduleFile, nemesis, "stop", fmt.Sprintf(":source %q :target %q :operation-id %q :exit-status %d :result :%s", second.Source, second.Target, second.OperationID, second.ExitStatus, statusLabel))
+	if !result.Valid {
+		return fmt.Errorf("repeated reinit checker failed: %s", result.Error)
+	}
+	return nil
+}
+
+func (lab *harnessLab) runRepeatedReinitStep(ctx context.Context, index int, excluded map[string]struct{}, reason string) (reinitRepeatedStep, error) {
+	target, source, controlService, err := lab.reinitTargetExcluding(ctx, excluded)
+	step := reinitRepeatedStep{
+		Index:          index,
+		RequestedAt:    time.Now().UTC().Format(time.RFC3339),
+		Target:         target,
+		Source:         source,
+		ControlService: controlService,
+		TargetService:  lab.serviceForMember(target),
+	}
+	if err != nil {
+		step.Error = err.Error()
+		return step, err
+	}
+	output, status := lab.requestReinit(ctx, target, controlService, reason)
+	step.ExitStatus = status
+	step.Output = output
+	step.OperationID = reinitOperationIDFromOutput(output)
+	if status != 0 {
+		step.Error = fmt.Sprintf("reinit request for %s failed with status %d: %s", target, status, strings.TrimSpace(output))
+		return step, fmt.Errorf("%s", step.Error)
+	}
+	wait := lab.waitForReinitCompletion(ctx, target, source, step.OperationID)
+	step.Wait = wait
+	step.Valid = wait.Valid
+	if !wait.Valid {
+		step.Error = wait.Error
+		if step.Error == "" {
+			step.Error = "timed out waiting for reinit completion"
+		}
+		return step, fmt.Errorf("reinit step %d for %s failed: %s", index, target, step.Error)
+	}
+	return step, nil
+}
+
+func (lab *harnessLab) writeRepeatedReinitArtifacts(caseDir string, result reinitRepeatedResult, err error) {
+	if err != nil && result.Error == "" {
+		result.Error = err.Error()
+	}
+	writeJSON(filepath.Join(caseDir, reinitArtifactFile), result)
+	lab.writeReinitChecker(caseDir, result.Valid, strings.Join(repeatedReinitTargets(result.Steps), ","), "", repeatedReinitOperationIDs(result.Steps), result.Error, nil)
+}
+
+func (lab *harnessLab) checkRepeatedReinitHistory(ctx context.Context, steps []reinitRepeatedStep) reinitRepeatedHistoryCheck {
+	check := reinitRepeatedHistoryCheck{Valid: true}
+	service := lab.repeatedReinitHistoryService(steps)
+	output, status, err := lab.composeExec(ctx, service, "env",
+		"PACMANCTL_API_URL=http://"+service+":8080",
+		"PACMANCTL_API_TOKEN="+pacmanAPIToken,
+		"pacmanctl", "history", "list", "-o", "json")
+	if err != nil || status != 0 {
+		check.Valid = false
+		check.Error = fmt.Sprintf("history list from %s failed with status %d: %s", service, status, strings.TrimSpace(output))
+		return check
+	}
+	history, err := reinitHistoryFromOutput(output)
+	if err != nil {
+		check.Valid = false
+		check.Error = err.Error()
+		return check
+	}
+	for _, step := range steps {
+		entry, ok := findReinitHistoryEntry(history.Items, step)
+		if !ok {
+			check.Valid = false
+			check.Error = fmt.Sprintf("missing successful reinit history entry for operation %s", step.OperationID)
+			return check
+		}
+		check.Entries = append(check.Entries, entry)
+	}
+	return check
+}
+
+func (lab *harnessLab) repeatedReinitHistoryService(steps []reinitRepeatedStep) string {
+	for index := len(steps) - 1; index >= 0; index-- {
+		if steps[index].ControlService != "" {
+			return steps[index].ControlService
+		}
+	}
+	return lab.options.target.firstDataService()
+}
+
+func reinitHistoryFromOutput(output string) (reinitHistoryResponse, error) {
+	for index, char := range output {
+		if char != '{' {
+			continue
+		}
+		decoder := json.NewDecoder(strings.NewReader(output[index:]))
+		var history reinitHistoryResponse
+		if err := decoder.Decode(&history); err != nil || history.Items == nil {
+			continue
+		}
+		return history, nil
+	}
+	return reinitHistoryResponse{}, fmt.Errorf("history output did not contain JSON response: %s", strings.TrimSpace(output))
+}
+
+func findReinitHistoryEntry(entries []reinitHistoryEntry, step reinitRepeatedStep) (reinitHistoryEntry, bool) {
+	for _, entry := range entries {
+		if entry.OperationID != step.OperationID {
+			continue
+		}
+		return entry, entry.Kind == "reinit" &&
+			entry.Result == "succeeded" &&
+			entry.FromMember == step.Source &&
+			entry.ToMember == step.Target
+	}
+	return reinitHistoryEntry{}, false
+}
+
+func (lab *harnessLab) checkRepeatedReinitSlots(ctx context.Context, steps []reinitRepeatedStep) reinitRepeatedSlotCheck {
+	primary := lab.currentPrimaryName(ctx)
+	if primary == "unknown" {
+		primary = firstRepeatedReinitSource(steps)
+	}
+	service := lab.serviceForMember(primary)
+	if service == "" {
+		service = lab.options.target.firstDataService()
+	}
+	check := reinitRepeatedSlotCheck{
+		Valid:          true,
+		Primary:        primary,
+		PrimaryService: service,
+		ExpectedSlots:  repeatedReinitExpectedSlots(steps),
+	}
+	output, err := lab.psqlService(ctx, service, "SELECT slot_name, active, coalesce(restart_lsn::text, '') FROM pg_replication_slots WHERE slot_type = 'physical' ORDER BY slot_name;")
+	if err != nil {
+		check.Valid = false
+		check.Error = err.Error()
+		return check
+	}
+	check.Slots = parseReinitSlotStatus(output)
+	for _, expected := range check.ExpectedSlots {
+		slot, ok := findReinitSlot(check.Slots, expected)
+		if !ok {
+			check.Valid = false
+			check.Error = fmt.Sprintf("missing replication slot %s on primary %s", expected, primary)
+			return check
+		}
+		if !slot.Active {
+			check.Valid = false
+			check.Error = fmt.Sprintf("replication slot %s on primary %s is not active", expected, primary)
+			return check
+		}
+		if slot.RestartLSN == "" {
+			check.Valid = false
+			check.Error = fmt.Sprintf("replication slot %s on primary %s has no restart_lsn", expected, primary)
+			return check
+		}
+	}
+	return check
+}
+
+func parseReinitSlotStatus(output string) []reinitSlotStatus {
+	var slots []reinitSlotStatus
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) < 2 {
+			continue
+		}
+		slot := reinitSlotStatus{
+			SlotName: strings.TrimSpace(fields[0]),
+			Active:   strings.TrimSpace(fields[1]) == "t",
+		}
+		if len(fields) > 2 {
+			slot.RestartLSN = strings.TrimSpace(fields[2])
+		}
+		slots = append(slots, slot)
+	}
+	return slots
+}
+
+func findReinitSlot(slots []reinitSlotStatus, name string) (reinitSlotStatus, bool) {
+	for _, slot := range slots {
+		if slot.SlotName == name {
+			return slot, true
+		}
+	}
+	return reinitSlotStatus{}, false
+}
+
+func checkRepeatedReinitFinalHealth(status clusterStatus, steps []reinitRepeatedStep) reinitRepeatedFinalHealth {
+	targets := repeatedReinitTargets(steps)
+	check := reinitRepeatedFinalHealth{Valid: true, Targets: targets}
+	if status.ActiveOperation != nil {
+		check.Valid = false
+		check.Error = fmt.Sprintf("active operation remained after repeated reinit: %s", status.ActiveOperation.ID)
+		return check
+	}
+	if status.Phase != "healthy" {
+		check.Valid = false
+		check.Error = fmt.Sprintf("cluster phase is %s, want healthy", status.Phase)
+		return check
+	}
+	for _, step := range steps {
+		if !repeatedReinitMemberHealthy(status, step) {
+			check.Valid = false
+			check.Error = fmt.Sprintf("target %s is not a healthy streaming replica after operation %s", step.Target, step.OperationID)
+			return check
+		}
+	}
+	return check
+}
+
+func repeatedReinitMemberHealthy(status clusterStatus, step reinitRepeatedStep) bool {
+	for _, member := range status.Members {
+		if member.Name != step.Target {
+			continue
+		}
+		return member.Healthy &&
+			member.Role == "replica" &&
+			member.State == "streaming" &&
+			reinitStatusCompleted(member.Reinit, step.Target, step.Source, step.OperationID)
+	}
+	return false
+}
+
+func repeatedReinitTargets(steps []reinitRepeatedStep) []string {
+	var targets []string
+	seen := make(map[string]struct{})
+	for _, step := range steps {
+		if step.Target == "" {
+			continue
+		}
+		if _, ok := seen[step.Target]; ok {
+			continue
+		}
+		seen[step.Target] = struct{}{}
+		targets = append(targets, step.Target)
+	}
+	return targets
+}
+
+func repeatedReinitOperationIDs(steps []reinitRepeatedStep) string {
+	var ids []string
+	for _, step := range steps {
+		if step.OperationID != "" {
+			ids = append(ids, step.OperationID)
+		}
+	}
+	return strings.Join(ids, ",")
+}
+
+func firstRepeatedReinitSource(steps []reinitRepeatedStep) string {
+	for _, step := range steps {
+		if step.Source != "" {
+			return step.Source
+		}
+	}
+	return ""
+}
+
+func repeatedReinitExpectedSlots(steps []reinitRepeatedStep) []string {
+	targets := repeatedReinitTargets(steps)
+	slots := make([]string, 0, len(targets))
+	for _, target := range targets {
+		slots = append(slots, reinitExpectedSlotName(target))
+	}
+	return slots
+}
+
+func reinitExpectedSlotName(memberName string) string {
+	normalized := strings.ToLower(strings.TrimSpace(memberName))
+	if normalized == "" {
+		return "pacman_rejoin"
+	}
+	var builder strings.Builder
+	lastUnderscore := false
+	for _, character := range normalized {
+		switch {
+		case character >= 'a' && character <= 'z':
+			builder.WriteRune(character)
+			lastUnderscore = false
+		case character >= '0' && character <= '9':
+			builder.WriteRune(character)
+			lastUnderscore = false
+		case character == '_':
+			if !lastUnderscore {
+				builder.WriteRune(character)
+				lastUnderscore = true
+			}
+		default:
+			if !lastUnderscore {
+				builder.WriteByte('_')
+				lastUnderscore = true
+			}
+		}
+	}
+	slot := strings.Trim(builder.String(), "_")
+	if slot == "" {
+		return "pacman_rejoin"
+	}
+	if len(slot) > 63 {
+		slot = strings.TrimRight(slot[:63], "_")
+	}
+	if slot == "" {
+		return "pacman_rejoin"
+	}
+	return slot
 }
 
 func (lab *harnessLab) reinitReplicaConcurrentRequest(ctx context.Context, caseDir, scheduleFile string) error {

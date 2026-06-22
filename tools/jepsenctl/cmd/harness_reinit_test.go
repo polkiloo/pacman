@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -273,6 +274,103 @@ func TestReinitQuorumSideObserverServicesPreferNonSource(t *testing.T) {
 	}
 }
 
+func TestRepeatedReinitFinalHealthRequiresCompletedTargetsAndNoActiveOperation(t *testing.T) {
+	t.Parallel()
+
+	status := clusterStatusJSONWithPrimary("alpha-1")
+	var healthy clusterStatus
+	if err := json.Unmarshal([]byte(status), &healthy); err != nil {
+		t.Fatalf("decode cluster: %v", err)
+	}
+	steps := []reinitRepeatedStep{
+		{Target: "alpha-2", Source: "alpha-1", OperationID: "reinit-1"},
+		{Target: "alpha-3", Source: "alpha-1", OperationID: "reinit-2"},
+	}
+	for index := range healthy.Members {
+		switch healthy.Members[index].Name {
+		case "alpha-2":
+			healthy.Members[index].Reinit = &reinitStatus{
+				OperationID: "reinit-1",
+				State:       "completed",
+				LastResult:  "succeeded",
+				FromMember:  "alpha-1",
+				ToMember:    "alpha-2",
+			}
+		case "alpha-3":
+			healthy.Members[index].Reinit = &reinitStatus{
+				OperationID: "reinit-2",
+				State:       "completed",
+				LastResult:  "succeeded",
+				FromMember:  "alpha-1",
+				ToMember:    "alpha-3",
+			}
+		}
+	}
+
+	if check := checkRepeatedReinitFinalHealth(healthy, steps); !check.Valid {
+		t.Fatalf("expected final health valid: %+v", check)
+	}
+
+	active := healthy
+	active.ActiveOperation = &operationStatus{ID: "reinit-active", Kind: "reinit", State: "running"}
+	if check := checkRepeatedReinitFinalHealth(active, steps); check.Valid || !strings.Contains(check.Error, "active operation") {
+		t.Fatalf("expected active operation to fail final health: %+v", check)
+	}
+
+	notStreaming := healthy
+	for index := range notStreaming.Members {
+		if notStreaming.Members[index].Name == "alpha-3" {
+			notStreaming.Members[index].State = "starting"
+		}
+	}
+	if check := checkRepeatedReinitFinalHealth(notStreaming, steps); check.Valid || !strings.Contains(check.Error, "alpha-3") {
+		t.Fatalf("expected non-streaming target to fail final health: %+v", check)
+	}
+}
+
+func TestRepeatedReinitHistorySlotsAndExpectedNames(t *testing.T) {
+	t.Parallel()
+
+	steps := []reinitRepeatedStep{
+		{Target: "alpha-2", Source: "alpha-1", OperationID: "reinit-1"},
+		{Target: "alpha.3", Source: "alpha-1", OperationID: "reinit-2"},
+	}
+	if got := repeatedReinitTargets(steps); !reflect.DeepEqual(got, []string{"alpha-2", "alpha.3"}) {
+		t.Fatalf("targets: got %#v", got)
+	}
+	if got := repeatedReinitExpectedSlots(steps); !reflect.DeepEqual(got, []string{"alpha_2", "alpha_3"}) {
+		t.Fatalf("expected slots: got %#v", got)
+	}
+	if got := repeatedReinitOperationIDs(steps); got != "reinit-1,reinit-2" {
+		t.Fatalf("operation ids: got %q", got)
+	}
+
+	history, err := reinitHistoryFromOutput(`log
+{"items":[
+  {"operationId":"reinit-1","kind":"reinit","fromMember":"alpha-1","toMember":"alpha-2","result":"succeeded"},
+  {"operationId":"reinit-2","kind":"reinit","fromMember":"alpha-1","toMember":"alpha.3","result":"succeeded"}
+]}`)
+	if err != nil {
+		t.Fatalf("history parse: %v", err)
+	}
+	if _, ok := findReinitHistoryEntry(history.Items, steps[0]); !ok {
+		t.Fatalf("expected first history entry to match")
+	}
+	wrongResult := steps[1]
+	wrongResult.OperationID = "missing"
+	if _, ok := findReinitHistoryEntry(history.Items, wrongResult); ok {
+		t.Fatalf("missing history entry matched")
+	}
+
+	slots := parseReinitSlotStatus("alpha_2\tt\t0/16B6C50\nalpha_3\tf\t0/16B6C60\n")
+	if slot, ok := findReinitSlot(slots, "alpha_2"); !ok || !slot.Active || slot.RestartLSN != "0/16B6C50" {
+		t.Fatalf("slot alpha_2: got %+v ok=%v", slot, ok)
+	}
+	if slot, ok := findReinitSlot(slots, "alpha_3"); !ok || slot.Active {
+		t.Fatalf("slot alpha_3: got %+v ok=%v", slot, ok)
+	}
+}
+
 func TestCheckReinitProcedureWritesNotApplicableAndRejectsInvalidArtifact(t *testing.T) {
 	t.Parallel()
 
@@ -289,7 +387,7 @@ func TestCheckReinitProcedureWritesNotApplicableAndRejectsInvalidArtifact(t *tes
 	}
 
 	writeTestFile(t, filepath.Join(caseDir, reinitCheckerFile), `{"checker":"full-replica-reinit","valid":false}`+"\n")
-	for _, nemesis := range []string{"reinit-replica", "reinit-replica-kill-target", "reinit-replica-kill-source", "reinit-replica-dcs-partition-target", "reinit-replica-dcs-partition-primary", "reinit-replica-concurrent-request", "reinit-replica-after-failover"} {
+	for _, nemesis := range []string{"reinit-replica", "reinit-replica-kill-target", "reinit-replica-kill-source", "reinit-replica-dcs-partition-target", "reinit-replica-dcs-partition-primary", "reinit-replica-repeated", "reinit-replica-concurrent-request", "reinit-replica-after-failover"} {
 		if err := lab.checkReinitProcedure(nemesis, caseDir); err == nil || !strings.Contains(err.Error(), "reinit checker failed") {
 			t.Fatalf("invalid reinit checker error for %s: %v", nemesis, err)
 		}

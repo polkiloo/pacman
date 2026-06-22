@@ -159,6 +159,18 @@ func TestValidateNemesisSchedule(t *testing.T) {
 `,
 		},
 		{
+			name:     "accepts repeated replica reinit steps",
+			workload: "append-reinit",
+			nemesis:  "reinit-replica-repeated",
+			schedule: `
+{:time "2026-05-01T00:00:01Z" :nemesis :reinit-replica-repeated :action :start :source "alpha-1" :target "alpha-2"}
+{:time "2026-05-01T00:00:02Z" :nemesis :reinit-replica-repeated :action :step :source "alpha-1" :target "alpha-2" :operation-id "reinit-1" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:03Z" :nemesis :reinit-replica-repeated :action :step :source "alpha-1" :target "alpha-3" :operation-id "reinit-2" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:04Z" :nemesis :reinit-replica-repeated :action :heal :source "alpha-1" :target "alpha-3" :operation-id "reinit-2" :exit-status 0 :result :ok}
+{:time "2026-05-01T00:00:04Z" :nemesis :reinit-replica-repeated :action :stop :source "alpha-1" :target "alpha-3" :operation-id "reinit-2" :exit-status 0 :result :ok}
+`,
+		},
+		{
 			name:     "accepts replica reinit concurrent request result",
 			workload: "append-reinit",
 			nemesis:  "reinit-replica-concurrent-request",

@@ -15,10 +15,11 @@ import (
 var expectedDataMembers = []string{"alpha-1", "alpha-2", "alpha-3"}
 
 type clusterStatus struct {
-	Phase          string          `json:"phase"`
-	CurrentPrimary string          `json:"currentPrimary"`
-	Reinit         *reinitStatus   `json:"reinit,omitempty"`
-	Members        []clusterMember `json:"members"`
+	Phase           string           `json:"phase"`
+	CurrentPrimary  string           `json:"currentPrimary"`
+	ActiveOperation *operationStatus `json:"activeOperation,omitempty"`
+	Reinit          *reinitStatus    `json:"reinit,omitempty"`
+	Members         []clusterMember  `json:"members"`
 }
 
 type clusterMember struct {

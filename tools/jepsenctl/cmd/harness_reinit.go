@@ -14,15 +14,16 @@ const (
 )
 
 type reinitObservation struct {
-	ObservedAt      string        `json:"observedAt"`
-	Service         string        `json:"service"`
-	ClusterPhase    string        `json:"clusterPhase"`
-	CurrentPrimary  string        `json:"currentPrimary"`
-	ClusterReinit   *reinitStatus `json:"clusterReinit,omitempty"`
-	TargetMember    clusterMember `json:"targetMember"`
-	TargetStreaming bool          `json:"targetStreaming"`
-	TargetHealthy   bool          `json:"targetHealthy"`
-	Error           string        `json:"error,omitempty"`
+	ObservedAt      string           `json:"observedAt"`
+	Service         string           `json:"service"`
+	ClusterPhase    string           `json:"clusterPhase"`
+	CurrentPrimary  string           `json:"currentPrimary"`
+	ActiveOperation *operationStatus `json:"activeOperation,omitempty"`
+	ClusterReinit   *reinitStatus    `json:"clusterReinit,omitempty"`
+	TargetMember    clusterMember    `json:"targetMember"`
+	TargetStreaming bool             `json:"targetStreaming"`
+	TargetHealthy   bool             `json:"targetHealthy"`
+	Error           string           `json:"error,omitempty"`
 }
 
 type reinitWaitResult struct {
@@ -80,6 +81,80 @@ type reinitDCSPartitionPrimaryProbe struct {
 	UnsafeTargetPrimaryObservations   []reinitObservation `json:"unsafeTargetPrimaryObservations,omitempty"`
 	UnavailableQuorumSideObservations int                 `json:"unavailableQuorumSideObservations,omitempty"`
 	Error                             string              `json:"error,omitempty"`
+}
+
+type operationStatus struct {
+	ID     string `json:"id"`
+	Kind   string `json:"kind"`
+	State  string `json:"state"`
+	Result string `json:"result,omitempty"`
+}
+
+type reinitRepeatedStep struct {
+	Index          int              `json:"index"`
+	RequestedAt    string           `json:"requestedAt"`
+	Target         string           `json:"target"`
+	Source         string           `json:"source"`
+	ControlService string           `json:"controlService"`
+	TargetService  string           `json:"targetService"`
+	ExitStatus     int              `json:"exitStatus"`
+	Output         string           `json:"output"`
+	OperationID    string           `json:"operationId"`
+	Wait           reinitWaitResult `json:"wait"`
+	Valid          bool             `json:"valid"`
+	Error          string           `json:"error,omitempty"`
+}
+
+type reinitRepeatedResult struct {
+	Valid       bool                       `json:"valid"`
+	Nemesis     string                     `json:"nemesis"`
+	Steps       []reinitRepeatedStep       `json:"steps"`
+	History     reinitRepeatedHistoryCheck `json:"history"`
+	Slots       reinitRepeatedSlotCheck    `json:"slots"`
+	FinalHealth reinitRepeatedFinalHealth  `json:"finalHealth"`
+	FinalStatus *clusterStatus             `json:"finalStatus,omitempty"`
+	Error       string                     `json:"error,omitempty"`
+}
+
+type reinitRepeatedHistoryCheck struct {
+	Valid   bool                 `json:"valid"`
+	Entries []reinitHistoryEntry `json:"entries"`
+	Error   string               `json:"error,omitempty"`
+}
+
+type reinitHistoryResponse struct {
+	Items []reinitHistoryEntry `json:"items"`
+}
+
+type reinitHistoryEntry struct {
+	OperationID string `json:"operationId"`
+	Kind        string `json:"kind"`
+	FromMember  string `json:"fromMember,omitempty"`
+	ToMember    string `json:"toMember,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+	Result      string `json:"result"`
+	FinishedAt  string `json:"finishedAt"`
+}
+
+type reinitRepeatedSlotCheck struct {
+	Valid          bool               `json:"valid"`
+	Primary        string             `json:"primary"`
+	PrimaryService string             `json:"primaryService"`
+	ExpectedSlots  []string           `json:"expectedSlots"`
+	Slots          []reinitSlotStatus `json:"slots"`
+	Error          string             `json:"error,omitempty"`
+}
+
+type reinitSlotStatus struct {
+	SlotName   string `json:"slotName"`
+	Active     bool   `json:"active"`
+	RestartLSN string `json:"restartLsn,omitempty"`
+}
+
+type reinitRepeatedFinalHealth struct {
+	Valid   bool     `json:"valid"`
+	Targets []string `json:"targets"`
+	Error   string   `json:"error,omitempty"`
 }
 
 func (lab *harnessLab) runReinitReplica(ctx context.Context, caseDir, scheduleFile string, options reinitRunOptions) error {
@@ -162,6 +237,10 @@ func (lab *harnessLab) runReinitReplica(ctx context.Context, caseDir, scheduleFi
 }
 
 func (lab *harnessLab) reinitTarget(ctx context.Context) (target, source, controlService string, err error) {
+	return lab.reinitTargetExcluding(ctx, nil)
+}
+
+func (lab *harnessLab) reinitTargetExcluding(ctx context.Context, excluded map[string]struct{}) (target, source, controlService string, err error) {
 	status, service, err := lab.pacmanClusterStatusAny(ctx)
 	if err != nil {
 		return "", "", "", err
@@ -169,6 +248,9 @@ func (lab *harnessLab) reinitTarget(ctx context.Context) (target, source, contro
 	source = status.CurrentPrimary
 	for _, member := range status.Members {
 		if member.Name == source || !member.Healthy || member.Role != "replica" {
+			continue
+		}
+		if _, skip := excluded[member.Name]; skip {
 			continue
 		}
 		if member.State == "streaming" || member.State == "running" {
