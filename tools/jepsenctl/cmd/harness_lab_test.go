@@ -637,6 +637,93 @@ func TestPatroniNodeRuntimeStopsAndStartsComposeService(t *testing.T) {
 	}
 }
 
+func TestReinitCompletionRequiresCompletedClusterAndStreamingTarget(t *testing.T) {
+	t.Parallel()
+
+	status := clusterStatusJSONWithPrimary("alpha-1")
+	var healthy clusterStatus
+	if err := json.Unmarshal([]byte(status), &healthy); err != nil {
+		t.Fatalf("decode cluster: %v", err)
+	}
+	healthy.Reinit = &reinitStatus{
+		OperationID: "reinit-1",
+		State:       "completed",
+		LastResult:  "succeeded",
+		FromMember:  "alpha-1",
+		ToMember:    "alpha-2",
+	}
+	for index := range healthy.Members {
+		if healthy.Members[index].Name == "alpha-2" {
+			healthy.Members[index].Reinit = healthy.Reinit
+		}
+	}
+
+	if !reinitComplete(healthy, "alpha-2", "alpha-1", "reinit-1") {
+		t.Fatalf("expected healthy completed reinit status to pass")
+	}
+
+	wrongOperation := healthy
+	wrongOperation.Reinit = &reinitStatus{
+		OperationID: "reinit-other",
+		State:       "completed",
+		LastResult:  "succeeded",
+		FromMember:  "alpha-1",
+		ToMember:    "alpha-2",
+	}
+	if reinitComplete(wrongOperation, "alpha-2", "alpha-1", "reinit-1") {
+		t.Fatalf("expected mismatched operation id to fail")
+	}
+
+	notStreaming := healthy
+	for index := range notStreaming.Members {
+		if notStreaming.Members[index].Name == "alpha-2" {
+			notStreaming.Members[index].State = "stopping"
+		}
+	}
+	if reinitComplete(notStreaming, "alpha-2", "alpha-1", "reinit-1") {
+		t.Fatalf("expected non-streaming target to fail")
+	}
+}
+
+func TestCheckReinitProcedureWritesNotApplicableAndRejectsInvalidArtifact(t *testing.T) {
+	t.Parallel()
+
+	lab := &harnessLab{}
+	caseDir := t.TempDir()
+
+	if err := lab.checkReinitProcedure("kill", caseDir); err != nil {
+		t.Fatalf("non-reinit checker: %v", err)
+	}
+	var checker map[string]any
+	readJSONTestFile(t, filepath.Join(caseDir, reinitCheckerFile), &checker)
+	if checker["applicable"] != false || checker["valid"] != true {
+		t.Fatalf("not applicable checker: %#v", checker)
+	}
+
+	writeTestFile(t, filepath.Join(caseDir, reinitCheckerFile), `{"checker":"full-replica-reinit","valid":false}`+"\n")
+	if err := lab.checkReinitProcedure("reinit-replica", caseDir); err == nil || !strings.Contains(err.Error(), "reinit checker failed") {
+		t.Fatalf("invalid reinit checker error: %v", err)
+	}
+}
+
+func TestReinitOperationIDFromPrettyJSONOutput(t *testing.T) {
+	t.Parallel()
+
+	output := `log line
+{
+  "message": "reinit accepted",
+  "operation": {
+    "id": "reinit-20260621T120000Z",
+    "kind": "reinit"
+  }
+}
+`
+
+	if got := reinitOperationIDFromOutput(output); got != "reinit-20260621T120000Z" {
+		t.Fatalf("operation id: got %q", got)
+	}
+}
+
 func TestHarnessSmallProfileHelpers(t *testing.T) {
 	t.Parallel()
 
@@ -660,6 +747,9 @@ func TestHarnessSmallProfileHelpers(t *testing.T) {
 	}
 	if got := workloadTable("append-check-timeline"); got != "jepsen.append_values" {
 		t.Fatalf("check timeline append table: got %q", got)
+	}
+	if got := workloadTable("append-reinit"); got != "jepsen.append_values" {
+		t.Fatalf("reinit append table: got %q", got)
 	}
 	if got := workloadTable("serializable-txn"); got != "jepsen.txn_ops" {
 		t.Fatalf("txn table: got %q", got)

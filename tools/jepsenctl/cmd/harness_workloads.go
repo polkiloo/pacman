@@ -17,7 +17,7 @@ func (lab *harnessLab) runWorkloadProfile(ctx context.Context, workload, runID, 
 	switch workload {
 	case "append-smoke", "append-dcs-quorum":
 		return lab.runAppendWorkload(ctx, runID, caseDir, "read committed", lab.cfg.defaultOps, lab.cfg.defaultKeys, 0)
-	case "append-failover", "append-sync", "append-sync-two", "append-strict-sync", "append-max-lag", "append-check-timeline":
+	case "append-failover", "append-reinit", "append-sync", "append-sync-two", "append-strict-sync", "append-max-lag", "append-check-timeline":
 		return lab.runAppendWorkload(ctx, runID, caseDir, "read committed", lab.cfg.defaultOps, lab.cfg.defaultKeys, lab.cfg.appendFailoverOpDelay)
 	case "append-switchover":
 		return lab.runAppendWorkload(ctx, runID, caseDir, "read committed", lab.cfg.defaultOps, lab.cfg.defaultKeys, lab.cfg.appendSwitchoverOpDelay)
@@ -38,7 +38,7 @@ func (lab *harnessLab) runWorkloadProfile(ctx context.Context, workload, runID, 
 
 func (lab *harnessLab) checkWorkloadProfile(ctx context.Context, workload, runID, caseDir string) error {
 	switch workload {
-	case "append-smoke", "append-failover", "append-sync", "append-sync-two", "append-strict-sync", "append-max-lag", "append-check-timeline", "append-switchover", "append-dcs-quorum", "open-transaction-failover", "vip-routing":
+	case "append-smoke", "append-failover", "append-reinit", "append-sync", "append-sync-two", "append-strict-sync", "append-max-lag", "append-check-timeline", "append-switchover", "append-dcs-quorum", "open-transaction-failover", "vip-routing":
 		return lab.checkAppendWorkload(ctx, runID, caseDir)
 	case "single-key-register":
 		return lab.checkRegisterWorkload(ctx, runID, caseDir)

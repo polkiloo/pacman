@@ -152,6 +152,7 @@ func defaultJepsenCases() []jepsenCase {
 		{Slug: "append-failover-primary-dcs-partition", Spec: "append-failover:primary-dcs-partition", Description: "Append workload while isolating the current primary from DCS only.", NightlyUnsafe: true},
 		{Slug: "append-failover-primary-replication-partition", Spec: "append-failover:primary-replication-partition", Description: "Append workload while blocking primary replication traffic only."},
 		{Slug: "append-failover-failover-chain", Spec: "append-failover:failover-chain", Description: "Append workload while chaining manual failovers across all three data nodes."},
+		{Slug: "append-reinit-reinit-replica", Spec: "append-reinit:reinit-replica", Description: "Append workload while reinitializing a replica through the full PACMAN WAL-G restore workflow."},
 		{Slug: "open-transaction-failover-kill", Spec: "open-transaction-failover:kill", Description: "Hold a transaction open while killing the current primary."},
 		{Slug: "vip-routing-switchover", Spec: "vip-routing:switchover", Description: "Verify vip-manager routes writes only to the current PACMAN primary during switchover."},
 		{Slug: "append-dcs-quorum-dcs-kill-one", Spec: "append-dcs-quorum:dcs-kill-one", Description: "Append workload while killing one etcd DCS member."},

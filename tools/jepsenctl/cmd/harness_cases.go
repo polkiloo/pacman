@@ -139,6 +139,7 @@ func (lab *harnessLab) runCase(ctx context.Context, workload, nemesis, runDir, c
 		"dcs_traffic_checker":              lab.checkDCSTraffic(nemesis, caseDir),
 		"dcs_quorum_checker":               runChecker(func() error { return execDCSQuorumChecker(caseDir, nemesis, lab.cfg.dcsSlowMinLatencyMS) }),
 		"failover_chain_checker":           lab.checkFailoverChain(nemesis, caseDir),
+		"reinit_checker":                   lab.checkReinitProcedure(nemesis, caseDir),
 		"open_transaction_checker":         lab.checkOpenTransaction(workload, caseDir),
 		"vip_routing_checker":              runChecker(func() error { return execVIPRoutingChecker(workload, nemesis, caseDir) }),
 		"synchronous_replication_checker":  lab.checkSynchronousReplication(ctx, workload, caseDir),
@@ -206,6 +207,7 @@ func collectCaseCheckerReports(caseDir string) map[string]caseCheckerReport {
 		{key: "acknowledgedWritePreservation", file: acknowledgedWriteCheckerFile},
 		{key: "timelineConvergence", file: timelineCheckerFile},
 		{key: "failoverRejoin", file: oldPrimaryRejoinCheckerFile},
+		{key: "fullReplicaReinit", file: reinitCheckerFile},
 	}
 
 	reports := make(map[string]caseCheckerReport, len(specs))
@@ -283,6 +285,14 @@ func summarizeCaseCheckerReport(file string, raw map[string]any) string {
 			fieldString(raw, "oldPrimaryUnsafeAfterPromotion"),
 			memberName(raw["initialPrimary"]),
 			memberName(raw["finalPrimary"]))
+	case reinitCheckerFile:
+		return fmt.Sprintf("valid=%s completed=%s source=%s target=%s operationId=%s observations=%s",
+			fieldString(raw, "valid"),
+			fieldString(raw, "completed"),
+			fieldString(raw, "source"),
+			fieldString(raw, "target"),
+			fieldString(raw, "operationId"),
+			fieldString(raw, "observations"))
 	default:
 		return fmt.Sprintf("valid=%s", fieldString(raw, "valid"))
 	}
@@ -298,6 +308,8 @@ func selectedCheckerFacts(file string, raw map[string]any) map[string]any {
 		return selectFields(raw, "promotionObserved", "timelineAdvanced", "replicasConverged", "oldPrimarySafe", "initialSample", "finalSample", "oldPrimaryFinalState")
 	case oldPrimaryRejoinCheckerFile:
 		return selectFields(raw, "nemesis", "promotionObserved", "initialPrimary", "finalPrimary", "oldPrimaryRejoined", "oldPrimarySafeOrRejoined", "oldPrimaryUnsafeAfterPromotion", "oldPrimaryFinalState")
+	case reinitCheckerFile:
+		return selectFields(raw, "source", "target", "operationId", "completed", "observations", "finalStatus")
 	default:
 		return nil
 	}

@@ -69,6 +69,17 @@ pacmand_config_path: /etc/pacman/pacmand.yaml
 pacmand_state_dir: /var/lib/pacman
 pacmand_token_dir: "{{ pacmand_config_dir }}/tokens"
 
+pacman_reinit_walg_enabled: false
+pacman_reinit_walg_binary: wal-g
+pacman_reinit_walg_repository_provider: filesystem
+pacman_reinit_walg_repository_prefix: /var/lib/pacman/walg
+pacman_reinit_walg_repository_endpoint: ""
+pacman_reinit_walg_repository_region: ""
+pacman_reinit_walg_restore_backup_name: LATEST
+pacman_reinit_walg_environment: {}
+pacman_reinit_walg_environment_files: {}
+pacman_reinit_walg_inherit_environment: []
+
 vip_manager_enabled: false
 vip_manager_version: 3.0.0
 vip_manager_package_url: ""

@@ -8,6 +8,15 @@ pacman_admin_token_inline: lab-admin-token
 postgres_superuser_password: pacman-demo-password
 pacmand_environment:
   PGPASSWORD: pacman-demo-password
+pacman_reinit_walg_enabled: true
+pacman_reinit_walg_binary: /usr/local/bin/pacman-lab-wal-g
+pacman_reinit_walg_repository_provider: filesystem
+pacman_reinit_walg_repository_prefix: /var/lib/pacman/walg
+pacman_reinit_walg_restore_backup_name: LATEST
+pacman_reinit_walg_environment:
+  PACMAN_LAB_REINIT_PRIMARY_HOST: 172.28.0.100
+  PACMAN_LAB_REINIT_PRIMARY_PORT: "5432"
+  PACMAN_LAB_REINIT_REPLICATION_USER: replicator
 etcd_user: root
 etcd_group: root
 vip_manager_enabled: true

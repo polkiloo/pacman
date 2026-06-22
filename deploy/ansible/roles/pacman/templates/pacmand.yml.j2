@@ -44,6 +44,44 @@ postgres:
   replicationUser: "{{ postgres_replication_user }}"
   replicationPassword: "{{ postgres_replication_password }}"
 
+{% if pacman_reinit_walg_enabled | bool %}
+reinit:
+  walg:
+    binary: "{{ pacman_reinit_walg_binary }}"
+    repository:
+      provider: "{{ pacman_reinit_walg_repository_provider }}"
+      prefix: "{{ pacman_reinit_walg_repository_prefix }}"
+{% if pacman_reinit_walg_repository_endpoint | length > 0 %}
+      endpoint: "{{ pacman_reinit_walg_repository_endpoint }}"
+{% endif %}
+{% if pacman_reinit_walg_repository_region | length > 0 %}
+      region: "{{ pacman_reinit_walg_repository_region }}"
+{% endif %}
+    restore:
+      backupName: "{{ pacman_reinit_walg_restore_backup_name }}"
+{% if pacman_reinit_walg_environment or pacman_reinit_walg_environment_files or pacman_reinit_walg_inherit_environment %}
+    credentials:
+{% if pacman_reinit_walg_inherit_environment %}
+      inheritEnvironment:
+{% for name in pacman_reinit_walg_inherit_environment %}
+        - "{{ name }}"
+{% endfor %}
+{% endif %}
+{% if pacman_reinit_walg_environment %}
+      environment:
+{% for name, value in pacman_reinit_walg_environment | dictsort %}
+        {{ name }}: "{{ value }}"
+{% endfor %}
+{% endif %}
+{% if pacman_reinit_walg_environment_files %}
+      environmentFiles:
+{% for name, path in pacman_reinit_walg_environment_files | dictsort %}
+        {{ name }}: "{{ path }}"
+{% endfor %}
+{% endif %}
+{% endif %}
+
+{% endif %}
 bootstrap:
   clusterName: "{{ pacman_cluster_name }}"
   initialPrimary: "{{ pacman_initial_primary }}"

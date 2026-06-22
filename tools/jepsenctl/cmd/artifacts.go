@@ -37,6 +37,8 @@ var artifactIndexExactNames = map[string]struct{}{
 	"dcs-quorum-during-nemesis.jsonl":                 {},
 	"failover-chain-checker.json":                     {},
 	"failover-chain.jsonl":                            {},
+	"reinit-checker.json":                             {},
+	"reinit.json":                                     {},
 	"open-transaction-checker.json":                   {},
 	"open-transaction.json":                           {},
 	"vip-routing-checker.json":                        {},

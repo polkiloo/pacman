@@ -17,14 +17,26 @@ var expectedDataMembers = []string{"alpha-1", "alpha-2", "alpha-3"}
 type clusterStatus struct {
 	Phase          string          `json:"phase"`
 	CurrentPrimary string          `json:"currentPrimary"`
+	Reinit         *reinitStatus   `json:"reinit,omitempty"`
 	Members        []clusterMember `json:"members"`
 }
 
 type clusterMember struct {
-	Name    string `json:"name"`
-	Role    string `json:"role"`
-	State   string `json:"state"`
-	Healthy bool   `json:"healthy"`
+	Name    string        `json:"name"`
+	Role    string        `json:"role"`
+	State   string        `json:"state"`
+	Healthy bool          `json:"healthy"`
+	Reinit  *reinitStatus `json:"reinit,omitempty"`
+}
+
+type reinitStatus struct {
+	OperationID string `json:"operationId"`
+	State       string `json:"state"`
+	LastResult  string `json:"lastResult"`
+	FromMember  string `json:"fromMember"`
+	ToMember    string `json:"toMember"`
+	Message     string `json:"message"`
+	UpdatedAt   string `json:"updatedAt"`
 }
 
 func newClusterCommand(stdout io.Writer) *cobra.Command {

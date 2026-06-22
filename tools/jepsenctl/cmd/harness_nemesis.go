@@ -199,6 +199,8 @@ func (lab *harnessLab) applyNemesis(ctx context.Context, profile, caseDir, sched
 		lab.dcsSlowNetwork(ctx, caseDir, scheduleFile, profile, lab.cfg.dcsSlowServices)
 	case "failover-chain":
 		lab.failoverChain(ctx, caseDir, scheduleFile)
+	case "reinit-replica":
+		return lab.reinitReplica(ctx, caseDir, scheduleFile)
 	case "slow-network":
 		event("slow-network", "start", fmt.Sprintf(":target %q", member))
 		_ = lab.slowNetworkOn(ctx, service)

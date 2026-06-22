@@ -327,6 +327,7 @@ func nemesisAllowedForWorkload(workload, nemesis string) bool {
 		"append-smoke":              {"none": {}},
 		"append-switchover":         {"switchover": {}},
 		"append-failover":           {"kill": {}, "packet": {}, "packet,kill": {}, "primary-dcs-partition": {}, "primary-replication-partition": {}, "failover-chain": {}, "repeated-failure": {}},
+		"append-reinit":             {"reinit-replica": {}},
 		"append-sync":               {"kill": {}, "sync-standby-kill": {}},
 		"append-sync-two":           {"none": {}},
 		"append-strict-sync":        {"no-standby": {}},
