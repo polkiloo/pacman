@@ -87,11 +87,13 @@ func TestNewControlPlaneAgentOptionWrapsUnsupportedBackendError(t *testing.T) {
 func TestOpenConfiguredDCSReturnsRaftConfigError(t *testing.T) {
 	t.Parallel()
 
-	backend, err := openConfiguredDCS(dcs.Config{
-		Backend:      dcs.BackendRaft,
-		ClusterName:  "alpha",
-		TTL:          time.Second,
-		RetryTimeout: time.Second,
+	backend, err := openConfiguredDCS(config.Config{
+		DCS: &dcs.Config{
+			Backend:      dcs.BackendRaft,
+			ClusterName:  "alpha",
+			TTL:          time.Second,
+			RetryTimeout: time.Second,
+		},
 	})
 	if err == nil {
 		t.Fatal("expected raft config error")
@@ -103,6 +105,60 @@ func TestOpenConfiguredDCSReturnsRaftConfigError(t *testing.T) {
 
 	if backend != nil {
 		t.Fatalf("expected nil backend on raft config error, got %#v", backend)
+	}
+}
+
+func TestConfiguredRaftConfigBootstrapsInitialPrimary(t *testing.T) {
+	t.Parallel()
+
+	cfg := raftPacmandConfig(t, "alpha-1")
+	raftConfig, err := configuredRaftConfig(cfg)
+	if err != nil {
+		t.Fatalf("configured raft config: %v", err)
+	}
+
+	if !raftConfig.Bootstrap {
+		t.Fatal("expected initial primary to bootstrap multi-node raft cluster")
+	}
+}
+
+func TestConfiguredRaftConfigDoesNotBootstrapNonInitialPrimary(t *testing.T) {
+	t.Parallel()
+
+	cfg := raftPacmandConfig(t, "alpha-2")
+	raftConfig, err := configuredRaftConfig(cfg)
+	if err != nil {
+		t.Fatalf("configured raft config: %v", err)
+	}
+
+	if raftConfig.Bootstrap {
+		t.Fatal("expected non-initial-primary node not to bootstrap multi-node raft cluster")
+	}
+}
+
+func TestConfiguredRaftConfigPreservesSingleNodeBootstrapDefault(t *testing.T) {
+	t.Parallel()
+
+	raftConfig, err := configuredRaftConfig(config.Config{
+		Node: config.NodeConfig{Name: "alpha-1"},
+		DCS: &dcs.Config{
+			Backend:      dcs.BackendRaft,
+			ClusterName:  "alpha",
+			TTL:          time.Second,
+			RetryTimeout: time.Second,
+			Raft: &dcs.RaftConfig{
+				DataDir:     t.TempDir(),
+				BindAddress: "127.0.0.1:7101",
+				Peers:       []string{"127.0.0.1:7101"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("configured raft config: %v", err)
+	}
+
+	if !raftConfig.Bootstrap {
+		t.Fatal("expected single-node raft config to keep backend bootstrap default")
 	}
 }
 
@@ -159,4 +215,33 @@ func TestNewControlPlaneAgentOptionCreatesRaftBackedStore(t *testing.T) {
 
 	lifecycle.RequireStart()
 	lifecycle.RequireStop()
+}
+
+func raftPacmandConfig(t *testing.T, nodeName string) config.Config {
+	t.Helper()
+
+	return config.Config{
+		Node: config.NodeConfig{Name: nodeName},
+		DCS: &dcs.Config{
+			Backend:      dcs.BackendRaft,
+			ClusterName:  "alpha",
+			TTL:          time.Second,
+			RetryTimeout: time.Second,
+			Raft: &dcs.RaftConfig{
+				DataDir:     t.TempDir(),
+				BindAddress: "127.0.0.1:7101",
+				Peers: []string{
+					"127.0.0.1:7101",
+					"127.0.0.1:7102",
+					"127.0.0.1:7103",
+				},
+			},
+		},
+		Bootstrap: &config.ClusterBootstrapConfig{
+			ClusterName:     "alpha",
+			InitialPrimary:  "alpha-1",
+			SeedAddresses:   []string{"127.0.0.1:9091", "127.0.0.1:9092", "127.0.0.1:9093"},
+			ExpectedMembers: []string{"alpha-1", "alpha-2", "alpha-3"},
+		},
+	}
 }

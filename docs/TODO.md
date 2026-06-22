@@ -20,7 +20,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] add structured logging
 - [x] add `testcontainers-go` integration test environment for `pacmand` and `pacmanctl` with `postgres:17`
 - [x] add metrics scaffolding
-- [ ] add local development scripts
+- [x] add local development scripts
 
 ---
 
@@ -244,7 +244,7 @@ Framework: **`github.com/hashicorp/raft`** + **`github.com/hashicorp/raft-boltdb
 - [x] implement `internal/dcs/raft/config.go` — Raft-specific configuration
 - [x] implement TTL expiration via background goroutine with Raft-applied deletes
 - [x] implement leader read path (`raft.VerifyLeader()` for linearizable reads)
-- [ ] wire Raft bootstrap into `pacmand` startup when `dcs.backend: raft`
+- [x] wire Raft bootstrap into `pacmand` startup when `dcs.backend: raft`
 - [x] pass all conformance tests
 - [x] add 3-node Raft integration tests with testcontainers
 
