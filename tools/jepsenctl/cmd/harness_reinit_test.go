@@ -93,6 +93,119 @@ func TestReinitTerminalFailureRejectsUnsafeTargetPromotion(t *testing.T) {
 	}
 }
 
+func TestReinitSourceFailureRequiresNewPrimaryAndFailedReinitMetadata(t *testing.T) {
+	t.Parallel()
+
+	status := clusterStatusJSONWithPrimary("alpha-3")
+	var failed clusterStatus
+	if err := json.Unmarshal([]byte(status), &failed); err != nil {
+		t.Fatalf("decode cluster: %v", err)
+	}
+	failed.Reinit = &reinitStatus{
+		OperationID: "reinit-1",
+		State:       "failed",
+		LastResult:  "failed",
+		FromMember:  "alpha-1",
+		ToMember:    "alpha-2",
+		Message:     "source primary became unavailable during restore",
+	}
+	for index := range failed.Members {
+		if failed.Members[index].Name == "alpha-2" {
+			failed.Members[index].Reinit = failed.Reinit
+		}
+	}
+
+	if !reinitSourceFailure(failed, "alpha-2", "alpha-1", "reinit-1") {
+		t.Fatalf("expected source failure to pass when another healthy primary is writable and reinit failed")
+	}
+
+	sourceStillPrimary := failed
+	sourceStillPrimary.CurrentPrimary = "alpha-1"
+	if reinitSourceFailure(sourceStillPrimary, "alpha-2", "alpha-1", "reinit-1") {
+		t.Fatalf("expected source failure to require promotion away from failed source")
+	}
+
+	targetPromoted := failed
+	targetPromoted.CurrentPrimary = "alpha-2"
+	for index := range targetPromoted.Members {
+		if targetPromoted.Members[index].Name == "alpha-2" {
+			targetPromoted.Members[index].Role = "primary"
+			targetPromoted.Members[index].State = "running"
+		}
+	}
+	if reinitSourceFailure(targetPromoted, "alpha-2", "alpha-1", "reinit-1") {
+		t.Fatalf("expected source failure to reject unsafe target promotion")
+	}
+
+	completed := failed
+	completed.Reinit = &reinitStatus{
+		OperationID: "reinit-1",
+		State:       "completed",
+		LastResult:  "succeeded",
+		FromMember:  "alpha-1",
+		ToMember:    "alpha-2",
+	}
+	for index := range completed.Members {
+		if completed.Members[index].Name == "alpha-2" {
+			completed.Members[index].Reinit = completed.Reinit
+		}
+	}
+	if reinitSourceFailure(completed, "alpha-2", "alpha-1", "reinit-1") {
+		t.Fatalf("expected source failure to require failed reinit metadata")
+	}
+}
+
+func TestReinitTargetMisleadingHealthyRequiresMissingOperationMetadata(t *testing.T) {
+	t.Parallel()
+
+	status := clusterStatusJSONWithPrimary("alpha-1")
+	var healthy clusterStatus
+	if err := json.Unmarshal([]byte(status), &healthy); err != nil {
+		t.Fatalf("decode cluster: %v", err)
+	}
+	if !reinitTargetMisleadingHealthy(healthy, "alpha-2", "reinit-1") {
+		t.Fatalf("expected healthy target without reinit metadata to be misleading")
+	}
+
+	clusterScoped := healthy
+	clusterScoped.Reinit = &reinitStatus{
+		OperationID: "reinit-1",
+		State:       "restoring_backup",
+		LastResult:  "pending",
+		FromMember:  "alpha-1",
+		ToMember:    "alpha-2",
+	}
+	if reinitTargetMisleadingHealthy(clusterScoped, "alpha-2", "reinit-1") {
+		t.Fatalf("expected cluster-level reinit metadata to make target status non-misleading")
+	}
+
+	memberScoped := healthy
+	for index := range memberScoped.Members {
+		if memberScoped.Members[index].Name == "alpha-2" {
+			memberScoped.Members[index].Reinit = &reinitStatus{
+				OperationID: "reinit-1",
+				State:       "restoring_backup",
+				LastResult:  "pending",
+				FromMember:  "alpha-1",
+				ToMember:    "alpha-2",
+			}
+		}
+	}
+	if reinitTargetMisleadingHealthy(memberScoped, "alpha-2", "reinit-1") {
+		t.Fatalf("expected member-level reinit metadata to make target status non-misleading")
+	}
+
+	unhealthy := healthy
+	for index := range unhealthy.Members {
+		if unhealthy.Members[index].Name == "alpha-2" {
+			unhealthy.Members[index].Healthy = false
+		}
+	}
+	if reinitTargetMisleadingHealthy(unhealthy, "alpha-2", "reinit-1") {
+		t.Fatalf("expected unhealthy target not to be a misleading healthy target")
+	}
+}
+
 func TestCheckReinitProcedureWritesNotApplicableAndRejectsInvalidArtifact(t *testing.T) {
 	t.Parallel()
 
@@ -109,7 +222,7 @@ func TestCheckReinitProcedureWritesNotApplicableAndRejectsInvalidArtifact(t *tes
 	}
 
 	writeTestFile(t, filepath.Join(caseDir, reinitCheckerFile), `{"checker":"full-replica-reinit","valid":false}`+"\n")
-	for _, nemesis := range []string{"reinit-replica", "reinit-replica-kill-target", "reinit-replica-concurrent-request", "reinit-replica-after-failover"} {
+	for _, nemesis := range []string{"reinit-replica", "reinit-replica-kill-target", "reinit-replica-kill-source", "reinit-replica-dcs-partition-target", "reinit-replica-concurrent-request", "reinit-replica-after-failover"} {
 		if err := lab.checkReinitProcedure(nemesis, caseDir); err == nil || !strings.Contains(err.Error(), "reinit checker failed") {
 			t.Fatalf("invalid reinit checker error for %s: %v", nemesis, err)
 		}

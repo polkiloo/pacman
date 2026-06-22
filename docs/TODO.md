@@ -178,8 +178,8 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] add integration tests for WAL-G-driven reinit and post-restore replication recovery
 - [x] create Jepsen tests for full replica reinit procedure coverage
 - [x] add Jepsen case `append-reinit:reinit-replica-kill-target` to kill target PostgreSQL or pacmand during restore and verify the operation fails or resumes without unsafe promotion
-- [ ] add Jepsen case `append-reinit:reinit-replica-kill-source` to kill or partition the source primary during restore and verify cluster write safety plus reinit failure reporting
-- [ ] add Jepsen case `append-reinit:reinit-replica-dcs-partition-target` to isolate the target from DCS during reinit and verify it cannot publish misleading healthy state
+- [x] add Jepsen case `append-reinit:reinit-replica-kill-source` to kill or partition the source primary during restore and verify cluster write safety plus reinit failure reporting
+- [x] add Jepsen case `append-reinit:reinit-replica-dcs-partition-target` to isolate the target from DCS during reinit and verify it cannot publish misleading healthy state
 - [ ] add Jepsen case `append-reinit:reinit-replica-dcs-partition-primary` to combine reinit with primary DCS quorum pressure and validate failover safety
 - [ ] add Jepsen case `append-reinit:reinit-replica-repeated` to run sequential replica reinit operations and validate operation history, cleanup, slots, and streaming health
 - [x] add Jepsen case `append-reinit:reinit-replica-concurrent-request` to reject a second reinit while one is active and preserve deterministic journal state

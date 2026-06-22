@@ -52,6 +52,99 @@ func (lab *harnessLab) reinitReplicaKillTarget(ctx context.Context, caseDir, sch
 	})
 }
 
+func (lab *harnessLab) reinitReplicaKillSource(ctx context.Context, caseDir, scheduleFile string) error {
+	return lab.runReinitReplica(ctx, caseDir, scheduleFile, reinitRunOptions{
+		Nemesis:       "reinit-replica-kill-source",
+		Reason:        "jepsen-reinit-kill-source",
+		WaitForResult: lab.waitForReinitSourceFailure,
+		AfterAccepted: func(ctx context.Context, run reinitRunContext) reinitVariantResult {
+			result := reinitVariantResult{Valid: true, Details: map[string]any{
+				"sourceService": run.SourceService,
+			}}
+			if run.SourceService == "" {
+				result.Valid = false
+				result.Error = fmt.Sprintf("source service is unknown for %s", run.Source)
+				return result
+			}
+			restartAttempted := false
+			defer func() {
+				if restartAttempted {
+					return
+				}
+				if err := lab.startNodeRuntime(ctx, run.SourceService); err != nil && result.Error == "" {
+					result.Error = err.Error()
+				}
+			}()
+			if err := lab.stopNodeRuntime(ctx, run.SourceService); err != nil {
+				result.Valid = false
+				result.Error = err.Error()
+				return result
+			}
+			result.Details["sourceStopped"] = true
+			result.Details["promoted"] = lab.waitForCurrentPrimaryNot(ctx, run.Source, 90*time.Second)
+			if result.Details["promoted"] == "unknown" {
+				result.Valid = false
+				result.Error = fmt.Sprintf("timed out waiting for promotion after stopping source %s", run.Source)
+			}
+			time.Sleep(lab.cfg.nemesisHold)
+			restartAttempted = true
+			if err := lab.startNodeRuntime(ctx, run.SourceService); err != nil {
+				result.Valid = false
+				result.Error = err.Error()
+				return result
+			}
+			result.Details["sourceRestarted"] = true
+			return result
+		},
+	})
+}
+
+func (lab *harnessLab) reinitReplicaDCSPartitionTarget(ctx context.Context, caseDir, scheduleFile string) error {
+	return lab.runReinitReplica(ctx, caseDir, scheduleFile, reinitRunOptions{
+		Nemesis:       "reinit-replica-dcs-partition-target",
+		Reason:        "jepsen-reinit-dcs-partition-target",
+		WaitForResult: lab.waitForReinitCompletionOrTerminalFailure,
+		AfterAccepted: func(ctx context.Context, run reinitRunContext) reinitVariantResult {
+			dcsServices := append([]string(nil), lab.cfg.dcsRestartServices...)
+			result := reinitVariantResult{Valid: true, Details: map[string]any{
+				"targetService": run.TargetService,
+				"dcsServices":   dcsServices,
+			}}
+			if run.TargetService == "" {
+				result.Valid = false
+				result.Error = fmt.Sprintf("target service is unknown for %s", run.Target)
+				return result
+			}
+			if len(dcsServices) == 0 {
+				result.Valid = false
+				result.Error = "no DCS services configured for target partition"
+				return result
+			}
+
+			partitioned := false
+			defer func() {
+				if partitioned {
+					lab.iptablesHeal(ctx, run.TargetService, dcsServices)
+				}
+			}()
+			if err := lab.iptablesPartition(ctx, run.TargetService, dcsServices); err != nil {
+				result.Valid = false
+				result.Error = err.Error()
+				return result
+			}
+			partitioned = true
+
+			probe := lab.observeReinitDCSPartitionTarget(ctx, run, dcsServices, lab.cfg.nemesisHold)
+			result.Details["dcsPartitionProbe"] = probe
+			if !probe.Valid {
+				result.Valid = false
+				result.Error = probe.Error
+			}
+			return result
+		},
+	})
+}
+
 func (lab *harnessLab) reinitReplicaConcurrentRequest(ctx context.Context, caseDir, scheduleFile string) error {
 	return lab.runReinitReplica(ctx, caseDir, scheduleFile, reinitRunOptions{
 		Nemesis: "reinit-replica-concurrent-request",
@@ -72,6 +165,85 @@ func (lab *harnessLab) reinitReplicaConcurrentRequest(ctx context.Context, caseD
 			return result
 		},
 	})
+}
+
+func (lab *harnessLab) observeReinitDCSPartitionTarget(ctx context.Context, run reinitRunContext, dcsServices []string, duration time.Duration) reinitDCSPartitionTargetProbe {
+	probe := reinitDCSPartitionTargetProbe{
+		Valid:       true,
+		DcsServices: append([]string(nil), dcsServices...),
+	}
+	deadline := time.Now().Add(maxDuration(duration, lab.cfg.clusterVerifyInterval))
+	successfulObservations := 0
+
+	for {
+		status, service, err := lab.pacmanClusterStatusAny(ctx)
+		observation := reinitObservation{
+			ObservedAt: time.Now().UTC().Format(time.RFC3339),
+			Service:    service,
+		}
+		if err != nil {
+			observation.Error = err.Error()
+		} else {
+			successfulObservations++
+			observation.ClusterPhase = status.Phase
+			observation.CurrentPrimary = status.CurrentPrimary
+			observation.ClusterReinit = status.Reinit
+			for _, member := range status.Members {
+				if member.Name == run.Target {
+					observation.TargetMember = member
+					observation.TargetHealthy = member.Healthy
+					observation.TargetStreaming = member.Role == "replica" && member.State == "streaming"
+					break
+				}
+			}
+			if reinitTargetMisleadingHealthy(status, run.Target, run.OperationID) {
+				probe.MisleadingHealthyObservations = append(probe.MisleadingHealthyObservations, observation)
+			}
+		}
+		probe.Observations = append(probe.Observations, observation)
+
+		if !time.Now().Before(deadline) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			probe.Valid = false
+			probe.Error = ctx.Err().Error()
+			return probe
+		case <-time.After(lab.cfg.clusterVerifyInterval):
+		}
+	}
+
+	if successfulObservations == 0 {
+		probe.Valid = false
+		probe.Error = "no successful cluster status observations while target was DCS-isolated"
+		return probe
+	}
+	if len(probe.MisleadingHealthyObservations) > 0 {
+		probe.Valid = false
+		probe.Error = "target published misleading healthy state while DCS-isolated during reinit"
+	}
+	return probe
+}
+
+func reinitTargetMisleadingHealthy(status clusterStatus, target, operationID string) bool {
+	if reinitStatusMatchesOperation(status.Reinit, operationID) {
+		return false
+	}
+	for _, member := range status.Members {
+		if member.Name != target {
+			continue
+		}
+		if reinitStatusMatchesOperation(member.Reinit, operationID) {
+			return false
+		}
+		return member.Healthy && (member.State == "running" || member.State == "streaming")
+	}
+	return false
+}
+
+func reinitStatusMatchesOperation(status *reinitStatus, operationID string) bool {
+	return status != nil && operationID != "" && status.OperationID == operationID
 }
 
 func (lab *harnessLab) reinitReplicaAfterFailover(ctx context.Context, caseDir, scheduleFile string) error {

@@ -36,6 +36,10 @@ func (lab *harnessLab) waitForReinitCompletionOrTerminalFailure(ctx context.Cont
 	})
 }
 
+func (lab *harnessLab) waitForReinitSourceFailure(ctx context.Context, target, source, operationID string) reinitWaitResult {
+	return lab.waitForReinitOutcome(ctx, target, source, operationID, reinitSourceFailure)
+}
+
 func (lab *harnessLab) waitForReinitOutcome(ctx context.Context, target, source, operationID string, accepted func(clusterStatus, string, string, string) bool) reinitWaitResult {
 	result := reinitWaitResult{
 		OperationID: operationID,
@@ -134,6 +138,27 @@ func reinitTerminalFailure(status clusterStatus, target, source, operationID str
 			reinitStatusTerminalFailure(member.Reinit, target, source, operationID)
 	}
 	return false
+}
+
+func reinitSourceFailure(status clusterStatus, target, source, operationID string) bool {
+	if status.CurrentPrimary == "" || status.CurrentPrimary == source || status.CurrentPrimary == target || status.Reinit == nil {
+		return false
+	}
+	if !reinitStatusTerminalFailure(status.Reinit, target, source, operationID) {
+		return false
+	}
+	targetFailed := false
+	currentPrimaryHealthy := false
+	for _, member := range status.Members {
+		if member.Name == target {
+			targetFailed = member.Role != "primary" && reinitStatusTerminalFailure(member.Reinit, target, source, operationID)
+			continue
+		}
+		if member.Name == status.CurrentPrimary {
+			currentPrimaryHealthy = member.Healthy && member.Role == "primary" && member.State == "running"
+		}
+	}
+	return targetFailed && currentPrimaryHealthy
 }
 
 func reinitStatusCompleted(status *reinitStatus, target, source, operationID string) bool {

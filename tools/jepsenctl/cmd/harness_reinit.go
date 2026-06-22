@@ -50,13 +50,24 @@ type reinitRunContext struct {
 	Source         string
 	ControlService string
 	TargetService  string
+	SourceService  string
 	OperationID    string
+	CaseDir        string
+	ScheduleFile   string
 }
 
 type reinitVariantResult struct {
 	Valid   bool
 	Error   string
 	Details map[string]any
+}
+
+type reinitDCSPartitionTargetProbe struct {
+	Valid                         bool                `json:"valid"`
+	DcsServices                   []string            `json:"dcsServices"`
+	Observations                  []reinitObservation `json:"observations"`
+	MisleadingHealthyObservations []reinitObservation `json:"misleadingHealthyObservations,omitempty"`
+	Error                         string              `json:"error,omitempty"`
 }
 
 func (lab *harnessLab) runReinitReplica(ctx context.Context, caseDir, scheduleFile string, options reinitRunOptions) error {
@@ -103,7 +114,10 @@ func (lab *harnessLab) runReinitReplica(ctx context.Context, caseDir, scheduleFi
 			Source:         source,
 			ControlService: controlService,
 			TargetService:  lab.serviceForMember(target),
+			SourceService:  lab.serviceForMember(source),
 			OperationID:    operationID,
+			CaseDir:        caseDir,
+			ScheduleFile:   scheduleFile,
 		})
 		result["variant"] = variant.Details
 		if variant.Error != "" {
