@@ -92,6 +92,12 @@ The staged mode exists so operators can distribute both the current and next
 bearer token, then switch the active symlink by changing
 `pacman_admin_token_active_id` in a later run.
 
+WAL-G reinit credentials can also be kept out of `pacmand.yaml` by setting
+`pacman_reinit_walg_environment_file_values`. The role writes those values as
+root-owned files under `pacman_reinit_walg_environment_file_dir` and renders
+matching `environmentFiles` entries for PACMAN. Existing files can be referenced
+directly with `pacman_reinit_walg_environment_files`.
+
 Example:
 
 ```bash

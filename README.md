@@ -35,3 +35,12 @@ A draft OpenAPI contract for the control-plane API lives in [docs/openapi.yaml](
 The maintainable split source for that contract lives in [docs/openapi](docs/openapi), using `oapi-codegen`-compatible external references across the module files.
 It now includes both PACMAN-native `/api/v1/*` endpoints and Patroni-compatible top-level routes to support seamless migration.
 The review notes, authentication model, and compatibility policy for that contract live in [docs/api-contract.md](docs/api-contract.md).
+
+## Local Development
+
+Common local workflows are wrapped in repository scripts:
+
+- `scripts/dev-setup.sh` prepares repo-local caches, downloads Go modules, and installs `golangci-lint` when missing.
+- `scripts/dev-check.sh quick` runs formatting, build, unit tests, and lint.
+- `scripts/dev-check.sh full` adds coverage and OpenAPI codegen checks.
+- `scripts/dev-clean.sh --all` removes build outputs and repo-local caches.

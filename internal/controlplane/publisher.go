@@ -19,8 +19,9 @@ type NodeStatePublisher interface {
 	PublishNodeStatus(context.Context, agentmodel.NodeStatus) (agentmodel.ControlPlaneStatus, error)
 }
 
-// MemoryStateStore is an in-memory replicated control-plane state store used
-// until the distributed source of truth is implemented.
+// MemoryStateStore is the DCS-backed control-plane state store. The name is
+// retained for compatibility with the existing unit and integration test
+// surface.
 type MemoryStateStore struct {
 	dcs                  dcs.DCS
 	keyspace             dcs.KeySpace

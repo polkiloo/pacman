@@ -20,7 +20,7 @@ The goal of the MVP is to deliver a minimal but serious PostgreSQL HA control pl
 - [x] add structured logging
 - [x] add `testcontainers-go` integration test environment for `pacmand` and `pacmanctl` with `postgres:17`
 - [x] add metrics scaffolding
-- [ ] add local development scripts
+- [x] add local development scripts
 
 ---
 
@@ -244,7 +244,7 @@ Framework: **`github.com/hashicorp/raft`** + **`github.com/hashicorp/raft-boltdb
 - [x] implement `internal/dcs/raft/config.go` — Raft-specific configuration
 - [x] implement TTL expiration via background goroutine with Raft-applied deletes
 - [x] implement leader read path (`raft.VerifyLeader()` for linearizable reads)
-- [ ] wire Raft bootstrap into `pacmand` startup when `dcs.backend: raft`
+- [x] wire Raft bootstrap into `pacmand` startup when `dcs.backend: raft`
 - [x] pass all conformance tests
 - [x] add 3-node Raft integration tests with testcontainers
 
@@ -532,15 +532,26 @@ This track captures the Kubernetes-native operator model described in [ARCHITECT
 - [ ] prevent unsafe failover completion without fencing confirmation
 - [ ] handle node drain and eviction interactions with failover policy
 
-### Kubernetes Packaging and Testing
+### Kubernetes Packaging
 - [ ] add RBAC manifests
 - [ ] add operator deployment manifest
 - [ ] add local `kind`-based lab environment
+
+### Kubernetes Integration Tests
 - [ ] add Kubernetes bootstrap end-to-end test
 - [ ] add Kubernetes planned switchover end-to-end test
 - [ ] add Kubernetes automatic failover end-to-end test
 - [ ] add Kubernetes former primary rejoin end-to-end test
 - [ ] add pod deletion and node drain scenario coverage
+- [ ] add role-service routing coverage for `primary` and `replicas` Services after promotion and rejoin
+- [ ] add operator reconciliation coverage for pod restart, PVC reuse, and StatefulSet rolling update scenarios
+
+### Kubernetes Jepsen Tests
+- [ ] add Kubernetes Jepsen target backed by the local `kind` lab
+- [ ] add Kubernetes Jepsen smoke campaign for bootstrap, steady writes, and no-fault validation
+- [ ] add Kubernetes Jepsen pod-kill / pod-delete campaign covering primary and replica disruption
+- [ ] add Kubernetes Jepsen network-partition campaign covering primary isolation, replica isolation, and quorum loss
+- [ ] add Kubernetes Jepsen node-drain / eviction campaign to validate fencing, failover, and former-primary rejoin behavior
 
 ---
 
@@ -553,29 +564,29 @@ This track captures the Kubernetes-native operator model described in [ARCHITECT
 - [x] implement lifecycle management
 
 ## Milestone 2 — Cluster View
-- [ ] implement multi-node membership
-- [ ] implement cluster status aggregation
-- [ ] implement leader election
-- [ ] implement source of truth model
+- [x] implement multi-node membership
+- [x] implement cluster status aggregation
+- [x] implement leader election
+- [x] implement source of truth model
 
 ## Milestone 3 — Planned Switchover
-- [ ] implement desired state model
-- [ ] implement promote / demote orchestration
-- [ ] implement operation history
+- [x] implement desired state model
+- [x] implement promote / demote orchestration
+- [x] implement operation history
 
 ## Milestone 4 — Automatic Failover
-- [ ] implement quorum-based failure confirmation
-- [ ] implement candidate selection
-- [ ] implement controlled promotion
-- [ ] implement epoch transition
+- [x] implement quorum-based failure confirmation
+- [x] implement candidate selection
+- [x] implement controlled promotion
+- [x] implement epoch transition
 
 ## Milestone 5 — Rejoin and Hardening
-- [ ] implement rejoin workflow
-- [ ] integrate rewind support
-- [ ] implement maintenance mode
-- [ ] implement reliability improvements
-- [ ] stabilize end-to-end tests
-- [ ] establish separate Jepsen fault-injection validation outside the fast PR pipeline
+- [x] implement rejoin workflow
+- [x] integrate rewind support
+- [x] implement maintenance mode
+- [x] implement reliability improvements
+- [x] stabilize end-to-end tests
+- [x] establish separate Jepsen fault-injection validation outside the fast PR pipeline
 
 ## Milestone 6 — Kubernetes Operator MVP
 - [ ] implement `PostgresCluster` CRD and status model
@@ -588,6 +599,7 @@ This track captures the Kubernetes-native operator model described in [ARCHITECT
 
 ## Nice-to-Have After MVP
 
+### Deferred Post-MVP Scope
 - [ ] add synchronous replication policies
 - [ ] add richer fencing backends
 - [ ] improve dedicated witness mode
@@ -595,8 +607,6 @@ This track captures the Kubernetes-native operator model described in [ARCHITECT
 - [ ] automate endpoint management
 - [ ] add web UI
 - [ ] add distributed-topology and MPP coverage inspired by Patroni `tests/test_citus.py` and `tests/test_mpp.py`
-
-### Cascading Replication
 - [ ] define post-MVP product scope and safety rules for cascading replication, including when PACMAN may prefer direct vs cascaded upstreams
 - [ ] extend the domain model with explicit replication upstream metadata so a replica can stream either from the current primary or from another replica
 - [ ] extend config and API surfaces to declare cascade-eligible members, preferred upstreams, and topology constraints for WAN / AZ-aware layouts
@@ -607,8 +617,6 @@ This track captures the Kubernetes-native operator model described in [ARCHITECT
 - [ ] extend failover candidate ranking to account for cascade depth, upstream health, and lag amplification across the replication tree
 - [ ] define slot and retention policy for cascaded replicas so WAL retention remains sufficient for downstream branches during outages
 - [ ] add `testcontainers-go` integration coverage for primary -> replica -> replica topologies, including upstream loss, promotion, and topology rewire scenarios
-
-### Multiple Replicas and Topology Policies
 - [ ] define the post-MVP product scope for clusters with many replicas, including supported replica counts, placement assumptions, and operator guarantees
 - [ ] extend the domain model with per-replica priority, availability-zone / location metadata, and promotion constraints used by failover ranking
 - [ ] add config and API support for replica tags such as `no_failover`, `no_sync`, `preferred_candidate`, and read-only routing hints
@@ -619,8 +627,6 @@ This track captures the Kubernetes-native operator model described in [ARCHITECT
 - [ ] implement reconciliation for adding, removing, and replacing replicas without destabilizing the current primary or existing healthy replicas
 - [ ] add API and CLI views that expose the full ordered replica set, promotion eligibility, and current upstream / sync state for each member
 - [ ] add `testcontainers-go` integration coverage for clusters with 3+ replicas, including direct-replication fanout, replica replacement, sync-standby rotation, and candidate ranking scenarios
-
-### Managed Logical Replication and Downstream Delivery
 - [ ] define post-MVP product scope for `physical HA + managed logical replication`, including guarantees, non-goals, and failure model relative to core HA
 - [ ] define cluster/domain model for logical publications, downstream subscriptions, delivery pipelines, and per-sink status
 - [ ] add config/API model for managed logical replication pipelines, including publication selection, table filters, and sink credentials

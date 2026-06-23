@@ -42,5 +42,7 @@ pacman_reinit_walg_repository_endpoint: ""
 pacman_reinit_walg_repository_region: ""
 pacman_reinit_walg_restore_backup_name: LATEST
 pacman_reinit_walg_environment: {}
+pacman_reinit_walg_environment_file_dir: "{{ pacmand_config_dir }}/walg-env"
+pacman_reinit_walg_environment_file_values: {}
 pacman_reinit_walg_environment_files: {}
 pacman_reinit_walg_inherit_environment: []

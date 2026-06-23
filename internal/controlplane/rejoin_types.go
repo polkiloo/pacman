@@ -9,8 +9,8 @@ import (
 	"github.com/polkiloo/pacman/internal/postgres"
 )
 
-// RejoinEngine exposes rejoin planning and the currently implemented rejoin
-// execution phases against the replicated control-plane state.
+// RejoinEngine exposes rejoin planning and execution phases against the
+// replicated control-plane state.
 type RejoinEngine interface {
 	AssessRejoinMember(string) (RejoinMemberAssessment, error)
 	DetectRejoinDivergence(string) (RejoinDivergenceAssessment, error)

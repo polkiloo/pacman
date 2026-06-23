@@ -22,6 +22,7 @@ const (
 	ansibleVarsPath        = "/workspace/test-vars.yml"
 	ansibleRPMPath         = "/workspace/artifacts/pacman.rpm"
 	pacmandConfigPath      = "/etc/pacman/pacmand.yaml"
+	walgEnvDir             = "/etc/pacman/walg-env"
 	pacmandSmokeConfigPath = "/var/lib/pacman/pacmand-smoke.yaml"
 	pacmandAPIPort         = "8080"
 	pacmandControlPort     = "9090"
@@ -76,6 +77,12 @@ func TestAnsibleThreeNodeInstallationUsingTestcontainers(t *testing.T) {
 	assertPackageInstalled(t, replica, "postgresql17-server")
 	assertFileContains(t, primary, pacmandConfigPath, "initialPrimary: \"alpha-1\"")
 	assertFileContains(t, primary, pacmandConfigPath, "http://pacman-dcs:2379")
+	assertFileContains(t, primary, pacmandConfigPath, "environmentFiles:")
+	assertFileContains(t, primary, pacmandConfigPath, "PACMAN_LAB_REINIT_PRIMARY_HOST: \"/etc/pacman/walg-env/PACMAN_LAB_REINIT_PRIMARY_HOST\"")
+	assertFileNotContains(t, primary, pacmandConfigPath, "PACMAN_LAB_REINIT_PRIMARY_HOST: \"pacman-primary\"")
+	assertFileContent(t, primary, walgEnvDir+"/PACMAN_LAB_REINIT_PRIMARY_HOST", "pacman-primary\n")
+	assertFileMode(t, primary, pacmandConfigPath, "640")
+	assertFileMode(t, primary, walgEnvDir+"/PACMAN_LAB_REINIT_PRIMARY_HOST", "640")
 	assertFileContains(t, replica, pacmandConfigPath, "http://pacman-dcs:2379")
 	assertFileContains(t, replica, "/var/lib/pgsql/17/data/postgresql.auto.conf", "primary_slot_name = 'pacman_alpha_2'")
 	assertFileExists(t, replica, "/var/lib/pgsql/17/data/standby.signal")
@@ -271,6 +278,9 @@ etcd_manage_service: false
 etcd_user: root
 etcd_group: root
 pacman_admin_token_inline: integration-token
+pacman_reinit_walg_enabled: true
+pacman_reinit_walg_environment_file_values:
+  PACMAN_LAB_REINIT_PRIMARY_HOST: pacman-primary
 `
 }
 
@@ -299,6 +309,33 @@ func assertFileContains(t *testing.T, service *testenv.Service, path, want strin
 	output := service.RequireExec(t, "cat", path)
 	if !strings.Contains(output, want) {
 		t.Fatalf("expected %q in %s for service %q, got %q", want, path, service.Name(), output)
+	}
+}
+
+func assertFileNotContains(t *testing.T, service *testenv.Service, path, unwanted string) {
+	t.Helper()
+
+	output := service.RequireExec(t, "cat", path)
+	if strings.Contains(output, unwanted) {
+		t.Fatalf("did not expect %q in %s for service %q, got %q", unwanted, path, service.Name(), output)
+	}
+}
+
+func assertFileContent(t *testing.T, service *testenv.Service, path, want string) {
+	t.Helper()
+
+	output := service.RequireExec(t, "cat", path)
+	if output != want {
+		t.Fatalf("expected %s content %q for service %q, got %q", path, want, service.Name(), output)
+	}
+}
+
+func assertFileMode(t *testing.T, service *testenv.Service, path, want string) {
+	t.Helper()
+
+	output := strings.TrimSpace(service.RequireExec(t, "stat", "-c", "%a", path))
+	if output != want {
+		t.Fatalf("expected %s mode %s for service %q, got %s", path, want, service.Name(), output)
 	}
 }
 
