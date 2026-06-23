@@ -7,8 +7,8 @@ import (
 	"github.com/polkiloo/pacman/internal/cluster"
 )
 
-// SwitchoverEngine exposes planned switchover validation against the
-// replicated control-plane state.
+// SwitchoverEngine exposes planned switchover validation, intent management,
+// and execution against the replicated control-plane state.
 type SwitchoverEngine interface {
 	SwitchoverTargetReadiness(string) (SwitchoverTargetReadiness, error)
 	ValidateSwitchover(context.Context, SwitchoverRequest) (SwitchoverValidation, error)

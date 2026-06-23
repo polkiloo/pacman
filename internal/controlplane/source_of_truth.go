@@ -49,7 +49,8 @@ type SourceOfTruthStore interface {
 }
 
 // ReplicatedStateStore is the control-plane state surface shared across
-// membership, leader election, desired state, and future observed state.
+// membership, leader election, desired state, observed state, and operation
+// workflows.
 type ReplicatedStateStore interface {
 	NodeStatePublisher
 	MemberRegistrar
@@ -67,8 +68,7 @@ type ReplicatedStateStore interface {
 }
 
 // ClusterSourceOfTruth captures the desired and observed cluster state accepted
-// by the control plane. Observed state may remain unset until aggregation is
-// implemented.
+// by the control plane.
 type ClusterSourceOfTruth struct {
 	Desired   *cluster.ClusterSpec
 	Observed  *cluster.ClusterStatus

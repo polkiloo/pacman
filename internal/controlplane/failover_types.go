@@ -7,8 +7,8 @@ import (
 	"github.com/polkiloo/pacman/internal/cluster"
 )
 
-// FailoverEngine exposes automatic failover planning against the replicated
-// control-plane state.
+// FailoverEngine exposes automatic failover planning, intent management, and
+// execution against the replicated control-plane state.
 type FailoverEngine interface {
 	FailoverCandidates() ([]FailoverCandidate, error)
 	ConfirmPrimaryFailure() (PrimaryFailureConfirmation, error)
