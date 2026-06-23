@@ -264,8 +264,8 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - ZooKeeper — znode versions for CAS, ephemeral znodes for TTL
 - Consul — `ModifyIndex` for CAS, sessions for TTL, blocking queries for watch
 - Kubernetes — ConfigMap + `resourceVersion` for CAS, Lease for leader election
-- [ ] replace the Exhibitor compatibility fixture with a real ZooKeeper + Exhibitor testcontainer topology once PACMAN can translate or intentionally probe Patroni `exhibitor` settings
-- [ ] replace the Kubernetes compatibility fixture with a real API-server-backed testcontainer topology, preferably `kind` or envtest, once PACMAN can translate or intentionally probe Patroni `kubernetes` settings
+- [x] replace the Exhibitor compatibility fixture with a real ZooKeeper + Exhibitor testcontainer topology once PACMAN can translate or intentionally probe Patroni `exhibitor` settings
+- [x] replace the Kubernetes compatibility fixture with a real API-server-backed testcontainer topology, preferably `kind` or envtest, once PACMAN can translate or intentionally probe Patroni `kubernetes` settings
 
 ---
 
