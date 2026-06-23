@@ -138,6 +138,49 @@
   notify:
     - Restart pacmand
 
+- name: Validate PACMAN WAL-G environment file inputs
+  ansible.builtin.assert:
+    that:
+      - pacman_reinit_walg_environment_file_values.keys() | intersect(pacman_reinit_walg_environment_files.keys()) | length == 0
+    fail_msg: "WAL-G environment variable names must not appear in both managed value files and external file references"
+  when:
+    - pacman_reinit_walg_environment_file_values | length > 0
+    - pacman_reinit_walg_environment_files | length > 0
+
+- name: Validate PACMAN WAL-G managed environment names
+  ansible.builtin.assert:
+    that:
+      - item.key is match('^[A-Za-z_][A-Za-z0-9_]*$')
+    fail_msg: "Managed WAL-G environment file names must be valid environment variable names"
+  loop: "{{ pacman_reinit_walg_environment_file_values | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when: pacman_reinit_walg_environment_file_values | length > 0
+
+- name: Ensure PACMAN WAL-G environment file directory exists
+  ansible.builtin.file:
+    path: "{{ pacman_reinit_walg_environment_file_dir }}"
+    state: directory
+    owner: root
+    group: "{{ pacmand_service_group }}"
+    mode: "0750"
+  when: pacman_reinit_walg_environment_file_values | length > 0
+
+- name: Install PACMAN WAL-G environment value files
+  ansible.builtin.copy:
+    dest: "{{ pacman_reinit_walg_environment_file_dir }}/{{ item.key }}"
+    content: "{{ item.value | string }}\n"
+    owner: root
+    group: "{{ pacmand_service_group }}"
+    mode: "0640"
+  loop: "{{ pacman_reinit_walg_environment_file_values | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  no_log: true
+  when: pacman_reinit_walg_environment_file_values | length > 0
+  notify:
+    - Restart pacmand
+
 - name: Install PACMAN node config
   ansible.builtin.template:
     src: pacmand.yml.j2

@@ -59,7 +59,7 @@ reinit:
 {% endif %}
     restore:
       backupName: "{{ pacman_reinit_walg_restore_backup_name }}"
-{% if pacman_reinit_walg_environment or pacman_reinit_walg_environment_files or pacman_reinit_walg_inherit_environment %}
+{% if pacman_reinit_walg_environment or pacman_reinit_walg_environment_file_values or pacman_reinit_walg_environment_files or pacman_reinit_walg_inherit_environment %}
     credentials:
 {% if pacman_reinit_walg_inherit_environment %}
       inheritEnvironment:
@@ -73,8 +73,11 @@ reinit:
         {{ name }}: "{{ value }}"
 {% endfor %}
 {% endif %}
-{% if pacman_reinit_walg_environment_files %}
+{% if pacman_reinit_walg_environment_file_values or pacman_reinit_walg_environment_files %}
       environmentFiles:
+{% for name, value in pacman_reinit_walg_environment_file_values | dictsort %}
+        {{ name }}: "{{ pacman_reinit_walg_environment_file_dir }}/{{ name }}"
+{% endfor %}
 {% for name, path in pacman_reinit_walg_environment_files | dictsort %}
         {{ name }}: "{{ path }}"
 {% endfor %}
