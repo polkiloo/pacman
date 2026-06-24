@@ -562,6 +562,15 @@ func mergeControlPlaneManagedNodeFlags(previous, current agentmodel.NodeStatus) 
 		merged.PendingRestart = true
 	}
 
+	if previous.PendingRestart &&
+		!previous.NeedsRejoin &&
+		!merged.PendingRestart &&
+		previous.Postgres.Managed &&
+		merged.Postgres.Managed &&
+		!merged.Postgres.Up {
+		merged.PendingRestart = true
+	}
+
 	// During shutdown or probe failures the agent can temporarily lose role and
 	// timeline visibility before PostgreSQL is fully down. Preserve the last
 	// known identity so failover and rejoin planning can still reason about the

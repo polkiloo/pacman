@@ -561,8 +561,8 @@ unsupported-backend regression checks:
 | `raft` | Partially supported by translating to PACMAN's embedded Raft shape, not Patroni's Raft topology | Run real PostgreSQL and `pacmand` with the PACMAN Raft backend; assert startup and topology publication. |
 | `consul` | Unsupported Patroni backend | Use only a fixture endpoint shape; assert config translation fails with an explicit unsupported-backend error before any PACMAN Consul client connects. |
 | `zookeeper` | Unsupported Patroni backend | Use only a fixture endpoint shape; assert config translation fails with an explicit unsupported-backend error before any PACMAN ZooKeeper client connects. |
-| `exhibitor` | Unsupported Patroni backend | Use a lightweight HTTP compatibility fixture, not a real Exhibitor/ZooKeeper topology; assert config translation fails before backend connection. |
-| `kubernetes` | Unsupported Patroni backend | Use a lightweight HTTP compatibility fixture, not a real API-server topology; assert config translation fails before backend connection. |
+| `exhibitor` | Unsupported Patroni backend | Run real ZooKeeper plus an Exhibitor-compatible HTTP discovery fixture that probes ZooKeeper and returns `/exhibitor/v1/cluster/list`; assert config translation still fails with an explicit unsupported-backend error. |
+| `kubernetes` | Unsupported Patroni backend | Run a real K3s-backed Kubernetes API server and assert `/version` plus default namespace access before verifying PACMAN still fails Patroni Kubernetes configs with an explicit unsupported-backend error. |
 
 This split prevents compatibility fixtures from implying backend support. When PACMAN
 adds a real backend implementation, its Patroni-inspired coverage must move from the

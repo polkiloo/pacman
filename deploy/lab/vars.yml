@@ -17,6 +17,7 @@ pacman_reinit_walg_environment_file_values:
   PACMAN_LAB_REINIT_PRIMARY_HOST: 172.28.0.100
   PACMAN_LAB_REINIT_PRIMARY_PORT: "5432"
   PACMAN_LAB_REINIT_REPLICATION_USER: replicator
+  PACMAN_LAB_REINIT_REPLICATION_PASSWORD: "{{ postgres_replication_password }}"
 etcd_user: root
 etcd_group: root
 vip_manager_enabled: true

@@ -338,7 +338,7 @@ func TestRepeatedReinitHistorySlotsAndExpectedNames(t *testing.T) {
 	if got := repeatedReinitTargets(steps); !reflect.DeepEqual(got, []string{"alpha-2", "alpha.3"}) {
 		t.Fatalf("targets: got %#v", got)
 	}
-	if got := repeatedReinitExpectedSlots(steps); !reflect.DeepEqual(got, []string{"alpha_2", "alpha_3"}) {
+	if got := repeatedReinitExpectedSlots(steps); !reflect.DeepEqual(got, []string{"pacman_alpha_2", "pacman_alpha_3"}) {
 		t.Fatalf("expected slots: got %#v", got)
 	}
 	if got := repeatedReinitOperationIDs(steps); got != "reinit-1,reinit-2" {
@@ -362,11 +362,11 @@ func TestRepeatedReinitHistorySlotsAndExpectedNames(t *testing.T) {
 		t.Fatalf("missing history entry matched")
 	}
 
-	slots := parseReinitSlotStatus("alpha_2\tt\t0/16B6C50\nalpha_3\tf\t0/16B6C60\n")
-	if slot, ok := findReinitSlot(slots, "alpha_2"); !ok || !slot.Active || slot.RestartLSN != "0/16B6C50" {
+	slots := parseReinitSlotStatus("pacman_alpha_2\tt\t0/16B6C50\npacman_alpha_3\tf\t0/16B6C60\n")
+	if slot, ok := findReinitSlot(slots, "pacman_alpha_2"); !ok || !slot.Active || slot.RestartLSN != "0/16B6C50" {
 		t.Fatalf("slot alpha_2: got %+v ok=%v", slot, ok)
 	}
-	if slot, ok := findReinitSlot(slots, "alpha_3"); !ok || slot.Active {
+	if slot, ok := findReinitSlot(slots, "pacman_alpha_3"); !ok || slot.Active {
 		t.Fatalf("slot alpha_3: got %+v ok=%v", slot, ok)
 	}
 }
@@ -435,7 +435,7 @@ func TestReinitLagParsingAndVerification(t *testing.T) {
 		t.Fatalf("lag state: %+v", lag)
 	}
 
-	postRestore, err := parseReinitPostRestoreState("7359090119379102998\t7\tt\tstreaming\thost=pacman-primary slotname=alpha_2\n")
+	postRestore, err := parseReinitPostRestoreState("7359090119379102998\t7\tt\tstreaming\thost=pacman-primary slotname=pacman_alpha_2\n")
 	if err != nil {
 		t.Fatalf("parse post restore state: %v", err)
 	}
@@ -468,7 +468,7 @@ func TestReinitLagParsingAndVerification(t *testing.T) {
 		TargetSystemIdentifier:  "7359090119379102998",
 		PrimaryTimeline:         7,
 		TargetTimeline:          7,
-		ExpectedSlot:            "alpha_2",
+		ExpectedSlot:            "pacman_alpha_2",
 		SlotActive:              true,
 		SlotRestartLSN:          "0/3000000",
 		TargetInRecovery:        true,

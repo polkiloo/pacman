@@ -274,7 +274,7 @@ case "${command}" in
 
     rm -rf "${data_dir}"
     mkdir -p "${data_dir}"
-    export PGPASSWORD="${PGPASSWORD:-pacman-demo-password}"
+    export PGPASSWORD="${PACMAN_LAB_REINIT_REPLICATION_PASSWORD:-replicator}"
     /usr/pgsql-17/bin/pg_basebackup \
       -h "${PACMAN_LAB_REINIT_PRIMARY_HOST:-172.28.0.100}" \
       -p "${PACMAN_LAB_REINIT_PRIMARY_PORT:-5432}" \
@@ -283,6 +283,10 @@ case "${command}" in
       -Fp \
       -Xs \
       -R
+    if [[ "$(id -u)" -eq 0 ]]; then
+      chown -R postgres:postgres "${data_dir}"
+      chmod 0700 "${data_dir}"
+    fi
     printf 'pacman lab wal-g shim restored %s into %s\n' "${backup_name}" "${data_dir}" >&2
     ;;
   wal-fetch)

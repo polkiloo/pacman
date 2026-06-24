@@ -64,6 +64,15 @@
   no_log: true
   when: (postgres_replication_force_reclone | bool) or not postgres_replica_standby_signal.stat.exists
 
+- name: Ensure replica data directory ownership after basebackup
+  ansible.builtin.file:
+    path: "{{ postgres_data_dir }}"
+    state: directory
+    owner: "{{ postgres_os_user }}"
+    group: "{{ postgres_os_group }}"
+    recurse: true
+  when: (postgres_replication_force_reclone | bool) or not postgres_replica_standby_signal.stat.exists
+
 - name: Install PostgreSQL PACMAN tuning block on replicas
   ansible.builtin.blockinfile:
     path: "{{ postgres_data_dir }}/postgresql.auto.conf"
@@ -79,6 +88,9 @@
 - name: Install PostgreSQL PACMAN pg_hba rules on replicas
   ansible.builtin.blockinfile:
     path: "{{ postgres_data_dir }}/pg_hba.conf"
+    owner: "{{ postgres_os_user }}"
+    group: "{{ postgres_os_group }}"
+    mode: "0600"
     marker: "# {mark} ANSIBLE MANAGED BLOCK pacman-pg-hba"
     block: "{{ lookup('template', 'pg_hba.conf.j2') }}"
   notify:

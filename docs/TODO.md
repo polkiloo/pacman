@@ -264,8 +264,8 @@ Additional backends can be added after MVP by implementing the same `DCS` interf
 - ZooKeeper — znode versions for CAS, ephemeral znodes for TTL
 - Consul — `ModifyIndex` for CAS, sessions for TTL, blocking queries for watch
 - Kubernetes — ConfigMap + `resourceVersion` for CAS, Lease for leader election
-- [ ] replace the Exhibitor compatibility fixture with a real ZooKeeper + Exhibitor testcontainer topology once PACMAN can translate or intentionally probe Patroni `exhibitor` settings
-- [ ] replace the Kubernetes compatibility fixture with a real API-server-backed testcontainer topology, preferably `kind` or envtest, once PACMAN can translate or intentionally probe Patroni `kubernetes` settings
+- [x] replace the Exhibitor compatibility fixture with a real ZooKeeper + Exhibitor testcontainer topology once PACMAN can translate or intentionally probe Patroni `exhibitor` settings
+- [x] replace the Kubernetes compatibility fixture with a real API-server-backed testcontainer topology, preferably `kind` or envtest, once PACMAN can translate or intentionally probe Patroni `kubernetes` settings
 
 ---
 
@@ -644,14 +644,14 @@ This track captures the Kubernetes-native operator model described in [ARCHITECT
 
 Close the MVP only after validating that PACMAN can reliably demonstrate the following outcomes:
 
-- [ ] validate bootstrap of a small PostgreSQL HA cluster
-- [ ] validate visibility into current topology
-- [ ] validate planned switchover
-- [ ] validate automatic failover with quorum
-- [ ] validate prevention of unsafe dual-primary behavior
-- [ ] validate explicit rejoin of a former primary
-- [ ] validate basic operator-facing CLI and API
-- [ ] validate repeatable integration and end-to-end test coverage
-- [ ] validate scheduled or on-demand Jepsen fault-injection coverage in separate CI/CD stages
+- [x] validate bootstrap of a small PostgreSQL HA cluster
+- [x] validate visibility into current topology
+- [x] validate planned switchover
+- [x] validate automatic failover with quorum
+- [x] validate prevention of unsafe dual-primary behavior
+- [x] validate explicit rejoin of a former primary
+- [x] validate basic operator-facing CLI and API
+- [x] validate repeatable integration and end-to-end test coverage
+- [x] validate scheduled or on-demand Jepsen fault-injection coverage in separate CI/CD stages
 - [ ] validate operator-managed Kubernetes deployment with `StatefulSet` and role-based Services
 - [ ] validate repeatable Kubernetes failover test coverage in `kind`

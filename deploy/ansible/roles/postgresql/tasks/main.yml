@@ -41,6 +41,15 @@
     creates: "{{ postgres_data_dir }}/PG_VERSION"
   become_user: "{{ postgres_os_user }}"
 
+- name: Ensure PostgreSQL data directory ownership for primary or standalone nodes
+  ansible.builtin.file:
+    path: "{{ postgres_data_dir }}"
+    state: directory
+    owner: "{{ postgres_os_user }}"
+    group: "{{ postgres_os_group }}"
+    recurse: true
+  when: postgres_is_initial_primary or not (postgres_manage_replication | bool)
+
 - name: Configure primary or standalone PostgreSQL node
   ansible.builtin.include_tasks: primary.yml
   when: postgres_is_initial_primary or not (postgres_manage_replication | bool)

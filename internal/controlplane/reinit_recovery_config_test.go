@@ -43,7 +43,7 @@ func TestMemoryStateStoreExecuteReinitRecoveryConfigRendersAfterWALGRestore(t *t
 	if request.Standby.PrimaryConnInfo != "host=10.0.0.1 port=5432 application_name=alpha-2" {
 		t.Fatalf("unexpected recovery primary_conninfo: %+v", request.Standby)
 	}
-	if request.Standby.PrimarySlotName != "alpha_2" {
+	if request.Standby.PrimarySlotName != "pacman_alpha_2" {
 		t.Fatalf("unexpected recovery primary_slot_name: %+v", request.Standby)
 	}
 	if request.Standby.RecoveryTargetTimeline != postgres.DefaultRecoveryTargetTimeline {
@@ -67,6 +67,87 @@ func TestMemoryStateStoreExecuteReinitRecoveryConfigRendersAfterWALGRestore(t *t
 	}
 	if !target.PendingRestart || !target.Postgres.Details.PendingRestart || target.Postgres.Up {
 		t.Fatalf("expected recovery-configured target to be pending restart and down, got %+v", target)
+	}
+}
+
+func TestMemoryStateStorePublishNodeStatusPreservesReinitPendingRestart(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.June, 17, 13, 45, 0, 0, time.UTC)
+	store := seededWALGRestoredReinitStore(t, now)
+
+	if _, err := store.ExecuteReinitRecoveryConfig(context.Background(), "alpha-2", &recordingReinitRecoveryConfigurator{}); err != nil {
+		t.Fatalf("execute reinit recovery config: %v", err)
+	}
+
+	heartbeat := reinitNodeStatus("alpha-2", cluster.MemberRoleReplica, cluster.MemberStateFailed, now.Add(10*time.Second), false, 21, 0, "10.0.0.2:5432")
+	heartbeat.PendingRestart = false
+	heartbeat.Postgres.Details.PendingRestart = false
+
+	if _, err := store.PublishNodeStatus(context.Background(), heartbeat); err != nil {
+		t.Fatalf("publish reinit target heartbeat: %v", err)
+	}
+
+	target, ok := store.NodeStatus("alpha-2")
+	if !ok {
+		t.Fatal("expected reinit target node status after heartbeat")
+	}
+	if !target.PendingRestart || !target.Postgres.Details.PendingRestart {
+		t.Fatalf("expected reinit pending restart to survive heartbeat merge, got %+v", target)
+	}
+}
+
+func TestMemoryStateStoreExecuteReinitRecoveryConfigUsesRegisteredPrimaryHost(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.June, 17, 13, 50, 0, 0, time.UTC)
+	store := seededWALGRestoredReinitStore(t, now)
+
+	if err := store.RegisterMember(context.Background(), MemberRegistration{
+		NodeName:       "alpha-1",
+		NodeRole:       cluster.NodeRoleData,
+		APIAddress:     "pacman-primary:8080",
+		ControlAddress: "pacman-primary:9090",
+		RegisteredAt:   now.Add(-time.Minute),
+	}); err != nil {
+		t.Fatalf("register primary member: %v", err)
+	}
+
+	configurator := &recordingReinitRecoveryConfigurator{}
+	if _, err := store.ExecuteReinitRecoveryConfig(context.Background(), "alpha-2", configurator); err != nil {
+		t.Fatalf("execute reinit recovery config: %v", err)
+	}
+
+	if len(configurator.requests) != 1 {
+		t.Fatalf("expected one recovery config request, got %+v", configurator.requests)
+	}
+	if got, want := configurator.requests[0].Standby.PrimaryConnInfo, "host=pacman-primary port=5432 application_name=alpha-2"; got != want {
+		t.Fatalf("unexpected recovery primary_conninfo: got %q want %q", got, want)
+	}
+}
+
+func TestReinitPrimarySlotNameUsesLabReplicationSlotConvention(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		member string
+		want   string
+	}{
+		{member: "alpha-2", want: "pacman_alpha_2"},
+		{member: "alpha.3", want: "pacman_alpha_3"},
+		{member: "alpha--4", want: "pacman_alpha__4"},
+		{member: "", want: "pacman_rejoin"},
+		{member: "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnop", want: "pacman_abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcd"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.member, func(t *testing.T) {
+			t.Parallel()
+
+			if got := reinitPrimarySlotName(testCase.member); got != testCase.want {
+				t.Fatalf("unexpected reinit slot name: got %q want %q", got, testCase.want)
+			}
+		})
 	}
 }
 
