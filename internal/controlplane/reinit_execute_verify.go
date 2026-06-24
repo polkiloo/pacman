@@ -133,7 +133,7 @@ func buildReinitReplicationVerificationRequest(prepared preparedReinitExecution)
 		TargetNode:              prepared.targetNode.Clone(),
 		CurrentPrimaryNode:      prepared.currentPrimaryNode.Clone(),
 		CurrentEpoch:            prepared.currentEpoch,
-		ExpectedPrimarySlotName: rejoinPrimarySlotName(prepared.validation.Target.Name),
+		ExpectedPrimarySlotName: reinitPrimarySlotName(prepared.validation.Target.Name),
 	}
 }
 
@@ -237,7 +237,7 @@ func assessReinitReplicationVerificationReasons(prepared preparedReinitExecution
 	if strings.TrimSpace(prepared.verification.BackupName) == "" {
 		reasons = append(reasons, reasonReinitBackupMetadataUnknown)
 	}
-	if prepared.verification.PrimarySlotName != rejoinPrimarySlotName(prepared.validation.Target.Name) {
+	if prepared.verification.PrimarySlotName != reinitPrimarySlotName(prepared.validation.Target.Name) {
 		reasons = append(reasons, reasonReinitPrimarySlotMismatch)
 	}
 	if prepared.verification.WALReceiverStatus != "streaming" {

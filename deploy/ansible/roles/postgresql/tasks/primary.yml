@@ -14,6 +14,9 @@
 - name: Install PostgreSQL PACMAN pg_hba rules
   ansible.builtin.blockinfile:
     path: "{{ postgres_data_dir }}/pg_hba.conf"
+    owner: "{{ postgres_os_user }}"
+    group: "{{ postgres_os_group }}"
+    mode: "0600"
     marker: "# {mark} ANSIBLE MANAGED BLOCK pacman-pg-hba"
     block: "{{ lookup('template', 'pg_hba.conf.j2') }}"
   notify:

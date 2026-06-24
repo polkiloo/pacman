@@ -99,7 +99,8 @@ func (store *MemoryStateStore) prepareReinitRecoveryConfig(member string, config
 		return preparedReinitExecution{}, ErrReinitPostgresStopRequired
 	}
 
-	standby, err := buildReinitRecoveryStandbyConfig(currentPrimaryNode.Postgres.Address, operation.ToMember)
+	primaryAddress := store.primaryPostgresAddressLocked(operation.FromMember, currentPrimaryNode.Postgres.Address)
+	standby, err := buildReinitRecoveryStandbyConfig(primaryAddress, operation.ToMember)
 	if err != nil {
 		return preparedReinitExecution{}, err
 	}
@@ -201,9 +202,39 @@ func buildReinitRecoveryStandbyConfig(currentPrimaryAddress, targetMember string
 
 	return (postgres.StandbyConfig{
 		PrimaryConnInfo:        connInfo,
-		PrimarySlotName:        rejoinPrimarySlotName(targetMember),
+		PrimarySlotName:        reinitPrimarySlotName(targetMember),
 		RecoveryTargetTimeline: postgres.DefaultRecoveryTargetTimeline,
 	}).WithDefaults(), nil
+}
+
+func reinitPrimarySlotName(memberName string) string {
+	const prefix = "pacman_"
+
+	normalized := strings.ToLower(strings.TrimSpace(memberName))
+	if normalized == "" {
+		return "pacman_rejoin"
+	}
+
+	var builder strings.Builder
+	for _, character := range normalized {
+		switch {
+		case character >= 'a' && character <= 'z':
+			builder.WriteRune(character)
+		case character >= '0' && character <= '9':
+			builder.WriteRune(character)
+		case character == '_':
+			builder.WriteRune(character)
+		default:
+			builder.WriteByte('_')
+		}
+	}
+
+	slot := prefix + builder.String()
+	if len(slot) > 63 {
+		slot = slot[:63]
+	}
+
+	return slot
 }
 
 func reinitRecoveryConfiguredStatus(status agentmodel.NodeStatus, observedAt time.Time) agentmodel.NodeStatus {

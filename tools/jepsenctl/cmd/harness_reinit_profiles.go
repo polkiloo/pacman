@@ -519,41 +519,28 @@ func repeatedReinitExpectedSlots(steps []reinitRepeatedStep) []string {
 }
 
 func reinitExpectedSlotName(memberName string) string {
+	const prefix = "pacman_"
+
 	normalized := strings.ToLower(strings.TrimSpace(memberName))
 	if normalized == "" {
 		return "pacman_rejoin"
 	}
 	var builder strings.Builder
-	lastUnderscore := false
 	for _, character := range normalized {
 		switch {
 		case character >= 'a' && character <= 'z':
 			builder.WriteRune(character)
-			lastUnderscore = false
 		case character >= '0' && character <= '9':
 			builder.WriteRune(character)
-			lastUnderscore = false
 		case character == '_':
-			if !lastUnderscore {
-				builder.WriteRune(character)
-				lastUnderscore = true
-			}
+			builder.WriteRune(character)
 		default:
-			if !lastUnderscore {
-				builder.WriteByte('_')
-				lastUnderscore = true
-			}
+			builder.WriteByte('_')
 		}
 	}
-	slot := strings.Trim(builder.String(), "_")
-	if slot == "" {
-		return "pacman_rejoin"
-	}
+	slot := prefix + builder.String()
 	if len(slot) > 63 {
-		slot = strings.TrimRight(slot[:63], "_")
-	}
-	if slot == "" {
-		return "pacman_rejoin"
+		slot = slot[:63]
 	}
 	return slot
 }

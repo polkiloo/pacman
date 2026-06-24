@@ -21,7 +21,7 @@ func TestMemoryStateStoreExecuteReinitVerifyReplicationRecordsHistory(t *testing
 			SystemIdentifier:  "sys-alpha",
 			Timeline:          21,
 			BackupName:        "LATEST",
-			PrimarySlotName:   "alpha_2",
+			PrimarySlotName:   "pacman_alpha_2",
 			WALReceiverStatus: "streaming",
 			InRecovery:        true,
 		},
@@ -35,7 +35,7 @@ func TestMemoryStateStoreExecuteReinitVerifyReplicationRecordsHistory(t *testing
 	if !execution.PostgresStopped || !execution.DataDirArchived || !execution.WALGRestored || !execution.RecoveryConfig || !execution.RestartedAsStandby || !execution.ReplicationVerified {
 		t.Fatalf("unexpected reinit verification execution: %+v", execution)
 	}
-	if execution.WALGBackupName != "LATEST" || execution.PrimarySlotName != "alpha_2" || execution.WALReceiverStatus != "streaming" || execution.SystemIdentifier != "sys-alpha" || execution.Timeline != 21 {
+	if execution.WALGBackupName != "LATEST" || execution.PrimarySlotName != "pacman_alpha_2" || execution.WALReceiverStatus != "streaming" || execution.SystemIdentifier != "sys-alpha" || execution.Timeline != 21 {
 		t.Fatalf("unexpected verification metadata: %+v", execution)
 	}
 	if execution.Operation.State != cluster.OperationStateCompleted || execution.Operation.Result != cluster.OperationResultSucceeded || execution.Operation.CompletedAt.IsZero() {
@@ -45,7 +45,7 @@ func TestMemoryStateStoreExecuteReinitVerifyReplicationRecordsHistory(t *testing
 		t.Fatalf("expected one reinit verification request, got %+v", verifier.requests)
 	}
 	request := verifier.requests[0]
-	if request.ExpectedPrimarySlotName != "alpha_2" || request.TargetNode.NodeName != "alpha-2" || request.CurrentPrimaryNode.NodeName != "alpha-1" {
+	if request.ExpectedPrimarySlotName != "pacman_alpha_2" || request.TargetNode.NodeName != "alpha-2" || request.CurrentPrimaryNode.NodeName != "alpha-1" {
 		t.Fatalf("unexpected reinit verification request: %+v", request)
 	}
 
@@ -125,7 +125,7 @@ func TestMemoryStateStoreExecuteReinitVerifyReplicationRejectsBlockedExecution(t
 					SystemIdentifier:  "sys-alpha",
 					Timeline:          21,
 					BackupName:        "LATEST",
-					PrimarySlotName:   "alpha_2",
+					PrimarySlotName:   "pacman_alpha_2",
 					WALReceiverStatus: "streaming",
 					InRecovery:        true,
 				},

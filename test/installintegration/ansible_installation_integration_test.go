@@ -79,13 +79,19 @@ func TestAnsibleThreeNodeInstallationUsingTestcontainers(t *testing.T) {
 	assertFileContains(t, primary, pacmandConfigPath, "http://pacman-dcs:2379")
 	assertFileContains(t, primary, pacmandConfigPath, "environmentFiles:")
 	assertFileContains(t, primary, pacmandConfigPath, "PACMAN_LAB_REINIT_PRIMARY_HOST: \"/etc/pacman/walg-env/PACMAN_LAB_REINIT_PRIMARY_HOST\"")
+	assertFileContains(t, primary, pacmandConfigPath, "PACMAN_LAB_REINIT_REPLICATION_PASSWORD: \"/etc/pacman/walg-env/PACMAN_LAB_REINIT_REPLICATION_PASSWORD\"")
 	assertFileNotContains(t, primary, pacmandConfigPath, "PACMAN_LAB_REINIT_PRIMARY_HOST: \"pacman-primary\"")
+	assertFileNotContains(t, primary, pacmandConfigPath, "PACMAN_LAB_REINIT_REPLICATION_PASSWORD: \"replicator\"")
 	assertFileContent(t, primary, walgEnvDir+"/PACMAN_LAB_REINIT_PRIMARY_HOST", "pacman-primary\n")
+	assertFileContent(t, primary, walgEnvDir+"/PACMAN_LAB_REINIT_REPLICATION_PASSWORD", "replicator\n")
 	assertFileMode(t, primary, pacmandConfigPath, "640")
 	assertFileMode(t, primary, walgEnvDir+"/PACMAN_LAB_REINIT_PRIMARY_HOST", "640")
+	assertFileMode(t, primary, walgEnvDir+"/PACMAN_LAB_REINIT_REPLICATION_PASSWORD", "640")
+	assertTreeOwnedBy(t, primary, "/var/lib/pgsql/17/data", "postgres", "postgres")
 	assertFileContains(t, replica, pacmandConfigPath, "http://pacman-dcs:2379")
 	assertFileContains(t, replica, "/var/lib/pgsql/17/data/postgresql.auto.conf", "primary_slot_name = 'pacman_alpha_2'")
 	assertFileExists(t, replica, "/var/lib/pgsql/17/data/standby.signal")
+	assertTreeOwnedBy(t, replica, "/var/lib/pgsql/17/data", "postgres", "postgres")
 
 	primaryState := primary.RequireExec(
 		t,
@@ -281,6 +287,7 @@ pacman_admin_token_inline: integration-token
 pacman_reinit_walg_enabled: true
 pacman_reinit_walg_environment_file_values:
   PACMAN_LAB_REINIT_PRIMARY_HOST: pacman-primary
+  PACMAN_LAB_REINIT_REPLICATION_PASSWORD: replicator
 `
 }
 
@@ -343,6 +350,27 @@ func assertFileExists(t *testing.T, service *testenv.Service, path string) {
 	t.Helper()
 
 	service.RequireExec(t, "test", "-f", path)
+}
+
+func assertTreeOwnedBy(t *testing.T, service *testenv.Service, path, user, group string) {
+	t.Helper()
+
+	command := fmt.Sprintf(
+		"find %s \\( ! -user %s -o ! -group %s \\) -print -quit",
+		shellQuote(path),
+		shellQuote(user),
+		shellQuote(group),
+	)
+	output := strings.TrimSpace(service.RequireExec(t, "/bin/sh", "-lc", command))
+	if output != "" {
+		owner := strings.TrimSpace(service.RequireExec(t, "stat", "-c", "%U:%G", output))
+		t.Fatalf("expected %s tree on service %q to be owned by %s:%s; %s is %s",
+			path, service.Name(), user, group, output, owner)
+	}
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func preparePacmandSmokeConfig(t *testing.T, svc *testenv.Service) {
