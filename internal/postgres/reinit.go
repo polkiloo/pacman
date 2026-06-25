@@ -11,6 +11,7 @@ import (
 )
 
 const defaultReinitArchiveDirName = ".pacman-reinit-archive"
+const postgresDataDirMode os.FileMode = 0o700
 
 // DataDirArchive describes a safe local data-directory archive operation before
 // a destructive reinit restore.
@@ -98,7 +99,7 @@ func (archive DataDirArchive) ArchiveForReinit() (DataDirArchiveResult, error) {
 	info, err := os.Lstat(dataDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			if err := os.MkdirAll(dataDir, 0o700); err != nil {
+			if err := os.MkdirAll(dataDir, postgresDataDirMode); err != nil {
 				return DataDirArchiveResult{}, fmt.Errorf("create empty postgres data directory %q: %w", dataDir, err)
 			}
 			return result, nil
@@ -109,6 +110,7 @@ func (archive DataDirArchive) ArchiveForReinit() (DataDirArchiveResult, error) {
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return DataDirArchiveResult{}, ErrDataDirUnsafe
 	}
+	owner := fileOwner(info)
 
 	if archiveInfo, statErr := os.Lstat(archivePath); statErr == nil {
 		if !archiveInfo.IsDir() {
@@ -133,12 +135,61 @@ func (archive DataDirArchive) ArchiveForReinit() (DataDirArchiveResult, error) {
 		return DataDirArchiveResult{}, fmt.Errorf("archive postgres data directory %q to %q: %w", dataDir, archivePath, err)
 	}
 
-	if err := os.MkdirAll(dataDir, info.Mode().Perm()); err != nil {
+	if err := os.MkdirAll(dataDir, postgresSafeDataDirMode(info.Mode().Perm())); err != nil {
 		return DataDirArchiveResult{}, fmt.Errorf("recreate postgres data directory %q: %w", dataDir, err)
+	}
+	if err := chownIfRoot(dataDir, owner); err != nil {
+		return DataDirArchiveResult{}, fmt.Errorf("restore postgres data directory owner %q: %w", dataDir, err)
 	}
 
 	result.Archived = true
 	return result, nil
+}
+
+// NormalizeRestoredDataDir makes a freshly restored PGDATA acceptable to
+// PostgreSQL before PACMAN attempts pg_ctl start.
+func NormalizeRestoredDataDir(dataDir string) error {
+	dataDir, err := safeDataDirPath(dataDir)
+	if err != nil {
+		return err
+	}
+
+	info, err := os.Lstat(dataDir)
+	if err != nil {
+		return fmt.Errorf("inspect restored postgres data directory %q: %w", dataDir, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return ErrDataDirUnsafe
+	}
+
+	if os.Geteuid() == 0 {
+		parentInfo, err := os.Stat(filepath.Dir(dataDir))
+		if err != nil {
+			return fmt.Errorf("inspect postgres data directory parent %q: %w", filepath.Dir(dataDir), err)
+		}
+		parentOwner := fileOwner(parentInfo)
+		if parentOwner.valid {
+			if err := filepath.WalkDir(dataDir, func(path string, _ os.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				return os.Lchown(path, parentOwner.uid, parentOwner.gid)
+			}); err != nil {
+				return fmt.Errorf("restore postgres data directory ownership %q: %w", dataDir, err)
+			}
+		}
+	} else {
+		owner := fileOwner(info)
+		if owner.valid && owner.uid != os.Geteuid() {
+			return fmt.Errorf("restored postgres data directory %q is owned by uid %d, but pacmand runs as uid %d", dataDir, owner.uid, os.Geteuid())
+		}
+	}
+
+	if err := os.Chmod(dataDir, postgresSafeDataDirMode(info.Mode().Perm())); err != nil {
+		return fmt.Errorf("restore postgres data directory mode %q: %w", dataDir, err)
+	}
+
+	return nil
 }
 
 func (archive DataDirArchive) now() time.Time {
@@ -194,6 +245,15 @@ func archiveName(dataDir, configured string, now time.Time) string {
 	}
 
 	return filepath.Base(dataDir) + "-" + label
+}
+
+func postgresSafeDataDirMode(mode os.FileMode) os.FileMode {
+	switch mode.Perm() {
+	case 0o700, 0o750:
+		return mode.Perm()
+	default:
+		return postgresDataDirMode
+	}
 }
 
 func sanitizeArchiveName(name string) string {

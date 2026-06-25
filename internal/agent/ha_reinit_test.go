@@ -139,6 +139,11 @@ exit 0
 	if _, err := os.Stat(filepath.Join(dataDir, "PG_VERSION")); err != nil {
 		t.Fatalf("expected restored data dir marker: %v", err)
 	}
+	if info, err := os.Stat(dataDir); err != nil {
+		t.Fatalf("stat restored data dir: %v", err)
+	} else if info.Mode().Perm() != 0o700 {
+		t.Fatalf("expected restored data dir mode 0700, got %v", info.Mode().Perm())
+	}
 	assertTraceLines(t, tracePath, []string{
 		"args=backup-fetch " + dataDir + " base_000000010000000000000005",
 		"prefix=/backups/alpha",

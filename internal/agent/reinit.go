@@ -97,6 +97,9 @@ func (r *localReinitWALGRestorer) RestoreFromWALG(ctx context.Context, _ control
 		}
 		return controlplane.ReinitWALGRestoreResult{}, fmt.Errorf("run WAL-G backup-fetch for reinit: %w: %s", err, renderedOutput)
 	}
+	if err := postgres.NormalizeRestoredDataDir(r.dataDir); err != nil {
+		return controlplane.ReinitWALGRestoreResult{}, fmt.Errorf("normalize restored postgres data directory for reinit: %w", err)
+	}
 
 	return controlplane.ReinitWALGRestoreResult{
 		DataDir:    strings.TrimSpace(r.dataDir),
