@@ -101,6 +101,16 @@ func (store *MemoryStateStore) reinitInputsLocked() (cluster.ClusterSpec, cluste
 }
 
 func evaluateReinitRequest(status cluster.ClusterStatus, request ReinitRequest, activeOperation *cluster.Operation, checkedAt time.Time) (ReinitValidation, error) {
+	return evaluateReinitRequestWithUnknownTarget(status, request, activeOperation, checkedAt, false)
+}
+
+func evaluateReinitExecutionRequest(status cluster.ClusterStatus, request ReinitRequest, checkedAt time.Time) (ReinitValidation, error) {
+	// A restarted target reports unknown until PostgreSQL is restored, but its
+	// accepted operation still proves that it was a replica at request time.
+	return evaluateReinitRequestWithUnknownTarget(status, request, nil, checkedAt, true)
+}
+
+func evaluateReinitRequestWithUnknownTarget(status cluster.ClusterStatus, request ReinitRequest, activeOperation *cluster.Operation, checkedAt time.Time, allowUnknownTarget bool) (ReinitValidation, error) {
 	if request.Member == "" {
 		return ReinitValidation{}, ErrReinitTargetRequired
 	}
@@ -127,7 +137,7 @@ func evaluateReinitRequest(status cluster.ClusterStatus, request ReinitRequest, 
 		return ReinitValidation{}, ErrReinitTargetIsCurrentPrimary
 	}
 
-	if !target.Role.IsDataBearing() {
+	if !target.Role.IsDataBearing() && (!allowUnknownTarget || target.Role != cluster.MemberRoleUnknown) {
 		return ReinitValidation{}, ErrReinitTargetIsWitness
 	}
 

@@ -82,7 +82,7 @@ func (store *MemoryStateStore) prepareReinitRecoveryConfig(member string, config
 		RequestedBy: operation.RequestedBy,
 		Reason:      operation.Reason,
 	}
-	validation, err := evaluateReinitRequest(status, request, nil, executedAt)
+	validation, err := evaluateReinitExecutionRequest(status, request, executedAt)
 	if err != nil {
 		return preparedReinitExecution{}, err
 	}

@@ -77,7 +77,7 @@ func (store *MemoryStateStore) prepareReinitWALGRestore(member string, restorer 
 		RequestedBy: operation.RequestedBy,
 		Reason:      operation.Reason,
 	}
-	validation, err := evaluateReinitRequest(status, request, nil, executedAt)
+	validation, err := evaluateReinitExecutionRequest(status, request, executedAt)
 	if err != nil {
 		return preparedReinitExecution{}, err
 	}
