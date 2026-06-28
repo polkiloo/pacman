@@ -67,6 +67,39 @@ func TestEvaluateReinitRequestAcceptsFailedReplicaWithHealthyPrimary(t *testing.
 	}
 }
 
+func TestEvaluateReinitExecutionRequestAcceptsUnknownTargetAfterRuntimeRestart(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.June, 28, 7, 12, 0, 0, time.UTC)
+	status := reinitValidationStatus(now, []cluster.MemberStatus{
+		reinitValidationMember("alpha-1", cluster.MemberRolePrimary, cluster.MemberStateRunning, true, now),
+		reinitValidationMember("alpha-2", cluster.MemberRoleUnknown, cluster.MemberStateFailed, false, now.Add(time.Second)),
+	})
+
+	validation, err := evaluateReinitExecutionRequest(status, ReinitRequest{Member: "alpha-2"}, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("evaluate resumed reinit execution: %v", err)
+	}
+	if validation.Target.Name != "alpha-2" || validation.Target.Role != cluster.MemberRoleUnknown {
+		t.Fatalf("unexpected resumed reinit target: %+v", validation.Target)
+	}
+}
+
+func TestEvaluateReinitExecutionRequestRejectsWitnessTarget(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.June, 28, 7, 13, 0, 0, time.UTC)
+	status := reinitValidationStatus(now, []cluster.MemberStatus{
+		reinitValidationMember("alpha-1", cluster.MemberRolePrimary, cluster.MemberStateRunning, true, now),
+		reinitValidationMember("witness-1", cluster.MemberRoleWitness, cluster.MemberStateRunning, true, now.Add(time.Second)),
+	})
+
+	_, err := evaluateReinitExecutionRequest(status, ReinitRequest{Member: "witness-1"}, now.Add(time.Minute))
+	if !errors.Is(err, ErrReinitTargetIsWitness) {
+		t.Fatalf("evaluate resumed witness reinit error: got %v want %v", err, ErrReinitTargetIsWitness)
+	}
+}
+
 func TestEvaluateReinitRequestRejectsMissingPrimaryAndRoleMismatches(t *testing.T) {
 	t.Parallel()
 
