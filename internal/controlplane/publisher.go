@@ -44,6 +44,7 @@ type MemoryStateStore struct {
 	now                  func() time.Time
 	leaseDuration        time.Duration
 	cacheRefreshedAt     time.Time
+	cacheSnapshotAt      time.Time
 	cacheMaxAge          time.Duration
 	cacheDirty           bool
 	sourceUpdated        time.Time

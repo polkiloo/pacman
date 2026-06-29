@@ -19,7 +19,7 @@ import (
 
 const (
 	defaultControlPlaneClusterName = "local"
-	defaultCacheMaxAge             = 0
+	defaultCacheMaxAge             = 2 * time.Second
 	cacheWatchRetryDelay           = 25 * time.Millisecond
 )
 
@@ -133,10 +133,11 @@ func (store *MemoryStateStore) ensureCacheFresh(ctx context.Context) error {
 	store.mu.RLock()
 	cacheReady := !store.cacheRefreshedAt.IsZero()
 	cacheDirty := store.cacheDirty
-	cacheExpired := cacheReady && store.cacheMaxAge > 0 && store.cacheRefreshedAt.Add(store.cacheMaxAge).Before(now)
+	snapshotExpired := store.cacheMaxAge > 0 &&
+		(store.cacheSnapshotAt.IsZero() || store.cacheSnapshotAt.Add(store.cacheMaxAge).Before(now))
 	store.mu.RUnlock()
 
-	if cacheReady && !cacheDirty && !cacheExpired {
+	if cacheReady && !cacheDirty && !snapshotExpired {
 		return nil
 	}
 
@@ -526,6 +527,7 @@ func (store *MemoryStateStore) forceRefreshCache(ctx context.Context) error {
 	store.leaderLease = leaderLease
 	store.lastDCSSeenAt = now
 	store.cacheRefreshedAt = now
+	store.cacheSnapshotAt = now
 	store.cacheDirty = false
 
 	if store.clusterSpec != nil {
