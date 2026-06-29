@@ -47,6 +47,43 @@ func TestMemoryStateStoreAssessRejoinMemberDetectsFormerPrimaryState(t *testing.
 	}
 }
 
+func TestMemoryStateStoreAssessRejoinMemberRefreshesStalePrimaryObservation(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.June, 29, 9, 0, 0, 0, time.UTC)
+	store := seededFailoverStore(t, cluster.ClusterSpec{
+		ClusterName: "alpha",
+		Members: []cluster.MemberSpec{
+			{Name: "alpha-1"},
+			{Name: "alpha-2"},
+		},
+	}, []agentmodel.NodeStatus{
+		rejoinFormerPrimaryStatus("alpha-1", now, 1, "sys-alpha"),
+		rejoinPrimaryStatus("alpha-2", now.Add(time.Second), 2, "sys-alpha"),
+	})
+
+	store.mu.Lock()
+	stalePrimary := store.nodeStatuses["alpha-2"]
+	stalePrimary.Postgres.RecoveryKnown = false
+	store.nodeStatuses["alpha-2"] = stalePrimary
+	store.refreshSourceOfTruthLocked(now.Add(2 * time.Second))
+	store.mu.Unlock()
+
+	assessment, err := store.AssessRejoinMember("alpha-1")
+	if err != nil {
+		t.Fatalf("assess rejoin member with stale primary observation: %v", err)
+	}
+
+	if !assessment.Ready || len(assessment.Reasons) != 0 {
+		t.Fatalf("expected DCS refresh to observe ready current primary, got %+v", assessment)
+	}
+
+	observedPrimary, ok := store.NodeStatus("alpha-2")
+	if !ok || !observedPrimary.Postgres.RecoveryKnown {
+		t.Fatalf("expected refreshed primary observation, got ok=%t status=%+v", ok, observedPrimary)
+	}
+}
+
 func TestMemoryStateStoreRecoversFormerPrimaryRejoinFromHistory(t *testing.T) {
 	t.Parallel()
 

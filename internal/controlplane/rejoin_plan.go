@@ -30,15 +30,16 @@ func (store *MemoryStateStore) AssessRejoinMember(nodeName string) (RejoinMember
 		return RejoinMemberAssessment{}, ErrRejoinTargetRequired
 	}
 
-	if err := store.ensureCacheFresh(context.Background()); err != nil {
+	inputs, err := store.rejoinInputs(target)
+	if err != nil {
 		return RejoinMemberAssessment{}, err
 	}
 
-	store.mu.RLock()
-	inputs, err := store.rejoinInputsLocked(target)
-	store.mu.RUnlock()
-	if err != nil {
-		return RejoinMemberAssessment{}, err
+	if inputs.member.NeedsRejoin || inputs.durableFormerPrimary {
+		inputs, err = store.forceRefreshRejoinInputs(target)
+		if err != nil {
+			return RejoinMemberAssessment{}, err
+		}
 	}
 
 	return buildRejoinMemberAssessment(inputs), nil
@@ -53,18 +54,41 @@ func (store *MemoryStateStore) DetectRejoinDivergence(nodeName string) (RejoinDi
 		return RejoinDivergenceAssessment{}, ErrRejoinTargetRequired
 	}
 
-	if err := store.ensureCacheFresh(context.Background()); err != nil {
-		return RejoinDivergenceAssessment{}, err
-	}
-
-	store.mu.RLock()
-	inputs, err := store.rejoinInputsLocked(target)
-	store.mu.RUnlock()
+	inputs, err := store.rejoinInputs(target)
 	if err != nil {
 		return RejoinDivergenceAssessment{}, err
 	}
 
+	if inputs.member.NeedsRejoin || inputs.durableFormerPrimary {
+		inputs, err = store.forceRefreshRejoinInputs(target)
+		if err != nil {
+			return RejoinDivergenceAssessment{}, err
+		}
+	}
+
 	return buildRejoinDivergenceAssessment(inputs), nil
+}
+
+func (store *MemoryStateStore) rejoinInputs(nodeName string) (rejoinInputs, error) {
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return rejoinInputs{}, err
+	}
+
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+
+	return store.rejoinInputsLocked(nodeName)
+}
+
+func (store *MemoryStateStore) forceRefreshRejoinInputs(nodeName string) (rejoinInputs, error) {
+	if err := store.forceRefreshCache(context.Background()); err != nil {
+		return rejoinInputs{}, err
+	}
+
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+
+	return store.rejoinInputsLocked(nodeName)
 }
 
 func buildRejoinMemberAssessment(inputs rejoinInputs) RejoinMemberAssessment {
