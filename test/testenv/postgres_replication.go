@@ -285,6 +285,7 @@ EOF
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<'SQL'
 ALTER SYSTEM SET wal_level = 'replica';
+ALTER SYSTEM SET wal_log_hints = 'on';
 ALTER SYSTEM SET max_wal_senders = '10';
 ALTER SYSTEM SET max_replication_slots = '10';
 ALTER SYSTEM SET hot_standby = 'on';
