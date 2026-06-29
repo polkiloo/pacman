@@ -50,7 +50,7 @@ func newRunCommand(stdout, stderr io.Writer) *cobra.Command {
 
 func newRunCICommand(stdout, stderr io.Writer, runner commandRunner) *cobra.Command {
 	command := &cobra.Command{
-		Use:   "ci smoke|nightly|case [case-name|workload:nemesis]",
+		Use:   "ci smoke|nightly|nightly-post|case [case-name|workload:nemesis]",
 		Short: "run a Jepsen campaign on the current host",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -75,7 +75,7 @@ func newRunCICommand(stdout, stderr io.Writer, runner commandRunner) *cobra.Comm
 
 func newRunDockerCommand(stdout, stderr io.Writer, runner commandRunner) *cobra.Command {
 	command := &cobra.Command{
-		Use:   "docker smoke|nightly|case [case-name|workload:nemesis]",
+		Use:   "docker smoke|nightly|nightly-post|case [case-name|workload:nemesis]",
 		Short: "run a Jepsen campaign from the Docker control-node image",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -110,7 +110,7 @@ func parseRunOptions(args []string) (runOptions, error) {
 
 	options := runOptions{campaign: args[0], target: target}
 	switch options.campaign {
-	case "smoke", "nightly":
+	case "smoke", "nightly", "nightly-post":
 		if len(args) > 1 {
 			return runOptions{}, fmt.Errorf("%s campaign does not accept a case argument", options.campaign)
 		}
@@ -278,11 +278,39 @@ func runHarnessCampaign(ctx context.Context, options harnessOptions) (int, error
 		return runHarnessSmoke(ctx, options)
 	case "nightly":
 		return runHarnessNightly(ctx, options)
+	case "nightly-post":
+		return runHarnessNightlyPost(ctx, options)
 	case "case":
 		return runHarnessCase(ctx, options)
 	default:
 		return 1, fmt.Errorf("unsupported Jepsen campaign %q", options.campaign)
 	}
+}
+
+func runHarnessNightlyPost(ctx context.Context, options harnessOptions) (status int, err error) {
+	runDir := runDirFor(options.artifactDir, "nightly-post", options.target)
+	historyFile := filepath.Join(runDir, "jepsen-history.edn")
+	failuresFile := filepath.Join(runDir, "nightly-failures.txt")
+
+	if err := createHarnessFiles(runDir, historyFile, failuresFile); err != nil {
+		return 1, err
+	}
+	options.env = append(options.env, "PACMAN_JEPSEN_CAMPAIGN=nightly-post")
+	defer finishHarnessCampaign(ctx, options, runDir, historyFile, "nightly post-campaign", &status, &err)
+
+	failed, failures, status, err := runNightlyPostCampaign(ctx, options, runDir, historyFile, failuresFile)
+	if err != nil || status != 0 {
+		return status, err
+	}
+	if failed {
+		fmt.Fprintln(options.stderr, "PACMAN Jepsen nightly post-campaign check failed:")
+		for _, failure := range failures {
+			fmt.Fprintf(options.stderr, "  - %s\n", failure)
+		}
+		return 1, nil
+	}
+
+	return 0, nil
 }
 
 func runHarnessSmoke(ctx context.Context, options harnessOptions) (status int, err error) {
@@ -673,16 +701,13 @@ func campaignCases(campaign string) []string {
 	if override := os.Getenv("PACMAN_JEPSEN_CASES"); override != "" {
 		return strings.Fields(override)
 	}
-	if campaign == "smoke" {
-		return []string{"append-smoke:none"}
-	}
 
-	cases := defaultJepsenCases()
+	cases, err := casesForCampaign(campaign)
+	if err != nil {
+		return nil
+	}
 	specs := make([]string, 0, len(cases))
 	for _, testCase := range cases {
-		if testCase.PatroniOnly || testCase.NightlyUnsafe {
-			continue
-		}
 		specs = append(specs, testCase.Spec)
 	}
 	return specs

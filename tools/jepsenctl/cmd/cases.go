@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -34,6 +35,15 @@ type casesValidateOptions struct {
 	makefiles []string
 }
 
+type caseMatrixEntry struct {
+	Slug string `json:"slug"`
+	Spec string `json:"spec"`
+}
+
+type caseMatrix struct {
+	Include []caseMatrixEntry `json:"include"`
+}
+
 func newCasesCommand(stdout, stderr io.Writer) *cobra.Command {
 	cases := &cobra.Command{
 		Use:   "cases",
@@ -41,9 +51,65 @@ func newCasesCommand(stdout, stderr io.Writer) *cobra.Command {
 	}
 
 	cases.AddCommand(newCasesListCommand(stdout))
+	cases.AddCommand(newCasesMatrixCommand(stdout))
 	cases.AddCommand(newCasesValidateCommand(stdout, stderr))
 
 	return cases
+}
+
+func newCasesMatrixCommand(stdout io.Writer) *cobra.Command {
+	var campaign string
+
+	matrix := &cobra.Command{
+		Use:   "matrix",
+		Short: "write a GitHub Actions case matrix",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 0 {
+				return fmt.Errorf("cases matrix does not accept arguments")
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cases, err := casesForCampaign(campaign)
+			if err != nil {
+				return err
+			}
+
+			entries := make([]caseMatrixEntry, 0, len(cases))
+			for _, testCase := range cases {
+				entries = append(entries, caseMatrixEntry{Slug: testCase.Slug, Spec: testCase.Spec})
+			}
+
+			return json.NewEncoder(stdout).Encode(caseMatrix{Include: entries})
+		},
+	}
+	matrix.Flags().StringVar(&campaign, "campaign", "nightly", "campaign whose cases should populate the matrix")
+
+	return matrix
+}
+
+func casesForCampaign(campaign string) ([]jepsenCase, error) {
+	switch campaign {
+	case "smoke":
+		for _, testCase := range defaultJepsenCases() {
+			if testCase.Spec == "append-smoke:none" {
+				return []jepsenCase{testCase}, nil
+			}
+		}
+		return nil, fmt.Errorf("smoke Jepsen case is not registered")
+	case "nightly":
+		cases := defaultJepsenCases()
+		selected := make([]jepsenCase, 0, len(cases))
+		for _, testCase := range cases {
+			if testCase.PatroniOnly || testCase.NightlyUnsafe {
+				continue
+			}
+			selected = append(selected, testCase)
+		}
+		return selected, nil
+	default:
+		return nil, fmt.Errorf("unsupported Jepsen matrix campaign %q", campaign)
+	}
 }
 
 func newCasesListCommand(stdout io.Writer) *cobra.Command {

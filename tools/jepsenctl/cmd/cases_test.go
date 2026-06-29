@@ -2,11 +2,67 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestCasesMatrixCommandSelectsNightlyCases(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	status := Run([]string{"cases", "matrix", "--campaign", "nightly"}, &stdout, &stderr)
+	if status != 0 {
+		t.Fatalf("status: got %d want 0; stderr:\n%s", status, stderr.String())
+	}
+
+	var matrix caseMatrix
+	if err := json.Unmarshal(stdout.Bytes(), &matrix); err != nil {
+		t.Fatalf("decode matrix: %v", err)
+	}
+	entries := make(map[string]string, len(matrix.Include))
+	for _, entry := range matrix.Include {
+		entries[entry.Slug] = entry.Spec
+	}
+	wantCount := 0
+	for _, testCase := range defaultJepsenCases() {
+		if testCase.PatroniOnly || testCase.NightlyUnsafe {
+			continue
+		}
+		wantCount++
+		if entries[testCase.Slug] != testCase.Spec {
+			t.Fatalf("nightly matrix is missing eligible case %q", testCase.Slug)
+		}
+	}
+	if len(matrix.Include) != wantCount {
+		t.Fatalf("nightly matrix case count: got %d want %d", len(matrix.Include), wantCount)
+	}
+	if entries["append-smoke-none"] != "append-smoke:none" || entries["append-reinit-reinit-replica"] != "append-reinit:reinit-replica" {
+		t.Fatalf("nightly matrix is missing required cases: %+v", entries)
+	}
+	for _, excluded := range []string{"append-failover-primary-dcs-partition", "append-sync-kill", "append-check-timeline-stale-timeline-failover"} {
+		if _, ok := entries[excluded]; ok {
+			t.Fatalf("nightly matrix included excluded case %q", excluded)
+		}
+	}
+}
+
+func TestCasesMatrixCommandRejectsUnsupportedCampaign(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	status := Run([]string{"cases", "matrix", "--campaign", "weekly"}, &stdout, &stderr)
+	if status != 2 {
+		t.Fatalf("status: got %d want 2", status)
+	}
+	if !strings.Contains(stderr.String(), `unsupported Jepsen matrix campaign "weekly"`) {
+		t.Fatalf("stderr: got %q", stderr.String())
+	}
+}
 
 func TestParseListCasesOutput(t *testing.T) {
 	t.Parallel()

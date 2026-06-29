@@ -29,6 +29,11 @@ func TestParseRunOptions(t *testing.T) {
 			wantCampaign: "nightly",
 		},
 		{
+			name:         "nightly post-campaign",
+			args:         []string{"nightly-post"},
+			wantCampaign: "nightly-post",
+		},
+		{
 			name:         "case argument",
 			args:         []string{"case", "append-smoke-none"},
 			wantCampaign: "case",
