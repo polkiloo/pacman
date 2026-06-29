@@ -47,6 +47,155 @@ func TestMemoryStateStoreAssessRejoinMemberDetectsFormerPrimaryState(t *testing.
 	}
 }
 
+func TestMemoryStateStoreRecoversFormerPrimaryRejoinFromHistory(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.June, 29, 6, 0, 0, 0, time.UTC)
+	offline := failoverNodeStatus("alpha-1", cluster.MemberRoleUnknown, cluster.MemberStateFailed, now, false, 0, 0)
+	offline.Postgres.Address = "alpha-1-postgres:5432"
+	store := seededFailoverStore(t, cluster.ClusterSpec{
+		ClusterName: "alpha",
+		Members: []cluster.MemberSpec{
+			{Name: "alpha-1"},
+			{Name: "alpha-2"},
+		},
+	}, []agentmodel.NodeStatus{
+		offline,
+		rejoinPrimaryStatus("alpha-2", now.Add(time.Second), 2, "sys-alpha"),
+	})
+
+	if _, err := store.JournalOperation(context.Background(), cluster.Operation{
+		ID:          "failover-1",
+		Kind:        cluster.OperationKindFailover,
+		State:       cluster.OperationStateCompleted,
+		RequestedBy: "controller",
+		RequestedAt: now.Add(-2 * time.Second),
+		FromMember:  "alpha-1",
+		ToMember:    "alpha-2",
+		Result:      cluster.OperationResultSucceeded,
+		CompletedAt: now.Add(-time.Second),
+	}); err != nil {
+		t.Fatalf("journal successful failover: %v", err)
+	}
+
+	offline.ObservedAt = now.Add(2 * time.Second)
+	offline.Postgres.CheckedAt = offline.ObservedAt
+	if _, err := store.PublishNodeStatus(context.Background(), offline); err != nil {
+		t.Fatalf("republish former primary after status loss: %v", err)
+	}
+
+	stored, ok := store.NodeStatus("alpha-1")
+	if !ok || !stored.NeedsRejoin || stored.State != cluster.MemberStateNeedsRejoin {
+		t.Fatalf("expected heartbeat to recover durable rejoin marker, got ok=%t status=%+v", ok, stored)
+	}
+
+	member, ok := store.Member("alpha-1")
+	if !ok {
+		t.Fatal("expected former primary member")
+	}
+	if !member.NeedsRejoin || member.Healthy || member.State != cluster.MemberStateNeedsRejoin {
+		t.Fatalf("expected durable former-primary repair state, got %+v", member)
+	}
+	if member.Role != cluster.MemberRoleUnknown {
+		t.Fatalf("expected unknown observed role to remain visible, got %+v", member)
+	}
+
+	assessment, err := store.AssessRejoinMember("alpha-1")
+	if err != nil {
+		t.Fatalf("assess history-derived former primary: %v", err)
+	}
+	if !assessment.Ready || !assessment.FormerPrimary {
+		t.Fatalf("expected history-derived former primary to be ready, got %+v", assessment)
+	}
+
+	decision, err := store.DecideRejoinStrategy("alpha-1")
+	if err != nil {
+		t.Fatalf("decide history-derived former-primary strategy: %v", err)
+	}
+	if !decision.Decided || decision.Strategy != cluster.RejoinStrategyRewind || decision.DirectRejoinPossible {
+		t.Fatalf("expected conservative rewind for expired former-primary identity, got %+v", decision)
+	}
+	if !containsString(decision.Reasons, reasonMemberSystemIdentifierUnknown) {
+		t.Fatalf("expected missing identity reason to remain visible, got %v", decision.Reasons)
+	}
+}
+
+func TestHistoryRejoinRequirementUsesLatestSuccessfulMemberOperation(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.June, 29, 6, 30, 0, 0, time.UTC)
+	testCases := []struct {
+		name         string
+		history      []cluster.HistoryEntry
+		wantRequired bool
+		wantKnown    bool
+	}{
+		{
+			name: "successful failover requires rejoin",
+			history: []cluster.HistoryEntry{
+				rejoinHistoryEntry("failover", cluster.OperationKindFailover, "alpha-1", "alpha-2", cluster.OperationResultSucceeded, now),
+			},
+			wantRequired: true,
+			wantKnown:    true,
+		},
+		{
+			name: "failed rejoin does not clear failover requirement",
+			history: []cluster.HistoryEntry{
+				rejoinHistoryEntry("failover", cluster.OperationKindFailover, "alpha-1", "alpha-2", cluster.OperationResultSucceeded, now),
+				rejoinHistoryEntry("rejoin", cluster.OperationKindRejoin, "alpha-1", "alpha-2", cluster.OperationResultFailed, now.Add(time.Second)),
+			},
+			wantRequired: true,
+			wantKnown:    true,
+		},
+		{
+			name: "successful rejoin clears failover requirement",
+			history: []cluster.HistoryEntry{
+				rejoinHistoryEntry("failover", cluster.OperationKindFailover, "alpha-1", "alpha-2", cluster.OperationResultSucceeded, now),
+				rejoinHistoryEntry("rejoin", cluster.OperationKindRejoin, "alpha-1", "alpha-2", cluster.OperationResultSucceeded, now.Add(time.Second)),
+			},
+			wantKnown: true,
+		},
+		{
+			name: "successful reinit clears failover requirement",
+			history: []cluster.HistoryEntry{
+				rejoinHistoryEntry("failover", cluster.OperationKindFailover, "alpha-1", "alpha-2", cluster.OperationResultSucceeded, now),
+				rejoinHistoryEntry("reinit", cluster.OperationKindReinit, "alpha-2", "alpha-1", cluster.OperationResultSucceeded, now.Add(time.Second)),
+			},
+			wantKnown: true,
+		},
+		{
+			name: "unrelated history leaves requirement unknown",
+			history: []cluster.HistoryEntry{
+				rejoinHistoryEntry("failover", cluster.OperationKindFailover, "alpha-2", "alpha-3", cluster.OperationResultSucceeded, now),
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			store := NewMemoryStateStore()
+			store.history = testCase.history
+			required, known := store.historyRejoinRequirementLocked("alpha-1")
+			if required != testCase.wantRequired || known != testCase.wantKnown {
+				t.Fatalf("unexpected history requirement: required=%t known=%t", required, known)
+			}
+		})
+	}
+}
+
+func rejoinHistoryEntry(id string, kind cluster.OperationKind, from, to string, result cluster.OperationResult, finishedAt time.Time) cluster.HistoryEntry {
+	return cluster.HistoryEntry{
+		OperationID: id,
+		Kind:        kind,
+		FromMember:  from,
+		ToMember:    to,
+		Result:      result,
+		FinishedAt:  finishedAt,
+	}
+}
+
 func TestMemoryStateStoreAssessRejoinMemberReportsBlockedReasons(t *testing.T) {
 	t.Parallel()
 

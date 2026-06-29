@@ -194,6 +194,12 @@ func (store *MemoryStateStore) PublishNodeStatus(ctx context.Context, status age
 	if previous, ok := store.nodeStatuses[cloned.NodeName]; ok {
 		cloned = mergeControlPlaneManagedNodeFlags(previous, cloned)
 	}
+	if required, known := store.historyRejoinRequirementLocked(cloned.NodeName); known && required {
+		cloned.NeedsRejoin = true
+		if cloned.Postgres.Managed && !cloned.Postgres.Up {
+			cloned.State = cluster.MemberStateNeedsRejoin
+		}
+	}
 	store.mu.RUnlock()
 
 	cloned.ControlPlane = published
@@ -501,6 +507,14 @@ func (store *MemoryStateStore) memberLocked(nodeName string) (cluster.MemberStat
 
 	if spec, ok := store.memberSpecLocked(nodeName); ok {
 		member = mergeDesiredMemberPolicy(member, spec)
+	}
+
+	if required, known := store.historyRejoinRequirementLocked(nodeName); known && required {
+		member.NeedsRejoin = true
+		member.Healthy = false
+		if !observed || (observation.Postgres.Managed && !observation.Postgres.Up) {
+			member.State = cluster.MemberStateNeedsRejoin
+		}
 	}
 
 	member.Reinit = store.reinitStatusForMemberLocked(member.Name)
