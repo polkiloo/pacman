@@ -33,9 +33,11 @@ func (daemon *Daemon) buildNodeStatus(observedAt time.Time, postgres agentmodel.
 
 	if daemon.selfDemotedPrimaryRejoinPending() && status.Postgres.Managed {
 		status.Role = cluster.MemberRoleReplica
-		status.State = cluster.MemberStateNeedsRejoin
 		status.NeedsRejoin = true
 		status.Postgres.Role = cluster.MemberRoleReplica
+		if status.State != cluster.MemberStateStreaming {
+			status.State = cluster.MemberStateNeedsRejoin
+		}
 	}
 
 	return status
