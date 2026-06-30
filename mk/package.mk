@@ -14,7 +14,7 @@ rpm: rpm-builder-image
 		-e RPM_COMMIT=$(COMMIT) \
 		-e SOURCE_DATE_EPOCH=$(RPM_SOURCE_DATE_EPOCH) \
 		-v $(CURDIR):/workspace:ro \
-		-v $(RPM_OUTPUT_DIR):/out \
+		-v $(abspath $(RPM_OUTPUT_DIR)):/out \
 		-v $(RPM_BUILDER_GOMODCACHE):/gomodcache \
 		$(RPM_BUILDER_IMAGE) \
 		go run ./tools/rpmctl
