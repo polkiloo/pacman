@@ -151,6 +151,7 @@ type ReinitRecoveryConfigRequest struct {
 	TargetNode         agentmodel.NodeStatus
 	CurrentPrimaryNode agentmodel.NodeStatus
 	CurrentEpoch       cluster.Epoch
+	PrimaryAddress     string
 	Standby            postgres.StandbyConfig
 }
 

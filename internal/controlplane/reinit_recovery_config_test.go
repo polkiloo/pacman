@@ -43,6 +43,9 @@ func TestMemoryStateStoreExecuteReinitRecoveryConfigRendersAfterWALGRestore(t *t
 	if request.Standby.PrimaryConnInfo != "host=10.0.0.1 port=5432 application_name=alpha-2" {
 		t.Fatalf("unexpected recovery primary_conninfo: %+v", request.Standby)
 	}
+	if request.PrimaryAddress != "10.0.0.1:5432" {
+		t.Fatalf("unexpected recovery primary address: %q", request.PrimaryAddress)
+	}
 	if request.Standby.PrimarySlotName != "pacman_alpha_2" {
 		t.Fatalf("unexpected recovery primary_slot_name: %+v", request.Standby)
 	}
@@ -123,6 +126,9 @@ func TestMemoryStateStoreExecuteReinitRecoveryConfigUsesRegisteredPrimaryHost(t 
 	}
 	if got, want := configurator.requests[0].Standby.PrimaryConnInfo, "host=pacman-primary port=5432 application_name=alpha-2"; got != want {
 		t.Fatalf("unexpected recovery primary_conninfo: got %q want %q", got, want)
+	}
+	if got, want := configurator.requests[0].PrimaryAddress, "pacman-primary:5432"; got != want {
+		t.Fatalf("unexpected recovery primary address: got %q want %q", got, want)
 	}
 }
 

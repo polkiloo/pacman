@@ -114,15 +114,25 @@ type localReinitRecoveryConfigurator struct {
 	walg                config.WALGConfig
 	replicationUser     string
 	replicationPassword string
+	ensureSlot          func(context.Context, string, string, string, string) error
 }
 
-func (c *localReinitRecoveryConfigurator) ConfigureReinitRecovery(_ context.Context, req controlplane.ReinitRecoveryConfigRequest) (controlplane.ReinitRecoveryConfigResult, error) {
+func (c *localReinitRecoveryConfigurator) ConfigureReinitRecovery(ctx context.Context, req controlplane.ReinitRecoveryConfigRequest) (controlplane.ReinitRecoveryConfigResult, error) {
 	restoreCommand, err := c.walg.WALFetchRestoreCommand(nil, nil)
 	if err != nil {
 		return controlplane.ReinitRecoveryConfigResult{}, err
 	}
 
 	standby := req.Standby
+	if strings.TrimSpace(standby.PrimarySlotName) != "" {
+		ensureSlot := c.ensureSlot
+		if ensureSlot == nil {
+			ensureSlot = postgres.EnsurePhysicalReplicationSlot
+		}
+		if err := ensureSlot(ctx, req.PrimaryAddress, c.replicationUser, c.replicationPassword, standby.PrimarySlotName); err != nil {
+			return controlplane.ReinitRecoveryConfigResult{}, fmt.Errorf("prepare reinit replication slot on current primary: %w", err)
+		}
+	}
 	standby.RestoreCommand = restoreCommand
 	standby.PrimaryConnInfo = mergePrimaryConnInfoCredentials(
 		standby.PrimaryConnInfo,
