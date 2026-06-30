@@ -19,6 +19,7 @@ type preparedReinitExecution struct {
 	archivePath        string
 	walgBackupName     string
 	restoreCommand     string
+	primaryAddress     string
 	standby            postgres.StandbyConfig
 	verification       ReinitReplicationVerificationResult
 	executedAt         time.Time

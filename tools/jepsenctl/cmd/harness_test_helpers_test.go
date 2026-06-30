@@ -38,6 +38,7 @@ type clusterStatusRunner struct {
 	promotedPrimary  string
 	statusAfterCalls int
 	statusCalls      int
+	failoverStatus   int
 	specs            []commandSpec
 }
 
@@ -50,6 +51,9 @@ func (runner *clusterStatusRunner) Run(_ context.Context, spec commandSpec) (int
 			primary = runner.promotedPrimary
 		}
 		fmt.Fprint(spec.stdout, clusterStatusJSONWithPrimary(primary))
+	}
+	if strings.Contains(strings.Join(spec.args, " "), "pacmanctl cluster failover") {
+		return runner.failoverStatus, nil
 	}
 	return 0, nil
 }

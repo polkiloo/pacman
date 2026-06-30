@@ -115,6 +115,7 @@ func (store *MemoryStateStore) prepareReinitRecoveryConfig(member string, config
 		currentPrimaryNode: currentPrimaryNode.Clone(),
 		operation:          updated.Clone(),
 		currentEpoch:       status.CurrentEpoch,
+		primaryAddress:     primaryAddress,
 		standby:            standby,
 		executedAt:         executedAt,
 	}, nil
@@ -145,6 +146,7 @@ func buildReinitRecoveryConfigRequest(prepared preparedReinitExecution) ReinitRe
 		TargetNode:         prepared.targetNode.Clone(),
 		CurrentPrimaryNode: prepared.currentPrimaryNode.Clone(),
 		CurrentEpoch:       prepared.currentEpoch,
+		PrimaryAddress:     prepared.primaryAddress,
 		Standby:            prepared.standby.WithDefaults(),
 	}
 }

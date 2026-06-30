@@ -1,12 +1,62 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestReinitPreFailoverAcceptsDifferentAutomaticCandidateAfterManualRequestRace(t *testing.T) {
+	t.Parallel()
+
+	target, err := resolveJepsenTarget(defaultJepsenTarget)
+	if err != nil {
+		t.Fatalf("resolve target: %v", err)
+	}
+	runner := &clusterStatusRunner{
+		initialPrimary:   "alpha-1",
+		promotedPrimary:  "alpha-3",
+		statusAfterCalls: 1,
+		failoverStatus:   1,
+	}
+	lab := newHarnessLab(harnessOptions{
+		repoRoot: t.TempDir(),
+		runner:   runner,
+		runOptions: runOptions{
+			target: target,
+		},
+	})
+
+	result, err := lab.reinitPreFailover(context.Background())
+	if err != nil {
+		t.Fatalf("pre-reinit failover: %v", err)
+	}
+	if result.PreviousPrimary != "alpha-1" || result.PreviousService != "pacman-primary" {
+		t.Fatalf("unexpected previous primary: %+v", result)
+	}
+	if result.Candidate != "alpha-2" || result.ControlService != "pacman-replica" {
+		t.Fatalf("unexpected failover candidate: %+v", result)
+	}
+	if result.PromotedPrimary != "alpha-3" || !result.Restarted {
+		t.Fatalf("expected promoted primary and restarted former primary: %+v", result)
+	}
+	if result.ExitStatus != 0 || !strings.Contains(result.Output, "already promoted alpha-3") {
+		t.Fatalf("expected automatic promotion to satisfy failed manual request: %+v", result)
+	}
+
+	stopIndex := runner.firstCommandIndex("pkill -u postgres")
+	failoverIndex := runner.firstCommandIndex("pacmanctl cluster failover")
+	restartIndex := runner.firstCommandIndex("exec /usr/bin/pacmand")
+	if stopIndex < 0 || failoverIndex < 0 || restartIndex < 0 {
+		t.Fatalf("missing runtime/failover command in:\n%s", strings.Join(runner.commands(), "\n"))
+	}
+	if !(stopIndex < failoverIndex && failoverIndex < restartIndex) {
+		t.Fatalf("expected runtime stop, failover, then runtime restart; commands:\n%s", strings.Join(runner.commands(), "\n"))
+	}
+}
 
 func TestReinitCompletionRequiresCompletedClusterAndStreamingTarget(t *testing.T) {
 	t.Parallel()

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Change Approval Gate"
+  short_description: "Explain and approve changes before implementation"
+  default_prompt: "Use $change-approval-gate to explain a repository change, obtain approval, then implement and verify it."

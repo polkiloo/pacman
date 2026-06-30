@@ -167,6 +167,12 @@ func TestLocalReinitRecoveryConfiguratorWritesWALGRestoreCommand(t *testing.T) {
 		dataDir:             dataDir,
 		replicationUser:     "replicator",
 		replicationPassword: "replicator secret",
+		ensureSlot: func(_ context.Context, address, user, password, slotName string) error {
+			if address != "alpha-1:5432" || user != "replicator" || password != "replicator secret" || slotName != "pacman_alpha_2" {
+				t.Fatalf("unexpected replication slot request: address=%q user=%q password=%q slot=%q", address, user, password, slotName)
+			}
+			return nil
+		},
 		walg: config.WALGConfig{
 			Binary: "/usr/local/bin/wal-g",
 			Repository: config.WALGRepositoryConfig{
@@ -177,8 +183,10 @@ func TestLocalReinitRecoveryConfiguratorWritesWALGRestoreCommand(t *testing.T) {
 	}
 
 	result, err := configurator.ConfigureReinitRecovery(context.Background(), controlplane.ReinitRecoveryConfigRequest{
+		PrimaryAddress: "alpha-1:5432",
 		Standby: postgres.StandbyConfig{
 			PrimaryConnInfo: "host=alpha-1 port=5432 application_name=alpha-2",
+			PrimarySlotName: "pacman_alpha_2",
 		},
 	})
 	if err != nil {
@@ -192,6 +200,7 @@ func TestLocalReinitRecoveryConfiguratorWritesWALGRestoreCommand(t *testing.T) {
 	rendered := readTestFile(t, filepath.Join(dataDir, postgres.PostgresAutoConfFileName))
 	assertContains(t, rendered, "listen_addresses = '*'")
 	assertContains(t, rendered, "primary_conninfo = 'host=alpha-1 port=5432 application_name=alpha-2 user=replicator password=''replicator secret'''")
+	assertContains(t, rendered, "primary_slot_name = 'pacman_alpha_2'")
 	assertContains(t, rendered, "restore_command = 'env ''WALG_FILE_PREFIX=/backups/alpha'' ''/usr/local/bin/wal-g'' wal-fetch ''%f'' ''%p'''")
 	assertContains(t, rendered, "recovery_target_timeline = 'latest'")
 	if strings.Contains(rendered, "old restore") || strings.Contains(rendered, "old primary") {

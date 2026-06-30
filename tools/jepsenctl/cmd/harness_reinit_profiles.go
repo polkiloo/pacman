@@ -820,42 +820,48 @@ func (lab *harnessLab) reinitPreFailover(ctx context.Context) (reinitPreFailover
 	if previousService == "" {
 		return result, fmt.Errorf("previous primary service is unknown for %s", previousPrimary)
 	}
-	if err := lab.stopPostgres(ctx, previousService); err != nil {
-		return result, fmt.Errorf("stop previous primary PostgreSQL before reinit failover: %w", err)
+	if err := lab.stopNodeRuntime(ctx, previousService); err != nil {
+		return result, fmt.Errorf("stop previous primary runtime before reinit failover: %w", err)
 	}
-	output, exitStatus := lab.requestManualFailoverUntilAccepted(ctx, candidate, controlService, lab.cfg.oldPrimaryRejoinTimeout)
+	output, exitStatus := lab.requestManualFailoverUntilAccepted(ctx, previousPrimary, candidate, controlService, lab.cfg.oldPrimaryRejoinTimeout)
 	result.ExitStatus = exitStatus
 	result.Output = output
 	if exitStatus != 0 {
-		_ = lab.startPostgres(ctx, previousService)
+		_ = lab.startNodeRuntime(ctx, previousService)
 		return result, fmt.Errorf("pre-reinit failover request failed with status %d: %s", exitStatus, strings.TrimSpace(output))
 	}
-	promoted := lab.waitForCurrentPrimary(ctx, candidate, lab.cfg.oldPrimaryRejoinTimeout)
-	if !promoted {
+	promotedPrimary := lab.waitForCurrentPrimaryNot(ctx, previousPrimary, lab.cfg.oldPrimaryRejoinTimeout)
+	if promotedPrimary == "" {
 		result.PromotedPrimary = lab.currentPrimaryName(ctx)
-		_ = lab.startPostgres(ctx, previousService)
-		return result, fmt.Errorf("pre-reinit failover did not promote %s", candidate)
+		_ = lab.startNodeRuntime(ctx, previousService)
+		return result, fmt.Errorf("pre-reinit failover did not promote away from %s", previousPrimary)
 	}
-	if err := lab.startPostgres(ctx, previousService); err != nil {
-		result.PromotedPrimary = candidate
-		return result, fmt.Errorf("restart previous primary PostgreSQL after reinit failover: %w", err)
+	if err := lab.startNodeRuntime(ctx, previousService); err != nil {
+		result.PromotedPrimary = promotedPrimary
+		return result, fmt.Errorf("restart previous primary runtime after reinit failover: %w", err)
 	}
 	result.Restarted = true
 	if !lab.waitForClusterSwitchoverReady(ctx, lab.cfg.oldPrimaryRejoinTimeout) {
 		result.PromotedPrimary = lab.currentPrimaryName(ctx)
-		return result, fmt.Errorf("cluster did not become reinit-ready after pre-reinit failover to %s", candidate)
+		return result, fmt.Errorf("cluster did not become reinit-ready after pre-reinit failover to %s", promotedPrimary)
 	}
-	result.PromotedPrimary = candidate
+	result.PromotedPrimary = promotedPrimary
 	return result, nil
 }
 
-func (lab *harnessLab) requestManualFailoverUntilAccepted(ctx context.Context, candidate, service string, timeout time.Duration) (string, int) {
+func (lab *harnessLab) requestManualFailoverUntilAccepted(ctx context.Context, previousPrimary, candidate, service string, timeout time.Duration) (string, int) {
 	deadline := time.Now().Add(timeout)
 	var output string
 	var status int
 	for {
 		output, status = lab.requestManualFailover(ctx, candidate, service)
-		if status == 0 || time.Now().After(deadline) {
+		if status == 0 {
+			return output, status
+		}
+		if current := lab.currentPrimaryName(ctx); current != "" && current != "unknown" && current != previousPrimary {
+			return strings.TrimSpace(output) + "\nautomatic failover already promoted " + current, 0
+		}
+		if time.Now().After(deadline) {
 			return output, status
 		}
 		select {
