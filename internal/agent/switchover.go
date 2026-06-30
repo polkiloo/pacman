@@ -110,6 +110,8 @@ func (daemon *Daemon) reconcileSwitchover(ctx context.Context) {
 		return
 	}
 
+	daemon.markSelfDemotedPrimaryForRejoin()
+
 	daemon.logger.InfoContext(ctx, "switchover executed",
 		daemon.logArgs("agent",
 			slog.String("from_primary", execution.CurrentPrimary),

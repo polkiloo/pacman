@@ -8,6 +8,10 @@ import (
 func setTestNow(store *MemoryStateStore, now func() time.Time) {
 	store.mu.Lock()
 	store.now = now
+	// Deterministic state-machine tests advance logical time by minutes while
+	// mutating the in-memory projection directly. Periodic refresh is opt-in for
+	// tests that exercise cache expiry or watch behavior.
+	store.cacheMaxAge = 0
 	store.mu.Unlock()
 }
 

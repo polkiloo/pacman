@@ -63,26 +63,120 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  jepsen-nightly:
-    name: Jepsen nightly
+  jepsen-nightly-plan:
+    name: Plan Jepsen nightly matrix
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.campaign == 'nightly')
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 5
+
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run Jepsen nightly campaign
-        run: make jepsen-nightly
+      - name: Build nightly case matrix
+        id: matrix
+        run: echo "matrix=$(go run ./tools/jepsenctl cases matrix --campaign nightly)" >> "$GITHUB_OUTPUT"
 
-      - name: Upload Jepsen nightly artifacts
+  jepsen-nightly-build:
+    name: Build Jepsen nightly RPM
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.campaign == 'nightly')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build RPM
+        run: make rpm RPM_OUTPUT_DIR=bin/ansible-install-rpm
+
+      - name: Upload RPM
+        uses: actions/upload-artifact@v4
+        with:
+          name: jepsen-nightly-rpm-${{ github.run_id }}
+          path: bin/ansible-install-rpm/
+          if-no-files-found: error
+          retention-days: 1
+
+  jepsen-nightly:
+    name: Jepsen nightly / ${{ matrix.slug }}
+    needs:
+      - jepsen-nightly-plan
+      - jepsen-nightly-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix: ${{ fromJSON(needs.jepsen-nightly-plan.outputs.matrix) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download RPM
+        uses: actions/download-artifact@v4
+        with:
+          name: jepsen-nightly-rpm-${{ github.run_id }}
+          path: bin/ansible-install-rpm
+
+      - name: Run Jepsen case
+        env:
+          PACMAN_JEPSEN_BUILD_RPM: "false"
+          PACMAN_JEPSEN_CASE: ${{ matrix.spec }}
+          PACMAN_JEPSEN_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.slug }}
+          PACMAN_JEPSEN_CI_ARTIFACT_DIR: bin/jepsen-ci/nightly/${{ matrix.slug }}
+        run: make jepsen-case
+
+      - name: Upload Jepsen case artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: jepsen-nightly-${{ github.run_id }}
+          name: jepsen-nightly-${{ github.run_id }}-${{ matrix.slug }}
           path: |
-            bin/jepsen-ci/nightly/
+            bin/jepsen-ci/nightly/${{ matrix.slug }}/
+            jepsen/store/
+          if-no-files-found: warn
+          retention-days: 30
+
+  jepsen-nightly-post:
+    name: Jepsen nightly / post-campaign
+    if: always() && needs.jepsen-nightly-plan.result == 'success' && needs.jepsen-nightly-build.result == 'success'
+    needs:
+      - jepsen-nightly-plan
+      - jepsen-nightly-build
+      - jepsen-nightly
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download RPM
+        uses: actions/download-artifact@v4
+        with:
+          name: jepsen-nightly-rpm-${{ github.run_id }}
+          path: bin/ansible-install-rpm
+
+      - name: Run post-campaign switchover check
+        env:
+          PACMAN_JEPSEN_BUILD_RPM: "false"
+          PACMAN_JEPSEN_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-post-campaign
+          PACMAN_JEPSEN_CI_ARTIFACT_DIR: bin/jepsen-ci/nightly/post-campaign
+        run: make jepsen-nightly-post
+
+      - name: Upload post-campaign artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jepsen-nightly-${{ github.run_id }}-post-campaign
+          path: |
+            bin/jepsen-ci/nightly/post-campaign/
             jepsen/store/
           if-no-files-found: warn
           retention-days: 30

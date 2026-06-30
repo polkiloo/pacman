@@ -579,8 +579,8 @@ func TestMemoryStateStoreJournalOperationTracksActiveAndFinishedState(t *testing
 		t.Fatal("expected cluster status after completing operation")
 	}
 
-	if status.Phase != cluster.ClusterPhaseHealthy {
-		t.Fatalf("expected cluster to return to healthy phase, got %q", status.Phase)
+	if status.Phase != cluster.ClusterPhaseDegraded {
+		t.Fatalf("expected successful failover history to keep the unrejoined former primary degraded, got %q", status.Phase)
 	}
 
 	history[0].OperationID = "mutated"

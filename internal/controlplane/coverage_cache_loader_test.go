@@ -248,8 +248,61 @@ func TestForceRefreshCacheLoadsStateFromDCS(t *testing.T) {
 		t.Fatalf("unexpected cluster phase after refresh: %+v", store.clusterStatus)
 	}
 
-	if !store.lastDCSSeenAt.Equal(now) || !store.cacheRefreshedAt.Equal(now) || store.cacheDirty {
-		t.Fatalf("unexpected cache timestamps: last=%v refreshed=%v dirty=%t", store.lastDCSSeenAt, store.cacheRefreshedAt, store.cacheDirty)
+	if !store.lastDCSSeenAt.Equal(now) || !store.cacheRefreshedAt.Equal(now) || !store.cacheSnapshotAt.Equal(now) || store.cacheDirty {
+		t.Fatalf("unexpected cache timestamps: last=%v refreshed=%v snapshot=%v dirty=%t", store.lastDCSSeenAt, store.cacheRefreshedAt, store.cacheSnapshotAt, store.cacheDirty)
+	}
+}
+
+func TestEnsureCacheFreshReloadsExpiredAuthoritativeSnapshot(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.June, 29, 18, 0, 0, 0, time.UTC)
+	store, backend := newFixtureControlPlaneStore(t, "alpha", now)
+	store.cacheRefreshedAt = now.Add(-3 * time.Second)
+	store.cacheSnapshotAt = now.Add(-3 * time.Second)
+	store.cacheMaxAge = 2 * time.Second
+	if err := store.refreshCache(context.Background()); err != nil {
+		t.Fatalf("record local cache refresh: %v", err)
+	}
+
+	operation := cluster.Operation{
+		ID:          "rejoin-1",
+		Kind:        cluster.OperationKindRejoin,
+		State:       cluster.OperationStateRunning,
+		Result:      cluster.OperationResultPending,
+		RequestedBy: "controlplane",
+		RequestedAt: now.Add(-time.Second),
+		StartedAt:   now.Add(-time.Second),
+		FromMember:  "alpha-1",
+		ToMember:    "alpha-2",
+	}
+	backend.gets[store.keyspace.Config()] = dcs.KeyValue{
+		Key:      store.keyspace.Config(),
+		Revision: 1,
+		Value: mustMarshalControlPlaneJSON(t, cluster.ClusterSpec{
+			ClusterName: "alpha",
+			Members: []cluster.MemberSpec{
+				{Name: "alpha-1"},
+				{Name: "alpha-2"},
+			},
+		}),
+	}
+	backend.gets[store.keyspace.Operation()] = dcs.KeyValue{
+		Key:      store.keyspace.Operation(),
+		Revision: 2,
+		Value:    mustMarshalControlPlaneJSON(t, operation),
+	}
+
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		t.Fatalf("refresh expired authoritative snapshot: %v", err)
+	}
+
+	active, ok := store.ActiveOperation()
+	if !ok || active.ID != operation.ID {
+		t.Fatalf("expected expired snapshot refresh to load remote operation, got ok=%t operation=%+v", ok, active)
+	}
+	if !store.cacheSnapshotAt.Equal(now) {
+		t.Fatalf("expected authoritative snapshot timestamp %v, got %v", now, store.cacheSnapshotAt)
 	}
 }
 

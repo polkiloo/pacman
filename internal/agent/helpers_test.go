@@ -133,6 +133,40 @@ func TestNewProbeContextWithoutTimeoutReturnsParent(t *testing.T) {
 	}
 }
 
+func TestBuildNodeStatusPublishesStreamingWhileSelfDemotedPrimaryRejoinIsPending(t *testing.T) {
+	t.Parallel()
+
+	observedAt := time.Date(2026, time.June, 16, 12, 40, 41, 0, time.UTC)
+	daemon := &Daemon{
+		config: config.Config{
+			Node: config.NodeConfig{
+				Name: "alpha-1",
+				Role: cluster.NodeRoleData,
+			},
+		},
+		selfDemotedPrimary: true,
+	}
+
+	status := daemon.buildNodeStatus(observedAt, agentmodel.PostgresStatus{
+		Managed:       true,
+		Up:            true,
+		Role:          cluster.MemberRoleReplica,
+		RecoveryKnown: true,
+		InRecovery:    true,
+		WAL: agentmodel.WALProgress{
+			ReceiveLSN: "0/4000000",
+			ReplayLSN:  "0/4000000",
+		},
+	})
+
+	if status.Role != cluster.MemberRoleReplica || status.Postgres.Role != cluster.MemberRoleReplica {
+		t.Fatalf("expected self-demoted primary to publish replica role, got %+v", status)
+	}
+	if status.State != cluster.MemberStateStreaming || !status.NeedsRejoin {
+		t.Fatalf("expected streaming observation to retain the pending rejoin obligation, got %+v", status)
+	}
+}
+
 func TestNormalizeLocalProbeHost(t *testing.T) {
 	t.Parallel()
 

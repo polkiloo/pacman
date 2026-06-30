@@ -113,6 +113,9 @@ func TestDaemonReconcileSwitchover(t *testing.T) {
 		if publisher.executeCalls != 1 {
 			t.Fatalf("expected one switchover execution attempt, got %d", publisher.executeCalls)
 		}
+		if !daemon.selfDemotedPrimaryRejoinPending() {
+			t.Fatal("expected completed switchover to keep the local former primary in rejoin state")
+		}
 
 		assertContains(t, logs.String(), `"msg":"switchover executed"`)
 		assertContains(t, logs.String(), `"from_primary":"alpha-1"`)

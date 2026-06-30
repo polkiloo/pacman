@@ -42,6 +42,16 @@ serializable-txn:packet,kill
 append-failover:repeated-failure
 ```
 
+Scheduled and manually dispatched nightly CI runs generate their GitHub Actions
+matrix from the case registry and run eligible cases on isolated runners, with
+up to six cases executing concurrently. Matrix jobs use `fail-fast: false`, so
+one failed case does not cancel the remaining cases, and each case uploads a
+separate artifact bundle. CI builds the installation RPM once and shares it
+with the isolated case runners. Patroni-only calibration cases and cases marked
+nightly-unsafe remain opt-in. A dedicated job preserves the fresh-cluster
+post-campaign switchover check after the case matrix. Local
+`make jepsen-nightly` runs serially and retains the combined campaign summary.
+
 The `append-switchover:switchover` case issues a manual PACMAN switchover while
 append writes are in flight. Nightly records the real checker result for every
 case in `case-results.jsonl`; a failed destructive profile remains a failed

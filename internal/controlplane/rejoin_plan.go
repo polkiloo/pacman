@@ -13,6 +13,7 @@ type rejoinInputs struct {
 	checkedAt             time.Time
 	currentEpoch          cluster.Epoch
 	member                cluster.MemberStatus
+	durableFormerPrimary  bool
 	memberNode            agentmodel.NodeStatus
 	hasMemberNode         bool
 	currentPrimary        cluster.MemberStatus
@@ -29,15 +30,16 @@ func (store *MemoryStateStore) AssessRejoinMember(nodeName string) (RejoinMember
 		return RejoinMemberAssessment{}, ErrRejoinTargetRequired
 	}
 
-	if err := store.ensureCacheFresh(context.Background()); err != nil {
+	inputs, err := store.rejoinInputs(target)
+	if err != nil {
 		return RejoinMemberAssessment{}, err
 	}
 
-	store.mu.RLock()
-	inputs, err := store.rejoinInputsLocked(target)
-	store.mu.RUnlock()
-	if err != nil {
-		return RejoinMemberAssessment{}, err
+	if inputs.member.NeedsRejoin || inputs.durableFormerPrimary {
+		inputs, err = store.forceRefreshRejoinInputs(target)
+		if err != nil {
+			return RejoinMemberAssessment{}, err
+		}
 	}
 
 	return buildRejoinMemberAssessment(inputs), nil
@@ -52,25 +54,48 @@ func (store *MemoryStateStore) DetectRejoinDivergence(nodeName string) (RejoinDi
 		return RejoinDivergenceAssessment{}, ErrRejoinTargetRequired
 	}
 
-	if err := store.ensureCacheFresh(context.Background()); err != nil {
-		return RejoinDivergenceAssessment{}, err
-	}
-
-	store.mu.RLock()
-	inputs, err := store.rejoinInputsLocked(target)
-	store.mu.RUnlock()
+	inputs, err := store.rejoinInputs(target)
 	if err != nil {
 		return RejoinDivergenceAssessment{}, err
 	}
 
+	if inputs.member.NeedsRejoin || inputs.durableFormerPrimary {
+		inputs, err = store.forceRefreshRejoinInputs(target)
+		if err != nil {
+			return RejoinDivergenceAssessment{}, err
+		}
+	}
+
 	return buildRejoinDivergenceAssessment(inputs), nil
+}
+
+func (store *MemoryStateStore) rejoinInputs(nodeName string) (rejoinInputs, error) {
+	if err := store.ensureCacheFresh(context.Background()); err != nil {
+		return rejoinInputs{}, err
+	}
+
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+
+	return store.rejoinInputsLocked(nodeName)
+}
+
+func (store *MemoryStateStore) forceRefreshRejoinInputs(nodeName string) (rejoinInputs, error) {
+	if err := store.forceRefreshCache(context.Background()); err != nil {
+		return rejoinInputs{}, err
+	}
+
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+
+	return store.rejoinInputsLocked(nodeName)
 }
 
 func buildRejoinMemberAssessment(inputs rejoinInputs) RejoinMemberAssessment {
 	assessment := RejoinMemberAssessment{
 		State:         cluster.RejoinStateAssessingMember,
 		Member:        inputs.member.Clone(),
-		FormerPrimary: inputs.member.NeedsRejoin,
+		FormerPrimary: inputs.member.NeedsRejoin || inputs.durableFormerPrimary,
 		CheckedAt:     inputs.checkedAt,
 	}
 
@@ -118,12 +143,17 @@ func buildRejoinDivergenceAssessment(inputs rejoinInputs) RejoinDivergenceAssess
 		return assessment.Clone()
 	}
 
-	switch {
-	case assessment.MemberSystemIdentifier == "":
-		assessment.Reasons = append(assessment.Reasons, reasonMemberSystemIdentifierUnknown)
-		return assessment.Clone()
-	case assessment.CurrentPrimarySystemIdentifier == "":
+	if assessment.CurrentPrimarySystemIdentifier == "" {
 		assessment.Reasons = append(assessment.Reasons, reasonCurrentPrimarySystemIdentifierUnknown)
+		return assessment.Clone()
+	}
+
+	if assessment.MemberSystemIdentifier == "" {
+		assessment.Reasons = append(assessment.Reasons, reasonMemberSystemIdentifierUnknown)
+		if inputs.durableFormerPrimary {
+			assessment.Diverged = true
+			assessment.RequiresRewind = true
+		}
 		return assessment.Clone()
 	}
 
@@ -135,12 +165,17 @@ func buildRejoinDivergenceAssessment(inputs rejoinInputs) RejoinDivergenceAssess
 		return assessment.Clone()
 	}
 
-	switch {
-	case inputs.member.Timeline == 0:
-		assessment.Reasons = append(assessment.Reasons, reasonMemberTimelineUnknown)
-		return assessment.Clone()
-	case inputs.currentPrimary.Timeline == 0:
+	if inputs.currentPrimary.Timeline == 0 {
 		assessment.Reasons = append(assessment.Reasons, reasonCurrentPrimaryTimelineUnknown)
+		return assessment.Clone()
+	}
+
+	if inputs.member.Timeline == 0 {
+		assessment.Reasons = append(assessment.Reasons, reasonMemberTimelineUnknown)
+		if inputs.durableFormerPrimary {
+			assessment.Diverged = true
+			assessment.RequiresRewind = true
+		}
 		return assessment.Clone()
 	}
 
@@ -176,9 +211,10 @@ func (store *MemoryStateStore) rejoinInputsLocked(nodeName string) (rejoinInputs
 	}
 
 	inputs := rejoinInputs{
-		checkedAt:    store.now().UTC(),
-		currentEpoch: store.clusterStatus.CurrentEpoch,
-		member:       member.Clone(),
+		checkedAt:            store.now().UTC(),
+		currentEpoch:         store.clusterStatus.CurrentEpoch,
+		member:               member.Clone(),
+		durableFormerPrimary: store.memberRequiresRejoinFromHistoryLocked(nodeName),
 	}
 
 	if status, ok := store.nodeStatuses[nodeName]; ok {
@@ -205,7 +241,7 @@ func (store *MemoryStateStore) rejoinInputsLocked(nodeName string) (rejoinInputs
 func assessRejoinMemberReasons(inputs rejoinInputs) []string {
 	reasons := make([]string, 0, 4)
 
-	if !inputs.member.NeedsRejoin {
+	if !inputs.member.NeedsRejoin && !inputs.durableFormerPrimary {
 		reasons = append(reasons, reasonMemberDoesNotRequireRejoin)
 	}
 
@@ -239,4 +275,47 @@ func assessRejoinMemberReasons(inputs rejoinInputs) []string {
 	}
 
 	return reasons
+}
+
+func (store *MemoryStateStore) memberRequiresRejoinFromHistoryLocked(nodeName string) bool {
+	required, known := store.historyRejoinRequirementLocked(nodeName)
+	return known && required
+}
+
+// historyRejoinRequirementLocked derives the latest durable repair obligation
+// for a member. Node observations are lease-backed, while completed operation
+// history survives long enough to recover this flag after an offline node's
+// status expires.
+func (store *MemoryStateStore) historyRejoinRequirementLocked(nodeName string) (required bool, known bool) {
+	target := strings.TrimSpace(nodeName)
+	if target == "" {
+		return false, false
+	}
+
+	for index := len(store.history) - 1; index >= 0; index-- {
+		entry := store.history[index]
+		if entry.Result != cluster.OperationResultSucceeded {
+			continue
+		}
+
+		switch entry.Kind {
+		case cluster.OperationKindRejoin:
+			if entry.FromMember == target {
+				return false, true
+			}
+		case cluster.OperationKindReinit:
+			if entry.ToMember == target {
+				return false, true
+			}
+		case cluster.OperationKindFailover, cluster.OperationKindSwitchover:
+			switch {
+			case entry.ToMember == target:
+				return false, true
+			case entry.FromMember == target:
+				return true, true
+			}
+		}
+	}
+
+	return false, false
 }
