@@ -181,7 +181,9 @@ INSERT INTO jepsen.append_values(run_id, op_id, key_id, value, client_id, observ
 VALUES (%s, %s, 1, 'held', 1, %s, %s);
 SELECT pg_sleep(%d);
 COMMIT;`, isolation, sqlLiteral(runID), sqlLiteral(openOpID), sqlLiteral(primary), sqlLiteral(isolation), sleepSeconds)
-	output, openErr := lab.psqlVIP(ctx, sql)
+	output, openErr := runOpenTransactionQuery(ctx, openTransactionQueryTimeout(sleepSeconds), func(queryCtx context.Context) (string, error) {
+		return lab.psqlVIP(queryCtx, sql)
+	})
 	finishedAt := time.Now().UTC().Format(time.RFC3339)
 	openStatus := 0
 	if openErr != nil {
@@ -223,6 +225,18 @@ COMMIT;`, isolation, sqlLiteral(runID), sqlLiteral(postOpID), sqlLiteral(finalPr
 		return fmt.Errorf("post open-transaction write failed")
 	}
 	return nil
+}
+
+const openTransactionQueryGrace = 30 * time.Second
+
+func openTransactionQueryTimeout(sleepSeconds int) time.Duration {
+	return time.Duration(sleepSeconds)*time.Second + openTransactionQueryGrace
+}
+
+func runOpenTransactionQuery(ctx context.Context, timeout time.Duration, query func(context.Context) (string, error)) (string, error) {
+	queryCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return query(queryCtx)
 }
 
 func (lab *harnessLab) runVIPRoutingWorkload(ctx context.Context, runID, caseDir, isolation string) error {
